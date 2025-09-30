@@ -302,7 +302,18 @@ export const Dashboard: React.FC = () => {
     };
 
     // Stats based on filtered data
+    // Calculate total cost for delivered orders in current period
     const totalSales = filteredOrders.reduce((sum, order) => order.status === 'Delivered' ? sum + order.total : sum, 0);
+    // Sum all orders' cost price (order-wise), not just delivered
+    const totalCost = filteredOrders.reduce((sum, order) => {
+      if (!order.orderItems) return sum;
+      const orderCost = order.orderItems.reduce((itemSum, item) => {
+        const product = safeProducts.find(p => p.id === item.productId);
+        const costPrice = (typeof product?.costPrice === 'number' && product.costPrice > 0) ? product.costPrice : 0;
+        return itemSum + (costPrice * (item.quantity || 0));
+      }, 0);
+      return sum + orderCost;
+    }, 0);
     const totalOrders = filteredOrders.length;
     
     // Previous period stats for comparison
@@ -424,7 +435,6 @@ export const Dashboard: React.FC = () => {
               <div className="flex-1">
                 <p className="text-3xl font-bold text-slate-900 dark:text-white">{formatCurrency(totalSales, currency)}</p>
                 <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Current period</p>
-                
                 {/* Percentage Calculator */}
                 {showPercentageCalculator && isAdmin && (
                   <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
@@ -459,6 +469,20 @@ export const Dashboard: React.FC = () => {
                 )}
               </div>
               <ChangeIndicator change={salesChange} />
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Total Cost</CardTitle>
+            <CardDescription>Cost of goods for delivered orders</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="text-3xl font-bold text-slate-900 dark:text-white">{formatCurrency(totalCost, currency)}</p>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Current period</p>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -622,22 +646,35 @@ export const Dashboard: React.FC = () => {
                         <th scope="col" className="px-6 py-3">Order ID</th>
                         <th scope="col" className="px-6 py-3">Customer</th>
                         <th scope="col" className="px-6 py-3">Total</th>
+                        { (isAdmin || isManager) && (
+                          <th scope="col" className="px-6 py-3">Cost</th>
+                        )}
                         <th scope="col" className="px-6 py-3">Status</th>
                         <th scope="col" className="px-6 py-3">Date</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {filteredOrders.slice(0, 5).map((order) => (
-                        <tr key={order.id} className="bg-white border-b dark:bg-slate-800 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600">
-                            <td className="px-6 py-4 font-medium text-slate-900 dark:text-white">{order.id}</td>
-                            <td className="px-6 py-4">{order.customerName}</td>
-                            <td className="px-6 py-4">{formatCurrency(order.total, currency)}</td>
-                            <td className="px-6 py-4">
+                        {filteredOrders.slice(0, 5).map((order) => {
+                          // Calculate order cost (sum of costPrice × quantity for all items) using safeProducts
+                          const orderCost = order.orderItems?.reduce((sum, item) => {
+                            const product = safeProducts.find(p => p.id === item.productId);
+                            return sum + ((product?.costPrice || 0) * (item.quantity || 0));
+                          }, 0) || 0;
+                          return (
+                            <tr key={order.id} className="bg-white border-b dark:bg-slate-800 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600">
+                              <td className="px-6 py-4 font-medium text-slate-900 dark:text-white">{order.id}</td>
+                              <td className="px-6 py-4">{order.customerName}</td>
+                              <td className="px-6 py-4">{formatCurrency(order.total, currency)}</td>
+                              { (isAdmin || isManager) && (
+                                <td className="px-6 py-4">{formatCurrency(orderCost, currency)}</td>
+                              )}
+                              <td className="px-6 py-4">
                                 <Badge variant={getStatusBadgeVariant(order.status)}>{order.status}</Badge>
-                            </td>
-                            <td className="px-6 py-4">{order.date}</td>
-                        </tr>
-                        ))}
+                              </td>
+                              <td className="px-6 py-4">{order.date}</td>
+                            </tr>
+                          );
+                        })}
                     </tbody>
                     </table>
                 </div>

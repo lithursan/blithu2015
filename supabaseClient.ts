@@ -30,6 +30,7 @@ export const fetchProducts = async () => {
     name: row.name,
     category: row.category,
     price: row.price,
+    costPrice: row.costprice == null || isNaN(Number(row.costprice)) ? 0 : Number(row.costprice),
     stock: row.stock,
     sku: row.sku,
     supplier: row.supplier,
@@ -56,6 +57,8 @@ export const fetchOrders = async () => {
     backorderedItems: [],
     chequeBalance: row.chequebalance == null || isNaN(Number(row.chequebalance)) ? 0 : Number(row.chequebalance),
     creditBalance: row.creditbalance == null || isNaN(Number(row.creditbalance)) ? 0 : Number(row.creditbalance),
+    returnAmount: row.returnamount == null || isNaN(Number(row.returnamount)) ? 0 : Number(row.returnamount),
+    amountPaid: row.amountpaid == null || isNaN(Number(row.amountpaid)) ? 0 : Number(row.amountpaid),
   }));
 };
 

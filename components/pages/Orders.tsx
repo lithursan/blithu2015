@@ -1,3 +1,4 @@
+// ...existing code...
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Order, OrderStatus, OrderItem, Customer, Product, UserRole, User } from '../../types';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/Card';
@@ -31,6 +32,7 @@ const OrderBill: React.FC<OrderBillProps> = ({ order, customer, products, curren
   // Use props if provided, else fallback to order object
   const billChequeBalance = typeof chequeBalance === 'number' ? chequeBalance : (order?.chequeBalance ?? 0);
   const billCreditBalance = typeof creditBalance === 'number' ? creditBalance : (order?.creditBalance ?? 0);
+  const billReturnAmount = typeof order.returnAmount === 'number' ? order.returnAmount : 0;
   const totalOutstanding = billChequeBalance + billCreditBalance;
   const amountPaid = order?.total ? order.total - totalOutstanding : 0;
 
@@ -121,6 +123,10 @@ const OrderBill: React.FC<OrderBillProps> = ({ order, customer, products, curren
           <span className="text-xl font-bold text-gray-900">{formatCurrency(order.total, currency)}</span>
         </div>
         <div className="flex justify-between items-center mt-2">
+          <span className="text-sm">Return Amount:</span>
+          <span className="text-lg font-bold text-blue-600">{formatCurrency(billReturnAmount, currency)}</span>
+        </div>
+        <div className="flex justify-between items-center mt-2">
           <span className="text-sm">Amount Paid:</span>
           <span className="text-lg font-bold text-green-600">{formatCurrency(amountPaid, currency)}</span>
         </div>
@@ -156,6 +162,8 @@ const getStatusBadgeVariant = (status: OrderStatus): 'success' | 'warning' | 'da
 
 export const Orders: React.FC = () => {
   // ...existing code...
+
+// printWindow.print() and printWindow.close() should only be inside generateAndDownloadBill, not at the top level
   const [orderNotes, setOrderNotes] = useState('');
   const [orderMethod, setOrderMethod] = useState('');
   // ...existing code...
@@ -188,6 +196,17 @@ export const Orders: React.FC = () => {
   const [editableChequeBalance, setEditableChequeBalance] = useState<number | ''>('');
   const [editableCreditBalance, setEditableCreditBalance] = useState<number | ''>('');
   const [editableAmountPaid, setEditableAmountPaid] = useState<number | ''>('');
+  // Return amount for returned products (calculated)
+  const [returnAmount, setReturnAmount] = useState<number>(0);
+  // Editable return amount for input
+  const [editableReturnAmount, setEditableReturnAmount] = useState<number | ''>('');
+
+  // Load amountPaid into editableAmountPaid when viewing/editing an order
+  useEffect(() => {
+    if (viewingOrder) {
+      setEditableAmountPaid(typeof viewingOrder.amountPaid === 'number' ? viewingOrder.amountPaid : '');
+    }
+  }, [viewingOrder]);
 
   const canEdit = useMemo(() => 
     currentUser?.role === UserRole.Admin || 
@@ -483,8 +502,12 @@ export const Orders: React.FC = () => {
     };
     setViewingOrder(patchedOrder);
     setEditableChequeBalance(patchedOrder.chequeBalance || 0);
-    setEditableCreditBalance(patchedOrder.creditBalance || 0);
-    const calculatedAmountPaid = patchedOrder.total - (patchedOrder.chequeBalance || 0) - (patchedOrder.creditBalance || 0);
+    // Use returnamount from DB if present, else fallback to calculated
+  let retAmount = typeof patchedOrder.returnAmount === 'number' ? patchedOrder.returnAmount : 0;
+    setReturnAmount(retAmount);
+    setEditableReturnAmount(retAmount);
+    setEditableCreditBalance((patchedOrder.creditBalance || 0) - retAmount);
+    const calculatedAmountPaid = patchedOrder.total - (patchedOrder.chequeBalance || 0) - ((patchedOrder.creditBalance || 0) - retAmount);
     setEditableAmountPaid(calculatedAmountPaid > 0 ? calculatedAmountPaid : 0);
   };
 
@@ -755,11 +778,15 @@ export const Orders: React.FC = () => {
         ...viewingOrder,
         chequeBalance: editableChequeBalance,
         creditBalance: editableCreditBalance,
+        returnAmount: editableReturnAmount === '' ? 0 : editableReturnAmount,
+        amountPaid: editableAmountPaid === '' ? 0 : editableAmountPaid,
     };
-    // Save to Supabase (Note: amountPaid is calculated field, not stored separately)
+    // Save to Supabase (amountPaid is now stored)
     supabase.from('orders').update({
       chequebalance: editableChequeBalance,
-      creditbalance: editableCreditBalance
+      creditbalance: editableCreditBalance,
+      returnamount: editableReturnAmount === '' ? 0 : editableReturnAmount,
+      amountpaid: editableAmountPaid === '' ? 0 : editableAmountPaid
     }).eq('id', viewingOrder.id).then(async ({ error }) => {
       if (!error) {
         // Upsert collection records for cheque/credit balances
@@ -814,6 +841,8 @@ export const Orders: React.FC = () => {
             backorderedItems: [],
             chequeBalance: row.chequebalance == null || isNaN(Number(row.chequebalance)) ? 0 : Number(row.chequebalance),
             creditBalance: row.creditbalance == null || isNaN(Number(row.creditbalance)) ? 0 : Number(row.creditbalance),
+            returnAmount: row.returnamount == null || isNaN(Number(row.returnamount)) ? 0 : Number(row.returnamount),
+            amountPaid: row.amountpaid == null || isNaN(Number(row.amountpaid)) ? 0 : Number(row.amountpaid),
           }));
           setOrders(mappedOrders);
           setViewingOrder(updatedOrder);
@@ -912,74 +941,8 @@ export const Orders: React.FC = () => {
 
     // 2. Update order status
     const updatedOrder: Order = { ...targetOrder, status: OrderStatus.Delivered };
-    (async () => {
-      await supabase.from('orders').update({ status: OrderStatus.Delivered }).eq('id', updatedOrder.id);
-    })();
-    setOrders(prevOrders =>
-      prevOrders.map(o => (o.id === updatedOrder.id ? updatedOrder : o))
-    );
-    setViewingOrder(updatedOrder);
-
-    // --- Update customer totals in Supabase ---
-    (async () => {
-      // Get all delivered orders for this customer
-      const customerOrders = orders.filter(o => o.customerId === updatedOrder.customerId && o.status === OrderStatus.Delivered);
-      // Add this order if just delivered
-      if (!customerOrders.find(o => o.id === updatedOrder.id)) {
-        customerOrders.push(updatedOrder);
-      }
-      const totalSpent = customerOrders.reduce((sum, o) => sum + (o.total || 0), 0);
-      const outstandingBalance = customerOrders.reduce((sum, o) => sum + ((o.chequeBalance || 0) + (o.creditBalance || 0)), 0);
-      await supabase.from('customers').update({ totalspent: totalSpent, outstandingbalance: outstandingBalance }).eq('id', updatedOrder.customerId);
-    })();
-
-    // --- End Transaction Simulation ---
-    // 4. Log actions
-    console.log(`AUDIT: {action: "Auto-mark Delivered", userId: "${currentUser?.id}", orderId: "${updatedOrder.id}", timestamp: "${new Date().toISOString()}"}`);
-    console.log(`INVENTORY: Stock deducted for order ${updatedOrder.id}.`);
-    console.log(`SALES_RECORD: Sale confirmed for order ${updatedOrder.id}, amount: ${formatCurrency(updatedOrder.total, currency)}.`);
-    
-    // Real-time update products for driver allocation display
-    if (currentUser?.role === UserRole.Driver && targetOrder.status !== OrderStatus.Delivered) {
-      // Update local products state immediately for real-time UI sync
-      setProducts(prevProducts => 
-        prevProducts.map(product => {
-          const deliveredItem = targetOrder.orderItems.find(item => item.productId === product.id);
-          if (deliveredItem) {
-            // For drivers, this reduces their allocated stock, not warehouse stock
-            const currentDriverStock = getDriverAllocatedStock(product.id);
-            const newDriverStock = Math.max(0, currentDriverStock - deliveredItem.quantity);
-            console.log(`Driver ${currentUser.name} - Product ${product.name}: ${currentDriverStock} → ${newDriverStock}`);
-            return product; // Don't modify product.stock for drivers
-          }
-          return product;
-        })
-      );
-    }
-
-    // Refresh data only if stock was actually deducted
-    if (targetOrder.status !== OrderStatus.Delivered) {
-      try {
-        // Force refresh products to show updated stock levels
-        if (window.refreshProducts) {
-          await window.refreshProducts();
-        }
-        
-        // Refresh all other data including driver allocations  
-        await refetchData();
-        
-        console.log('Data refreshed after delivery confirmation - products and allocations updated');
-      } catch (error) {
-        console.error('Failed to refresh data after delivery:', error);
-      }
-    }
-    
-    // Only show print preview if this was called from the finalize modal
-    if (!orderToProcess) {
-      setIsPrintPreviewOpen(true);
-      setOrderToFinalize(null);
-    }
-  };
+    // End of handleConfirmFinalize function
+  }
   
   const handleDownloadBill = async () => {
     if (!viewingOrder) return;
@@ -1142,6 +1105,10 @@ export const Orders: React.FC = () => {
               <span>${formatCurrency(viewingOrder.total, currency)}</span>
             </div>
             <div>
+              <span>Return Amount:</span>
+              <span style="color: #2563eb;"><strong>${formatCurrency(viewingOrder.returnAmount || 0, currency)}</strong></span>
+            </div>
+            <div>
               <span>Amount Paid:</span>
               <span style="color: #059669;"><strong>${formatCurrency(editableAmountPaid, currency)}</strong></span>
             </div>
@@ -1176,6 +1143,8 @@ export const Orders: React.FC = () => {
     };
   };
 
+  // ...existing code...
+  // Place the return statement here, after all hooks and functions
   return (
     <>
       <style>{`
@@ -1307,6 +1276,7 @@ export const Orders: React.FC = () => {
                             {isManagerView && <th scope="col" className="px-6 py-3">Assigned To</th>}
                             <th scope="col" className="px-6 py-3">Date</th>
                             <th scope="col" className="px-6 py-3">Total</th>
+                            {isManagerView && <th scope="col" className="px-6 py-3">Cost Price</th>}
                             <th scope="col" className="px-6 py-3">Items</th>
                             <th scope="col" className="px-6 py-3">Status</th>
                             {currentUser?.role !== UserRole.Driver && <th scope="col" className="px-6 py-3">Outstanding</th>}
@@ -1358,6 +1328,18 @@ export const Orders: React.FC = () => {
                                           : 'N/A'
                                       }</td>
                     <td className="px-6 py-4">{typeof order.total === 'number' ? `LKR${order.total.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : 'LKR0'}</td>
+                    {isManagerView && (
+                      <td className="px-6 py-4">{
+                        (() => {
+                          if (!order.orderItems || !Array.isArray(order.orderItems)) return 'LKR0';
+                          const totalCost = order.orderItems.reduce((sum, item) => {
+                            const product = products.find(p => p.id === item.productId);
+                            return sum + ((product?.costPrice || 0) * (item.quantity || 0));
+                          }, 0);
+                          return `LKR${totalCost.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+                        })()
+                      }</td>
+                    )}
                     <td className="px-6 py-4">
                       <div className="flex items-center space-x-2">
                         <span className="inline-block bg-blue-100 dark:bg-blue-700 px-2 py-1 rounded text-xs text-blue-800 dark:text-blue-200">
@@ -1376,6 +1358,7 @@ export const Orders: React.FC = () => {
                         <div>
                           <span className="block text-xs text-slate-600">Cheque: <span className="font-bold">{typeof order.chequeBalance === 'number' && !isNaN(order.chequeBalance) ? `LKR${order.chequeBalance.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : 'LKR0.00'}</span></span>
                           <span className="block text-xs text-slate-600">Credit: <span className="font-bold">{typeof order.creditBalance === 'number' && !isNaN(order.creditBalance) ? `LKR${order.creditBalance.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : 'LKR0.00'}</span></span>
+                          <span className="block text-xs text-blue-600">Return Amount: <span className="font-bold">{typeof order.returnAmount === 'number' && !isNaN(order.returnAmount) ? `LKR${order.returnAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : 'LKR0.00'}</span></span>
                           <span className="block text-xs text-red-600">Outstanding: <span className="font-bold">{'LKR' + ((typeof order.chequeBalance === 'number' && !isNaN(order.chequeBalance) ? order.chequeBalance : 0) + (typeof order.creditBalance === 'number' && !isNaN(order.creditBalance) ? order.creditBalance : 0)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span></span>
                         </div>
                       </td>
@@ -1695,15 +1678,15 @@ export const Orders: React.FC = () => {
                           <div className="pt-4 border-t dark:border-slate-700">
                               <h4 className="text-md font-semibold text-slate-800 dark:text-slate-200 mb-2">Financial Summary</h4>
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-                                  <div>
-                                      <label htmlFor="chequeBalance" className="block mb-1 text-sm font-medium text-slate-700 dark:text-slate-300">Pending Cheque</label>
-                                      <div className="relative">
-                                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">{currency}</span>
-                                          <input 
-                                              type="number"
-                                              id="chequeBalance"
-                                              step="1"
-                                              min="0"
+                  <div>
+                    <label htmlFor="chequeBalance" className="block mb-1 text-sm font-medium text-slate-700 dark:text-slate-300">Pending Cheque</label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">{currency}</span>
+                      <input 
+                        type="number"
+                        id="chequeBalance"
+                        step="1"
+                        min="0"
                         value={editableChequeBalance === '' ? '' : editableChequeBalance}
                         onChange={(e) => {
                           const val = e.target.value;
@@ -1715,23 +1698,23 @@ export const Orders: React.FC = () => {
                           const cheque = parseFloat(val) || 0;
                           setEditableChequeBalance(cheque);
                           // Auto-calculate credit balance
-                          const newCredit = viewingOrder.total - (editableAmountPaid === '' ? 0 : editableAmountPaid) - cheque;
+                          const newCredit = viewingOrder.total - (editableAmountPaid === '' ? 0 : editableAmountPaid) - cheque - (editableReturnAmount === '' ? 0 : editableReturnAmount);
                           setEditableCreditBalance(newCredit > 0 ? newCredit : 0);
                         }}
-                                              className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 pl-10 dark:bg-slate-700 dark:border-slate-600 dark:text-white"
-                                              disabled={!canEdit}
-                                          />
-                                      </div>
-                                  </div>
-                                  <div>
-                                      <label htmlFor="amountPaid" className="block mb-1 text-sm font-medium text-slate-700 dark:text-slate-300">Amount Paid</label>
-                                      <div className="relative">
-                                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">{currency}</span>
-                                          <input 
-                                              type="number"
-                                              id="amountPaid"
-                                              step="1"
-                                              min="0"
+                        className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 pl-10 dark:bg-slate-700 dark:border-slate-600 dark:text-white"
+                        disabled={!canEdit}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label htmlFor="amountPaid" className="block mb-1 text-sm font-medium text-slate-700 dark:text-slate-300">Amount Paid</label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">{currency}</span>
+                      <input 
+                        type="number"
+                        id="amountPaid"
+                        step="1"
+                        min="0"
                         value={editableAmountPaid === '' ? '' : editableAmountPaid}
                         onChange={(e) => {
                           const val = e.target.value;
@@ -1743,14 +1726,42 @@ export const Orders: React.FC = () => {
                           const paid = parseFloat(val) || 0;
                           setEditableAmountPaid(paid);
                           // Auto-calculate credit balance
-                          const newCredit = viewingOrder.total - paid - (editableChequeBalance === '' ? 0 : editableChequeBalance);
+                          const newCredit = viewingOrder.total - paid - (editableChequeBalance === '' ? 0 : editableChequeBalance) - (editableReturnAmount === '' ? 0 : editableReturnAmount);
                           setEditableCreditBalance(newCredit > 0 ? newCredit : 0);
                         }}
-                                              className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 pl-10 dark:bg-slate-700 dark:border-slate-600 dark:text-white"
-                                              disabled={!canEdit}
-                                          />
-                                      </div>
-                                  </div>
+                        className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 pl-10 dark:bg-slate-700 dark:border-slate-600 dark:text-white"
+                        disabled={!canEdit}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label htmlFor="returnAmount" className="block mb-1 text-sm font-medium text-slate-700 dark:text-slate-300">Return Amount</label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">{currency}</span>
+                      <input 
+                        type="number"
+                        id="returnAmount"
+                        step="1"
+                        min="0"
+                        value={editableReturnAmount === undefined || editableReturnAmount === '' ? '' : editableReturnAmount}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val === '') {
+                            setEditableReturnAmount('');
+                            setEditableCreditBalance(viewingOrder.total - (editableAmountPaid === '' ? 0 : editableAmountPaid) - (editableChequeBalance === '' ? 0 : editableChequeBalance));
+                            return;
+                          }
+                          const ret = parseFloat(val) || 0;
+                          setEditableReturnAmount(ret);
+                          // Auto-calculate credit balance
+                          const newCredit = viewingOrder.total - (editableAmountPaid === '' ? 0 : editableAmountPaid) - (editableChequeBalance === '' ? 0 : editableChequeBalance) - ret;
+                          setEditableCreditBalance(newCredit > 0 ? newCredit : 0);
+                        }}
+                        className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 pl-10 dark:bg-slate-700 dark:border-slate-600 dark:text-white"
+                        disabled={!canEdit}
+                      />
+                    </div>
+                  </div>
                                   <div className="sm:col-span-2">
                                       <label className="block mb-1 text-sm font-medium text-slate-700 dark:text-slate-300">Credit Balance (Auto-calculated)</label>
                                       <div className="relative">
@@ -1768,17 +1779,21 @@ export const Orders: React.FC = () => {
                                   </div>
                                   <div className="sm:col-span-2 mt-2 p-3 bg-slate-50 dark:bg-slate-900/50 rounded-lg">
                                       <div className="flex justify-between">
-                                          <span className="text-slate-600 dark:text-slate-400">Amount Paid:</span> 
-                                          <span className="font-medium text-green-600">{formatCurrency(editableAmountPaid, currency)}</span>
-                                      </div>
-                                      <div className="flex justify-between">
-                                          <span className="text-slate-600 dark:text-slate-400">Pending Cheque:</span> 
-                                          <span className="font-medium text-orange-600">{formatCurrency(editableChequeBalance, currency)}</span>
-                                      </div>
-                                      <div className="flex justify-between font-bold text-base mt-1">
-                                          <span className="text-slate-800 dark:text-slate-200">Balance Due:</span> 
-                                          <span className="text-red-600">{formatCurrency(editableChequeBalance + editableCreditBalance, currency)}</span>
-                                      </div>
+                      <span className="text-slate-600 dark:text-slate-400">Amount Paid:</span> 
+                      <span className="font-medium text-green-600">{formatCurrency(editableAmountPaid, currency)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-600 dark:text-slate-400">Pending Cheque:</span> 
+                      <span className="font-medium text-orange-600">{formatCurrency(editableChequeBalance, currency)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-600 dark:text-slate-400">Return Amount:</span>
+                      <span className="font-medium text-blue-600">{formatCurrency(editableReturnAmount === '' ? 0 : editableReturnAmount, currency)}</span>
+                    </div>
+                    <div className="flex justify-between font-bold text-base mt-1">
+                      <span className="text-slate-800 dark:text-slate-200">Balance Due:</span> 
+                      <span className="text-red-600">{formatCurrency(editableChequeBalance + editableCreditBalance, currency)}</span>
+                    </div>
                                   </div>
                               </div>
                           </div>
@@ -1788,45 +1803,50 @@ export const Orders: React.FC = () => {
                               <div className="overflow-x-auto border rounded-lg dark:border-slate-700">
                                   <table className="min-w-full text-sm">
                                       <thead className="text-xs text-slate-700 uppercase bg-slate-50 dark:bg-slate-700 dark:text-slate-400">
-                                          <tr>
-                                              <th className="py-2 px-4 text-left">Product</th>
-                                              <th className="py-2 px-4 text-right">Quantity</th>
-                                              <th className="py-2 px-4 text-right">Unit Price</th>
-                                              <th className="py-2 px-4 text-right">Discount</th>
-                                              <th className="py-2 px-4 text-right">Subtotal</th>
-                                              <th className="py-2 px-4 text-center">Actions</th>
-                                          </tr>
+                      <tr>
+                        <th className="py-2 px-4 text-left">Product</th>
+                        <th className="py-2 px-4 text-right">Quantity</th>
+                        <th className="py-2 px-4 text-right">Unit Price</th>
+                        {isManagerView && <th className="py-2 px-4 text-right">Cost Price</th>}
+                        <th className="py-2 px-4 text-right">Discount</th>
+                        <th className="py-2 px-4 text-right">Subtotal</th>
+                        <th className="py-2 px-4 text-center">Actions</th>
+                      </tr>
                                       </thead>
                                       <tbody className="text-slate-600 dark:text-slate-400 bg-white dark:bg-slate-800 divide-y divide-slate-200 dark:divide-slate-700">
-                                          {(viewingOrder.orderItems ?? []).map(item => {
-                                              const product = products.find(p => p.id === item.productId);
-                                              if (!product) return null;
-                                              const subtotal = (item.quantity * item.price) * (1 - (item.discount || 0) / 100);
-                                              return (
-                                                  <tr key={item.productId}>
-                                                      <td className="py-3 px-4">
-                                                          <div className="flex items-center space-x-3">
-                                                              <img src={product.imageUrl} alt={product.name} className="w-10 h-10 rounded-md object-cover" />
-                                                              <span className="font-medium text-slate-800 dark:text-slate-200">{product.name}</span>
-                                                          </div>
-                                                      </td>
-                                                      <td className="py-3 px-4 text-right">{item.quantity}</td>
-                                                      <td className="py-3 px-4 text-right">{formatCurrency(item.price, currency)}</td>
-                                                      <td className="py-3 px-4 text-right text-green-600 dark:text-green-400">{item.discount ? `${item.discount}%` : '-'}</td>
-                                                      <td className="py-3 px-4 text-right font-semibold text-slate-900 dark:text-white">
-                                                          {formatCurrency(subtotal, currency)}
-                                                      </td>
-                                                      <td className="py-3 px-4 text-center">
-                                                          <button 
-                                                              onClick={() => handleToggleHoldInView(item.productId, 'hold')}
-                                                              className="px-3 py-1 text-xs font-medium rounded-md transition-colors bg-yellow-400 text-yellow-900 hover:bg-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800"
-                                                          >
-                                                              Hold
-                                                          </button>
-                                                      </td>
-                                                  </tr>
-                                              )
-                                          })}
+                      {(viewingOrder.orderItems ?? []).map(item => {
+                        const product = products.find(p => p.id === item.productId);
+                        if (!product) return null;
+                        const subtotal = (item.quantity * item.price) * (1 - (item.discount || 0) / 100);
+                        const totalCostPrice = (product.costPrice || 0) * (item.quantity || 0);
+                        return (
+                          <tr key={item.productId}>
+                            <td className="py-3 px-4">
+                              <div className="flex items-center space-x-3">
+                                <img src={product.imageUrl} alt={product.name} className="w-10 h-10 rounded-md object-cover" />
+                                <span className="font-medium text-slate-800 dark:text-slate-200">{product.name}</span>
+                              </div>
+                            </td>
+                            <td className="py-3 px-4 text-right">{item.quantity}</td>
+                            <td className="py-3 px-4 text-right">{formatCurrency(item.price, currency)}</td>
+                            {isManagerView && (
+                            <td className="py-3 px-4 text-right">{formatCurrency(totalCostPrice, currency)}</td>
+                            )}
+                            <td className="py-3 px-4 text-right text-green-600 dark:text-green-400">{item.discount ? `${item.discount}%` : '-'}</td>
+                            <td className="py-3 px-4 text-right font-semibold text-slate-900 dark:text-white">
+                              {formatCurrency(subtotal, currency)}
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              <button 
+                                onClick={() => handleToggleHoldInView(item.productId, 'hold')}
+                                className="px-3 py-1 text-xs font-medium rounded-md transition-colors bg-yellow-400 text-yellow-900 hover:bg-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800"
+                              >
+                                Hold
+                              </button>
+                            </td>
+                          </tr>
+                        )
+                      })}
                                       </tbody>
                                   </table>
                               </div>
@@ -1877,9 +1897,9 @@ export const Orders: React.FC = () => {
                           )}
                       </div>
                       <div className="flex items-center justify-between p-6 border-t border-slate-200 dark:border-slate-600">
-                        <div className="flex-1">
-                            <p className="text-sm text-slate-600 dark:text-slate-300">Grand Total: <span className="font-bold text-slate-900 dark:text-white">{formatCurrency(viewingOrder.total, currency)}</span></p>
-                        </div>
+            <div className="flex-1">
+              <p className="text-sm text-slate-600 dark:text-slate-300">Grand Total: <span className="font-bold text-slate-900 dark:text-white">{formatCurrency(viewingOrder.total, currency)}</span></p>
+            </div>
                         <div className="flex flex-wrap items-center gap-2">
                            {canEdit && (
                                 <button onClick={handleSaveBalances} type="button" className="text-white bg-green-600 hover:bg-green-700 focus:ring-4 focus:outline-none focus:ring-green-300 font-medium rounded-lg text-sm px-4 py-2 text-center">
@@ -1929,14 +1949,17 @@ export const Orders: React.FC = () => {
         >
           <div id="printable-bill-content" className="bg-white">
             {viewingOrder && customers.find(c => c.id === viewingOrder.customerId) ? (
-              <OrderBill
-                order={viewingOrder}
-                customer={customers.find(c => c.id === viewingOrder.customerId)}
-                products={products}
-                currency={currency}
-                chequeBalance={editableChequeBalance}
-                creditBalance={editableCreditBalance}
-              />
+                <OrderBill
+                  order={{
+                    ...viewingOrder,
+                    creditBalance: (typeof editableCreditBalance === 'number' ? editableCreditBalance : 0)
+                  }}
+                  customer={customers.find(c => c.id === viewingOrder.customerId)}
+                  products={products}
+                  currency={currency}
+                  chequeBalance={editableChequeBalance}
+                  creditBalance={editableCreditBalance}
+                />
             ) : (
               <div className="p-8 text-center text-slate-500">
                 பில் விவரங்கள் கிடைக்கவில்லை. தயவுசெய்து order மற்றும் customer தரவை சரிபார்க்கவும்.
@@ -1956,4 +1979,4 @@ export const Orders: React.FC = () => {
       </div>
     </>
   );
-};
+}

@@ -87,8 +87,8 @@ export const Products: React.FC = () => {
 
 
   const openModal = (mode: 'add' | 'edit', product?: Product) => {
-    setModalMode(mode);
-    setCurrentProduct(product || { name: '', category: '', price: 0, stock: 0, sku: '', supplier: '', imageUrl: '' });
+  setModalMode(mode);
+  setCurrentProduct(product || { name: '', category: '', price: 0, costPrice: 0, stock: 0, sku: '', supplier: '', imageUrl: '' });
     clearErrors();
     setIsModalOpen(true);
   };
@@ -114,6 +114,7 @@ export const Products: React.FC = () => {
         name: validationRules.name,
         category: validationRules.required,
         price: validationRules.price,
+        costPrice: validationRules.price, // reuse price validation
         stock: validationRules.stock,
         sku: validationRules.sku,
         supplier: validationRules.required
@@ -135,6 +136,7 @@ export const Products: React.FC = () => {
           name: currentProduct.name || '',
           category: currentProduct.category || '',
           price: currentProduct.price || 0,
+          costPrice: currentProduct.costPrice || 0,
           stock: currentProduct.stock || 0,
           sku: currentProduct.sku || '',
           supplier: currentProduct.supplier || '',
@@ -146,6 +148,7 @@ export const Products: React.FC = () => {
           name: newProduct.name,
           category: newProduct.category,
           price: newProduct.price,
+          costprice: newProduct.costPrice,
           stock: newProduct.stock,
           sku: newProduct.sku,
           supplier: newProduct.supplier,
@@ -168,6 +171,7 @@ export const Products: React.FC = () => {
           name: currentProduct.name,
           category: currentProduct.category,
           price: currentProduct.price,
+          costprice: currentProduct.costPrice,
           stock: currentProduct.stock,
           sku: currentProduct.sku,
           supplier: currentProduct.supplier,
@@ -386,6 +390,7 @@ export const Products: React.FC = () => {
                               <th scope="col" className="px-6 py-3">Product</th>
                               <th scope="col" className="px-6 py-3">Category</th>
                               <th scope="col" className="px-6 py-3">Price</th>
+                              {canEdit && <th scope="col" className="px-6 py-3">Cost Price</th>}
                               <th scope="col" className="px-6 py-3">Stock</th>
                               <th scope="col" className="px-6 py-3">Weight</th>
                               {canEdit && <th scope="col" className="px-6 py-3">Actions</th>}
@@ -408,6 +413,7 @@ export const Products: React.FC = () => {
                                 </td>
                                 <td className="px-6 py-4">{product.category}</td>
                                 <td className="px-6 py-4">{formatCurrency(product.price, currency)}</td>
+                                {canEdit && <td className="px-6 py-4">{formatCurrency(product.costPrice || 0, currency)}</td>}
                                 <td className="px-6 py-4">
                                   <Badge variant={getStockBadgeVariant(product.stock)}>{product.stock}</Badge>
                                 </td>
@@ -450,6 +456,10 @@ export const Products: React.FC = () => {
             <div>
               <label htmlFor="price" className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">Price ({currency})</label>
               <input type="number" id="price" value={currentProduct.price || ''} onChange={e => handleInputChange('price', parseFloat(e.target.value) || 0)} className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white" required />
+            </div>
+            <div>
+              <label htmlFor="costPrice" className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">Cost Price ({currency})</label>
+              <input type="number" id="costPrice" value={currentProduct.costPrice || ''} onChange={e => handleInputChange('costPrice', parseFloat(e.target.value) || 0)} className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white" required />
             </div>
             <div>
               <label htmlFor="stock" className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">Stock</label>

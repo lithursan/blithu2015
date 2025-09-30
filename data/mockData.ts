@@ -1,14 +1,14 @@
 import { Product, Order, Customer, OrderStatus, SalesData, StockData, User, UserRole, UserStatus, DriverAllocation, DriverSale, Supplier } from '../types';
 
 export const mockProducts: Product[] = [
-  { id: 'PROD001', name: 'Premium Grade A Basmati Rice', category: 'Grains', price: 150.00, stock: 120, sku: 'SKU-BASM-001', supplier: 'Himalayan Grains Co.', imageUrl: 'https://picsum.photos/seed/rice/400/400' },
-  { id: 'PROD002', name: 'Organic Toor Dal', category: 'Pulses', price: 120.50, stock: 80, sku: 'SKU-TOOR-002', supplier: 'Deccan Pulses Ltd.', imageUrl: 'https://picsum.photos/seed/dal/400/400' },
-  { id: 'PROD003', name: 'Cold Pressed Sunflower Oil', category: 'Oils', price: 220.00, stock: 200, sku: 'SKU-SUNF-003', supplier: 'Healthy Oils Inc.', imageUrl: 'https://picsum.photos/seed/oil/400/400' },
-  { id: 'PROD004', name: 'Whole Wheat Atta', category: 'Flour', price: 55.00, stock: 300, sku: 'SKU-ATTA-004', supplier: 'Golden Harvest', imageUrl: 'https://picsum.photos/seed/atta/400/400' },
-  { id: 'PROD005', name: 'Refined Sugar', category: 'Sweeteners', price: 45.00, stock: 0, sku: 'SKU-SUGR-005', supplier: 'Sweet Life', imageUrl: 'https://picsum.photos/seed/sugar/400/400' },
-  { id: 'PROD006', name: 'Himalayan Pink Salt', category: 'Spices', price: 90.00, stock: 150, sku: 'SKU-SALT-006', supplier: 'Himalayan Grains Co.', imageUrl: 'https://picsum.photos/seed/salt/400/400' },
-  { id: 'PROD007', name: 'Turmeric Powder', category: 'Spices', price: 75.00, stock: 180, sku: 'SKU-TURM-007', supplier: 'Deccan Pulses Ltd.', imageUrl: 'https://picsum.photos/seed/turmeric/400/400' },
-  { id: 'PROD008', name: 'Coriander Powder', category: 'Spices', price: 60.00, stock: 250, sku: 'SKU-CORI-008', supplier: 'Golden Harvest', imageUrl: 'https://picsum.photos/seed/coriander/400/400' },
+  { id: 'PROD001', name: 'Premium Grade A Basmati Rice', category: 'Grains', price: 150.00, costPrice: 110.00, stock: 120, sku: 'SKU-BASM-001', supplier: 'Himalayan Grains Co.', imageUrl: 'https://picsum.photos/seed/rice/400/400' },
+  { id: 'PROD002', name: 'Organic Toor Dal', category: 'Pulses', price: 120.50, costPrice: 90.00, stock: 80, sku: 'SKU-TOOR-002', supplier: 'Deccan Pulses Ltd.', imageUrl: 'https://picsum.photos/seed/dal/400/400' },
+  { id: 'PROD003', name: 'Cold Pressed Sunflower Oil', category: 'Oils', price: 220.00, costPrice: 180.00, stock: 200, sku: 'SKU-SUNF-003', supplier: 'Healthy Oils Inc.', imageUrl: 'https://picsum.photos/seed/oil/400/400' },
+  { id: 'PROD004', name: 'Whole Wheat Atta', category: 'Flour', price: 55.00, costPrice: 40.00, stock: 300, sku: 'SKU-ATTA-004', supplier: 'Golden Harvest', imageUrl: 'https://picsum.photos/seed/atta/400/400' },
+  { id: 'PROD005', name: 'Refined Sugar', category: 'Sweeteners', price: 45.00, costPrice: 32.00, stock: 0, sku: 'SKU-SUGR-005', supplier: 'Sweet Life', imageUrl: 'https://picsum.photos/seed/sugar/400/400' },
+  { id: 'PROD006', name: 'Himalayan Pink Salt', category: 'Spices', price: 90.00, costPrice: 65.00, stock: 150, sku: 'SKU-SALT-006', supplier: 'Himalayan Grains Co.', imageUrl: 'https://picsum.photos/seed/salt/400/400' },
+  { id: 'PROD007', name: 'Turmeric Powder', category: 'Spices', price: 75.00, costPrice: 55.00, stock: 180, sku: 'SKU-TURM-007', supplier: 'Deccan Pulses Ltd.', imageUrl: 'https://picsum.photos/seed/turmeric/400/400' },
+  { id: 'PROD008', name: 'Coriander Powder', category: 'Spices', price: 60.00, costPrice: 42.00, stock: 250, sku: 'SKU-CORI-008', supplier: 'Golden Harvest', imageUrl: 'https://picsum.photos/seed/coriander/400/400' },
 ];
 
 export const mockOrders: Order[] = [

@@ -45,6 +45,7 @@ export interface Product {
   name: string;
   category: string;
   price: number;
+  costPrice?: number; // purchase price
   stock: number;
   sku: string;
   supplier: string;
@@ -56,6 +57,7 @@ export interface OrderItem {
   quantity: number;
   price: number; // price at the time of order to prevent changes if product price updates
   discount?: number; // discount percentage
+  isReturn?: boolean; // true if this item is a returned product
 }
 
 export interface Order {
@@ -71,6 +73,8 @@ export interface Order {
   chequeBalance?: number;
   creditBalance?: number;
   assignedUserId?: string; // ID of the user (Sales Rep or Driver) who created/manages the order
+  returnAmount?: number; // Amount returned for this order
+  amountPaid?: number; // Amount paid for this order
 }
 
 export interface Customer {

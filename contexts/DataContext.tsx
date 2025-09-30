@@ -68,6 +68,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                             name: row.name,
                             category: row.category,
                             price: row.price,
+                            costPrice: row.costprice !== undefined ? Number(row.costprice) : undefined,
                             stock: row.stock,
                             sku: row.sku,
                             supplier: row.supplier,
@@ -85,7 +86,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 console.error('Supabase orders fetch error:', ordersError);
             }
             if (!ordersError && ordersData) {
-                const mappedOrders = ordersData.map((row: DatabaseOrder) => {
+                const mappedOrders = ordersData.map((row: DatabaseOrder & { returnamount?: number }) => {
                     const orderItemsResult = safeJsonParse(row.orderitems, [], 'orderitems', row.id);
                     if (!orderItemsResult.success) {
                         // Log error but continue with fallback
@@ -107,6 +108,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                         expectedDeliveryDate: row.expecteddeliverydate,
                         chequeBalance: row.chequebalance == null || isNaN(Number(row.chequebalance)) ? 0 : Number(row.chequebalance),
                         creditBalance: row.creditbalance == null || isNaN(Number(row.creditbalance)) ? 0 : Number(row.creditbalance),
+                        returnAmount: row.returnamount == null || isNaN(Number(row.returnamount)) ? 0 : Number(row.returnamount),
                     } as Order;
                 });
                 setOrders(mappedOrders);
@@ -392,6 +394,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     name: row.name,
                     category: row.category,
                     price: row.price,
+                    costPrice: row.costprice !== undefined ? Number(row.costprice) : undefined,
                     stock: row.stock,
                     sku: row.sku,
                     supplier: row.supplier,
