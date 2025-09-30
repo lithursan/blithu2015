@@ -91,7 +91,7 @@ export const NAV_ITEMS = [
 ];
 
 export const COMPANY_DETAILS = {
-  name: 'SHIVAM DISTRIBUTOR (PVT) LTD',
+  name: 'SHIVAM DISTRIBUTORS (PVT) LTD',
   address: 'A9 Road, Kanthaswamy Kovil, Kilinochchi, Sri Lanka',
   email: 'Shivam2025@gmail.com',
   phone: '+94 772819267 / +94 779095954',

@@ -46,7 +46,7 @@ export class EmailService {
             
             <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e2e8f0;">
               <p style="color: #64748b; font-size: 12px;">
-                This is an automated notification from SHIVAM DISTRIBUTOR (PVT) LTD.<br>
+                This is an automated notification from SHIVAM DISTRIBUTORS (PVT) LTD.<br>
                 You can manage your notification preferences in Settings.
               </p>
             </div>
@@ -103,7 +103,7 @@ export class EmailService {
             
             <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e2e8f0;">
               <p style="color: #64748b; font-size: 12px;">
-                This is an automated notification from SHIVAM DISTRIBUTOR (PVT) LTD.<br>
+                This is an automated notification from SHIVAM DISTRIBUTORS (PVT) LTD.<br>
                 You can manage your notification preferences in Settings.
               </p>
             </div>

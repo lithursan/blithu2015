@@ -45,7 +45,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isSidebarOpen, closeSidebar })
         </div>
         <div className="ml-3 flex flex-col">
           <h1 className="text-lg font-bold text-slate-800 dark:text-white leading-tight tracking-wide">SHIVAM</h1>
-          <p className="text-xs font-medium text-blue-600 dark:text-blue-400 tracking-wider">DISTRIBUTOR (PVT) LTD</p>
+          <p className="text-xs font-medium text-blue-600 dark:text-blue-400 tracking-wider">DISTRIBUTORS (PVT) LTD</p>
         </div>
       </div>
       <nav className="p-4">

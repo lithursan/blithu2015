@@ -49,7 +49,7 @@ export const Login: React.FC = () => {
                                 SHIVAM
                             </h1>
                             <div className="text-sm font-semibold text-blue-600 dark:text-blue-400 tracking-widest">
-                                DISTRIBUTOR (PVT) LTD
+                                DISTRIBUTORS (PVT) LTD
                             </div>
                         </div>
                     </div>
