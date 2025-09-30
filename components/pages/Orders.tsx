@@ -869,28 +869,33 @@ export const Orders: React.FC = () => {
 
 
   const handleConfirmFinalize = async (orderToProcess?: Order) => {
-    const targetOrder = orderToProcess || orderToFinalize;
-    if (!targetOrder) return;
-    // Integrity check
-    if (!targetOrder || !targetOrder.orderItems || targetOrder.orderItems.length === 0) {
-      alert("Cannot finalize an order with no items.");
-      if (!orderToProcess) setOrderToFinalize(null);
-      return;
+  const targetOrder = orderToProcess || orderToFinalize;
+  if (!targetOrder) return;
+  // Prevent double delivery logic
+  if (targetOrder.status === OrderStatus.Delivered) {
+    // Already delivered, skip all allocation/stock logic
+    return;
+  }
+  // Integrity check
+  if (!targetOrder || !targetOrder.orderItems || targetOrder.orderItems.length === 0) {
+    alert("Cannot finalize an order with no items.");
+    if (!orderToProcess) setOrderToFinalize(null);
+    return;
+  }
+  // Check stock levels before proceeding
+  let stockSufficient = true;
+  for (const item of targetOrder.orderItems) {
+    const product = products.find(p => p.id === item.productId);
+    if (!product || getEffectiveStock(product) < item.quantity) {
+      alert(`Insufficient stock for ${product?.name || 'an item'}. Cannot finalize order.`);
+      stockSufficient = false;
+      break;
     }
-    // Check stock levels before proceeding
-    let stockSufficient = true;
-    for (const item of targetOrder.orderItems) {
-        const product = products.find(p => p.id === item.productId);
-        if (!product || getEffectiveStock(product) < item.quantity) {
-            alert(`Insufficient stock for ${product?.name || 'an item'}. Cannot finalize order.`);
-            stockSufficient = false;
-            break;
-        }
-    }
-    if (!stockSufficient) {
-        if (!orderToProcess) setOrderToFinalize(null);
-        return; // Abort the finalization
-    }
+  }
+  if (!stockSufficient) {
+    if (!orderToProcess) setOrderToFinalize(null);
+    return; // Abort the finalization
+  }
   // --- Update sold column in orders table ---
   const soldQty = targetOrder.orderItems.reduce((sum, i) => sum + i.quantity, 0);
   await supabase.from('orders').update({ status: OrderStatus.Delivered, sold: soldQty }).eq('id', targetOrder.id);
@@ -975,20 +980,19 @@ export const Orders: React.FC = () => {
       return;
     }
 
-    // If order is not delivered, mark it as delivered first
-  if (viewingOrder.status !== OrderStatus.Delivered && canMarkDelivered) {
-      // Confirm with user before marking as delivered
+    // Only on first delivery (not already delivered)
+    if (viewingOrder.status !== OrderStatus.Delivered && canMarkDelivered) {
       if (!confirm('This will mark the order as delivered and reduce stock. Continue?')) {
         setBillLoading(false);
         return;
       }
-      
       try {
-        // Call handleConfirmFinalize with the viewingOrder directly
-        await handleConfirmFinalize(viewingOrder);
-        // Refetch all data to sync UI everywhere
+        await handleConfirmFinalize(viewingOrder); // This will update status to Delivered and reduce stock/allocation
+        // Update viewingOrder status in UI immediately for live sync
+        if (setViewingOrder) setViewingOrder({ ...viewingOrder, status: OrderStatus.Delivered });
+        // Also update the order in the orders list if present
+        setOrders(prev => prev.map(o => o.id === viewingOrder.id ? { ...o, status: OrderStatus.Delivered } : o));
         await refetchData();
-        // Wait a moment for state to update, then download
         setTimeout(() => {
           generateAndDownloadBill();
           setBillLoading(false);
@@ -999,11 +1003,11 @@ export const Orders: React.FC = () => {
         setBillLoading(false);
         return;
       }
+    } else {
+      // Already delivered: just print, do not touch allocation/stock
+      generateAndDownloadBill();
+      setBillLoading(false);
     }
-
-    // If already delivered, directly download
-  generateAndDownloadBill();
-  setBillLoading(false);
   };
 
   const generateAndDownloadBill = () => {
