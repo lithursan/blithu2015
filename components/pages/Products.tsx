@@ -131,6 +131,11 @@ export const Products: React.FC = () => {
       if (modalMode === 'add') {
         // Generate unique ID using timestamp and random number
         const uniqueId = `PROD${Date.now().toString().slice(-6)}${Math.floor(Math.random() * 100).toString().padStart(2, '0')}`;
+        // Auto-generate SKU if left empty
+        let sku = currentProduct.sku && currentProduct.sku.trim() !== ''
+          ? currentProduct.sku.trim()
+          : `SKU-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+
         const newProduct: Product = {
           id: uniqueId,
           name: currentProduct.name || '',
@@ -138,7 +143,7 @@ export const Products: React.FC = () => {
           price: currentProduct.price || 0,
           costPrice: currentProduct.costPrice || 0,
           stock: currentProduct.stock || 0,
-          sku: currentProduct.sku || '',
+          sku,
           supplier: currentProduct.supplier || '',
           imageUrl: currentProduct.imageUrl || `https://picsum.photos/seed/${currentProduct.name || 'new'}/400/400`,
         };
@@ -332,7 +337,7 @@ export const Products: React.FC = () => {
                                     <th scope="col" className="px-6 py-3">Category</th>
                                     <th scope="col" className="px-6 py-3">Price</th>
                                     <th scope="col" className="px-6 py-3">Allocated Stock</th>
-                                    <th scope="col" className="px-6 py-3">Weight</th>
+                                    <th scope="col" className="px-6 py-3">SKU</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -392,7 +397,7 @@ export const Products: React.FC = () => {
                               <th scope="col" className="px-6 py-3">Price</th>
                               {canEdit && <th scope="col" className="px-6 py-3">Cost Price</th>}
                               <th scope="col" className="px-6 py-3">Stock</th>
-                              <th scope="col" className="px-6 py-3">Weight</th>
+                              <th scope="col" className="px-6 py-3">SKU</th>
                               {canEdit && <th scope="col" className="px-6 py-3">Actions</th>}
                             </tr>
                           </thead>
@@ -466,8 +471,8 @@ export const Products: React.FC = () => {
               <input type="number" id="stock" value={currentProduct.stock || ''} onChange={e => handleInputChange('stock', parseInt(e.target.value, 10) || 0)} className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white" required />
             </div>
             <div>
-              <label htmlFor="sku" className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">Weight</label>
-              <input type="text" id="sku" value={currentProduct.sku || ''} onChange={e => handleInputChange('sku', e.target.value)} className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white" required />
+              <label htmlFor="sku" className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">SKU</label>
+              <input type="text" id="sku" value={currentProduct.sku || ''} onChange={e => handleInputChange('sku', e.target.value)} placeholder="Auto-generated if left empty" className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white" />
             </div>
             <div>
               <label htmlFor="supplier" className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">Supplier</label>

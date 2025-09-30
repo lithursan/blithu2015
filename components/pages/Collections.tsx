@@ -137,9 +137,19 @@ export const Collections: React.FC = () => {
   const handleRecognizeCollection = async () => {
     if (!selectedCollection) return;
     try {
-      // Reduce the outstanding amount from the order
+      // Fetch the current order to get the latest amountpaid
+      const { data: orderData, error: fetchOrderError } = await supabase
+        .from('orders')
+        .select('amountpaid')
+        .eq('id', selectedCollection.order_id)
+        .single();
+      if (fetchOrderError) throw fetchOrderError;
+      const prevAmountPaid = orderData?.amountpaid || 0;
+
+      // Reduce the outstanding amount from the order and increment amountpaid
       const updatedOrderData: any = {
-        notes: `${selectedCollection.collection_type.toUpperCase()} collection of ${formatCurrency(selectedCollection.amount)} completed by ${currentUser?.name}. ${verificationNotes ? 'Notes: ' + verificationNotes : ''}`
+        notes: `${selectedCollection.collection_type.toUpperCase()} collection of ${formatCurrency(selectedCollection.amount)} completed by ${currentUser?.name}. ${verificationNotes ? 'Notes: ' + verificationNotes : ''}`,
+        amountpaid: prevAmountPaid + selectedCollection.amount
       };
       // Reduce the appropriate balance to 0 since it's been collected
       if (selectedCollection.collection_type === 'credit') {
@@ -173,7 +183,7 @@ export const Collections: React.FC = () => {
       // Refresh all data from server to ensure consistency
       await refetchData();
 
-  alert(`${selectedCollection.collection_type.toUpperCase()} collection of ${formatCurrency(selectedCollection.amount)} has been marked as complete!`);
+      alert(`${selectedCollection.collection_type.toUpperCase()} collection of ${formatCurrency(selectedCollection.amount)} has been marked as complete!`);
 
       setSelectedCollection(null);
       setVerificationNotes('');

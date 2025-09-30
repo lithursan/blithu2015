@@ -501,14 +501,24 @@ export const Orders: React.FC = () => {
       customerId: order.customerId || '', // use only camelCase for type safety
     };
     setViewingOrder(patchedOrder);
-    setEditableChequeBalance(patchedOrder.chequeBalance || 0);
-    // Use returnamount from DB if present, else fallback to calculated
-  let retAmount = typeof patchedOrder.returnAmount === 'number' ? patchedOrder.returnAmount : 0;
-    setReturnAmount(retAmount);
-    setEditableReturnAmount(retAmount);
-    setEditableCreditBalance((patchedOrder.creditBalance || 0) - retAmount);
-    const calculatedAmountPaid = patchedOrder.total - (patchedOrder.chequeBalance || 0) - ((patchedOrder.creditBalance || 0) - retAmount);
-    setEditableAmountPaid(calculatedAmountPaid > 0 ? calculatedAmountPaid : 0);
+    // Always use DB values if present, fallback to calculated only if missing
+    setEditableChequeBalance(
+      typeof patchedOrder.chequeBalance === 'number' ? patchedOrder.chequeBalance : 0
+    );
+    setEditableCreditBalance(
+      typeof patchedOrder.creditBalance === 'number' ? patchedOrder.creditBalance : 0
+    );
+    setReturnAmount(
+      typeof patchedOrder.returnAmount === 'number' ? patchedOrder.returnAmount : 0
+    );
+    setEditableReturnAmount(
+      typeof patchedOrder.returnAmount === 'number' ? patchedOrder.returnAmount : 0
+    );
+    setEditableAmountPaid(
+      typeof patchedOrder.amountPaid === 'number'
+        ? patchedOrder.amountPaid
+        : (patchedOrder.total - (patchedOrder.chequeBalance || 0) - (patchedOrder.creditBalance || 0))
+    );
   };
 
   const closeViewModal = () => {
@@ -881,9 +891,11 @@ export const Orders: React.FC = () => {
         if (!orderToProcess) setOrderToFinalize(null);
         return; // Abort the finalization
     }
-    // --- Update sold column in orders table ---
-    const soldQty = targetOrder.orderItems.reduce((sum, i) => sum + i.quantity, 0);
-    await supabase.from('orders').update({ status: OrderStatus.Delivered, sold: soldQty }).eq('id', targetOrder.id);
+  // --- Update sold column in orders table ---
+  const soldQty = targetOrder.orderItems.reduce((sum, i) => sum + i.quantity, 0);
+  await supabase.from('orders').update({ status: OrderStatus.Delivered, sold: soldQty }).eq('id', targetOrder.id);
+  // Refetch all data to sync UI everywhere
+  await refetchData();
     // --- Sync allocation salesTotal and update allocatedItems after delivery ---
     if (currentUser?.role === UserRole.Driver && driverAllocations.length > 0) {
       const todayStr = new Date().toISOString().slice(0, 10);
@@ -925,9 +937,12 @@ export const Orders: React.FC = () => {
       }
     }
   // --- Deduct inventory in UI and Supabase ---
-    // Only deduct stock if order is not already delivered (prevent double deduction)
+    // Deduct stock ONLY when delivering (not at allocation)
     if (targetOrder.status !== OrderStatus.Delivered) {
       for (const item of targetOrder.orderItems) {
+        // For drivers, reduce from allocated stock (driver_allocations), not from warehouse
+        // For non-drivers, reduce from warehouse stock
+        // Here, always reduce from warehouse stock only on delivery
         const currentProduct = products.find(p => p.id === item.productId);
         if (currentProduct && currentProduct.stock >= item.quantity) {
           await supabase.from('products').update({ 
@@ -944,38 +959,51 @@ export const Orders: React.FC = () => {
     // End of handleConfirmFinalize function
   }
   
+  const [billLoading, setBillLoading] = useState(false);
+
   const handleDownloadBill = async () => {
-    if (!viewingOrder) return;
+    if (billLoading) return; // Prevent double click
+    setBillLoading(true);
+    if (!viewingOrder) {
+      setBillLoading(false);
+      return;
+    }
     const customer = customers.find(c => c.id === viewingOrder.customerId);
     if (!customer) {
       alert('Customer data missing. Cannot download bill.');
+      setBillLoading(false);
       return;
     }
 
     // If order is not delivered, mark it as delivered first
-    if (viewingOrder.status !== OrderStatus.Delivered && canMarkDelivered) {
+  if (viewingOrder.status !== OrderStatus.Delivered && canMarkDelivered) {
       // Confirm with user before marking as delivered
       if (!confirm('This will mark the order as delivered and reduce stock. Continue?')) {
+        setBillLoading(false);
         return;
       }
       
       try {
         // Call handleConfirmFinalize with the viewingOrder directly
         await handleConfirmFinalize(viewingOrder);
-        
+        // Refetch all data to sync UI everywhere
+        await refetchData();
         // Wait a moment for state to update, then download
         setTimeout(() => {
           generateAndDownloadBill();
+          setBillLoading(false);
         }, 1000);
         return;
       } catch (error) {
         alert('Failed to mark order as delivered. Please try again.');
+        setBillLoading(false);
         return;
       }
     }
 
     // If already delivered, directly download
-    generateAndDownloadBill();
+  generateAndDownloadBill();
+  setBillLoading(false);
   };
 
   const generateAndDownloadBill = () => {
@@ -1910,9 +1938,10 @@ export const Orders: React.FC = () => {
                               <button 
                                   onClick={handleDownloadBill} 
                                   type="button" 
-                                  className="text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-4 py-2 text-center"
+                                  className="text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-4 py-2 text-center disabled:bg-blue-400 disabled:cursor-not-allowed"
+                                  disabled={billLoading}
                               >
-                                  {viewingOrder.status === OrderStatus.Delivered ? '📄 Download Bill' : '📄 Download Bill & Confirm Sale'}
+                                  {billLoading ? 'Processing...' : (viewingOrder.status === OrderStatus.Delivered ? '📄 Download Bill' : '📄 Download Bill & Confirm Sale')}
                               </button>
                             )}
                             <button onClick={closeViewModal} type="button" className="text-white bg-slate-600 hover:bg-slate-700 focus:ring-4 focus:outline-none focus:ring-slate-300 font-medium rounded-lg text-sm px-4 py-2 text-center">

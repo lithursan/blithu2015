@@ -327,9 +327,19 @@ export const Customers: React.FC = () => {
     [allCustomers, customerOutstandingMap]
   );
 
+
+  // Calculate total spent for each customer from delivered orders
+  const customerTotalSpentMap: Record<string, number> = {};
+  orders.forEach(order => {
+    if (!order.customerId || order.status !== 'Delivered') return;
+    // Sum up the total for each delivered order
+    customerTotalSpentMap[order.customerId] = (customerTotalSpentMap[order.customerId] || 0) + (order.total || 0);
+  });
+
+  // Total spent for visible customers
   const totalSpent = useMemo(() => 
-    allCustomers.reduce((sum, customer) => sum + customer.totalSpent, 0), 
-    [allCustomers]
+    allCustomers.reduce((sum, customer) => sum + (customerTotalSpentMap[customer.id] || 0), 0),
+    [allCustomers, customerTotalSpentMap]
   );
 
   return (
@@ -536,7 +546,7 @@ export const Customers: React.FC = () => {
                                 <div>{customer.email}</div>
                                 <div className="text-xs text-slate-500">{customer.phone}</div>
                             </td>
-                            <td className="px-6 py-4">{formatCurrency(customer.totalSpent, currency)}</td>
+                            <td className="px-6 py-4">{formatCurrency(customerTotalSpentMap[customer.id] || 0, currency)}</td>
                             <td className={`px-6 py-4 font-bold ${(customerOutstandingMap[customer.id] || 0) > 0 ? 'text-red-500' : 'text-green-500'}`}>{formatCurrency(customerOutstandingMap[customer.id] || 0, currency)}</td>
                             {canEdit && (
                                 <td className="px-6 py-4 flex items-center space-x-2">
