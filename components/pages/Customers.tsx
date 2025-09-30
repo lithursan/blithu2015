@@ -523,17 +523,17 @@ export const Customers: React.FC = () => {
                     <table className="w-full text-sm text-left text-slate-500 dark:text-slate-400">
                       <thead className="text-xs text-slate-700 uppercase bg-slate-50 dark:bg-slate-700 dark:text-slate-400">
                         <tr>
-                          <th scope="col" className="px-6 py-3">Customer</th>
-                          <th scope="col" className="px-6 py-3">Contact</th>
+                          <th scope="col" className="px-6 py-3 bg-white z-20 sticky left-0">Customer</th>
+                          <th scope="col" className="px-6 py-3 bg-white z-20 sticky left-[112px]">Contact</th>
                           <th scope="col" className="px-6 py-3">Total Spent</th>
                           <th scope="col" className="px-6 py-3">Outstanding</th>
-                          {canEdit && <th scope="col" className="px-6 py-3">Actions</th>}
+                          {canEdit && <th scope="col" className="px-6 py-3 bg-white z-20 sticky right-0">Actions</th>}
                         </tr>
                       </thead>
                       <tbody>
                         {(supplierCustomers as Customer[]).map((customer) => (
                           <tr key={customer.id} className="bg-white border-b dark:bg-slate-800 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600">
-                            <td className="px-6 py-4 font-medium text-slate-900 dark:text-white">
+                            <td className="px-6 py-4 font-medium text-slate-900 dark:text-white bg-white z-10 sticky left-0">
                                 <div className="flex items-center space-x-3">
                                     <img src={customer.avatarUrl} alt={customer.name} className="w-10 h-10 rounded-full" />
                                     <div>
@@ -542,14 +542,14 @@ export const Customers: React.FC = () => {
                                     </div>
                                 </div>
                             </td>
-                            <td className="px-6 py-4">
+                            <td className="px-6 py-4 bg-white z-10 sticky left-[112px]">
                                 <div>{customer.email}</div>
                                 <div className="text-xs text-slate-500">{customer.phone}</div>
                             </td>
                             <td className="px-6 py-4">{formatCurrency(customerTotalSpentMap[customer.id] || 0, currency)}</td>
                             <td className={`px-6 py-4 font-bold ${(customerOutstandingMap[customer.id] || 0) > 0 ? 'text-red-500' : 'text-green-500'}`}>{formatCurrency(customerOutstandingMap[customer.id] || 0, currency)}</td>
-                            {canEdit && (
-                                <td className="px-6 py-4 flex items-center space-x-2">
+              {canEdit && (
+                <td className="px-6 py-4 flex items-center space-x-2 bg-white z-10 sticky right-0">
                                 <button onClick={() => openModal('edit', customer)} className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">Edit</button>
                                 <button onClick={() => openDeleteConfirm(customer)} className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300">Delete</button>
                                 </td>
