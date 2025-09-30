@@ -1,26 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/Card';
 import { exportData } from '../../utils/exportUtils';
-  // Export handler for filtered collections
-  const handleExport = (format: 'csv' | 'xlsx') => {
-    if (!filteredCollections.length) {
-      alert('No collections to export');
-      return;
-    }
-    // Format data for export
-    const formatted = filteredCollections.map(c => ({
-      'Order ID': c.order_id,
-      'Customer': c.customer_id,
-      'Type': c.collection_type,
-      'Amount': c.amount,
-      'Collected By': c.collected_by,
-      'Date': c.collected_at || c.created_at,
-      'Status': c.status,
-      'Notes': c.notes || '',
-    }));
-    const timestamp = new Date().toISOString().split('T')[0];
-    exportData(formatted, `collections_${timestamp}`, format, 'Collections');
-  };
 import { Badge } from '../ui/Badge';
 import { Modal } from '../ui/Modal';
 import { useData } from '../../contexts/DataContext';
@@ -47,6 +27,26 @@ interface CollectionRecord {
 }
 
 export const Collections: React.FC = () => {
+  // Export handler for filtered collections
+  const handleExport = (format: 'csv' | 'xlsx') => {
+    if (!filteredCollections.length) {
+      alert('No collections to export');
+      return;
+    }
+    // Format data for export
+    const formatted = filteredCollections.map(c => ({
+      'Order ID': c.order_id,
+      'Customer': c.customer_id,
+      'Type': c.collection_type,
+      'Amount': c.amount,
+      'Collected By': c.collected_by,
+      'Date': c.collected_at || c.created_at,
+      'Status': c.status,
+      'Notes': c.notes || '',
+    }));
+    const timestamp = new Date().toISOString().split('T')[0];
+    exportData(formatted, `collections_${timestamp}`, format, 'Collections');
+  };
   const { refetchData } = useData();
   const { currentUser } = useAuth();
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
