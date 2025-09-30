@@ -1335,7 +1335,7 @@ export const Orders: React.FC = () => {
                 }
                 return (
                   <tr key={order.id} className="border-b dark:bg-slate-800 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600">
-                    <td className="px-6 py-4 font-medium text-slate-900 dark:text-white bg-white z-10 sticky left-0">{order.id}</td>
+                    <td className="px-6 py-4 font-medium text-slate-900 dark:text-white z-10 sticky left-0">{order.id}</td>
                     <td className="px-6 py-4 z-10 sticky left-[112px]">{order.customerName}</td>
                     {isManagerView && (
                       <td className="px-6 py-4">
