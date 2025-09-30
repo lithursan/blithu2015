@@ -1303,8 +1303,8 @@ export const Orders: React.FC = () => {
                       <table className="w-full text-sm text-left text-slate-500 dark:text-slate-400">
                         <thead className="text-xs text-slate-700 uppercase bg-slate-50 dark:bg-slate-700 dark:text-slate-400">
                           <tr>
-                            <th scope="col" className="px-6 py-3 bg-white z-20 sticky left-0">Order ID</th>
-                            <th scope="col" className="px-6 py-3 bg-white z-20 sticky left-[112px]">Customer Name</th>
+                            <th scope="col" className="px-6 py-3 z-20 sticky left-0">Order ID</th>
+                            <th scope="col" className="px-6 py-3 z-20 sticky left-[112px]">Customer Name</th>
                             {isManagerView && <th scope="col" className="px-6 py-3">Assigned To</th>}
                             <th scope="col" className="px-6 py-3">Date</th>
                             <th scope="col" className="px-6 py-3">Total</th>
@@ -1312,7 +1312,7 @@ export const Orders: React.FC = () => {
                             <th scope="col" className="px-6 py-3">Items</th>
                             <th scope="col" className="px-6 py-3">Status</th>
                             {currentUser?.role !== UserRole.Driver && <th scope="col" className="px-6 py-3">Outstanding</th>}
-                            <th scope="col" className="px-6 py-3 bg-white z-20 sticky right-0">Actions</th>
+                            <th scope="col" className="px-6 py-3 z-20 sticky right-0">Actions</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1334,9 +1334,9 @@ export const Orders: React.FC = () => {
                   }
                 }
                 return (
-                  <tr key={order.id} className="bg-white border-b dark:bg-slate-800 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600">
+                  <tr key={order.id} className="border-b dark:bg-slate-800 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600">
                     <td className="px-6 py-4 font-medium text-slate-900 dark:text-white bg-white z-10 sticky left-0">{order.id}</td>
-                    <td className="px-6 py-4 bg-white z-10 sticky left-[112px]">{order.customerName}</td>
+                    <td className="px-6 py-4 z-10 sticky left-[112px]">{order.customerName}</td>
                     {isManagerView && (
                       <td className="px-6 py-4">
                         {assignedUser ? (
@@ -1395,7 +1395,7 @@ export const Orders: React.FC = () => {
                         </div>
                       </td>
                     )}
-                    <td className="px-6 py-4 flex items-center space-x-3 bg-white z-10 sticky right-0">
+                    <td className="px-6 py-4 flex items-center space-x-3 z-10 sticky right-0">
                     <button onClick={() => openViewModal(order)} className="font-medium text-slate-600 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-300">View</button>
                     {canEdit && (
                       <>
