@@ -413,7 +413,7 @@ export const Dashboard: React.FC = () => {
         </Card>
 
       {/* Stat Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+  <div className="flex flex-wrap gap-4">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
