@@ -995,7 +995,7 @@ export const Orders: React.FC = () => {
         setOrders(prev => prev.map(o => o.id === viewingOrder.id ? { ...o, status: OrderStatus.Delivered } : o));
         await refetchData();
         setTimeout(() => {
-          generateAndDownloadBill();
+          generateAndDownloadBill(viewingOrder.status);
           setBillLoading(false);
         }, 1000);
         return;
@@ -1006,12 +1006,12 @@ export const Orders: React.FC = () => {
       }
     } else {
       // Already delivered: just print, do not touch allocation/stock
-      generateAndDownloadBill();
+      generateAndDownloadBill(viewingOrder.status);
       setBillLoading(false);
     }
   };
 
-  const generateAndDownloadBill = () => {
+  const generateAndDownloadBill = (status) => {
     if (!viewingOrder) return;
     const customer = customers.find(c => c.id === viewingOrder.customerId);
     if (!customer) return;
@@ -1078,14 +1078,23 @@ export const Orders: React.FC = () => {
       </html>
     `;
 
-    // Create a downloadable HTML file
-    const blob = new Blob([billHTML], { type: 'text/html' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `Invoice-${viewingOrder.id}.html`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    if(status !== OrderStatus.Delivered){
+      // Create a downloadable HTML file
+      const blob = new Blob([billHTML], { type: 'text/html' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `Invoice-${viewingOrder.id}.html`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } else {
+      const printWindow = window.open('', '_blank');
+      printWindow.document.write(billHTML);
+      printWindow.document.close();
+      printWindow.focus();
+      printWindow.print();
+      printWindow.close();
+    }
   };
 
 
