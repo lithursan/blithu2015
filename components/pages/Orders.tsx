@@ -10,6 +10,7 @@ import { supabase, fetchOrders } from '../../supabaseClient';
 import { useAuth } from '../../contexts/AuthContext';
 import { exportOrders } from '../../utils/exportUtils';
 import { emailService } from '../../utils/emailService';
+import html2pdf from "html2pdf.js";
 
 const formatCurrency = (amount: number, currency: string) => {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency, minimumFractionDigits: 2 }).format(amount).replace('$', `${currency} `);
@@ -1015,164 +1016,49 @@ export const Orders: React.FC = () => {
     const customer = customers.find(c => c.id === viewingOrder.customerId);
     if (!customer) return;
 
-    // Create a temporary element to render the bill
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      alert('Please allow popups to download the bill.');
-      return;
-    }
-
     // Generate bill HTML content
-    const billHTML = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Invoice - Order ${viewingOrder.id}</title>
-          <style>
-            body { font-family: Arial, sans-serif; margin: 20px; color: #333; }
-            .header { display: flex; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
-            .company-info h1 { margin: 0; font-size: 24px; }
-            .company-info p { margin: 5px 0; font-size: 12px; }
-            .invoice-info { text-align: right; }
-            .invoice-info h2 { margin: 0; font-size: 20px; color: #666; }
-            .customer-section { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin: 20px 0; }
-            .bill-to h3 { margin: 0 0 10px 0; font-size: 14px; color: #666; }
-            .bill-to p { margin: 5px 0; }
-            table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-            th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
-            th { background-color: #f5f5f5; font-weight: bold; }
-            .text-right { text-align: right; }
-            .total-section { margin-top: 20px; text-align: right; }
-            .total-section div { display: flex; justify-content: space-between; margin: 5px 0; }
-            .grand-total { font-size: 18px; font-weight: bold; border-top: 2px solid #333; padding-top: 10px; }
-            .thank-you { text-align: center; margin-top: 40px; font-size: 12px; color: #666; }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <div class="company-info">
-              <h1>${COMPANY_DETAILS.name}</h1>
-              <p>${COMPANY_DETAILS.address}</p>
-              <p>${COMPANY_DETAILS.email} | ${COMPANY_DETAILS.phone}</p>
-            </div>
-            <div class="invoice-info">
-              <h2>INVOICE</h2>
-              <p><strong>Order ID:</strong> ${viewingOrder.id}</p>
-              <p><strong>Date:</strong> ${viewingOrder.date}</p>
-            </div>
-          </div>
-          
-          <div class="customer-section">
-            <div class="bill-to">
-              <h3>Bill To:</h3>
-              <p><strong>${customer.name}</strong></p>
-              <p>${customer.location || ''}</p>
-              <p>${customer.email || ''}</p>
-            </div>
-            <div style="text-align: right;">
-              <p><strong>Status:</strong> ${viewingOrder.status}</p>
-              <p><strong>Expected Delivery:</strong> ${viewingOrder.expectedDeliveryDate || 'N/A'}</p>
-            </div>
-          </div>
+    const tempDiv = document.createElement('div');
+  tempDiv.innerHTML = `
+    <div id="invoice-content" style="font-family: Arial, sans-serif; color: #333;">
+      <h1>${COMPANY_DETAILS.name}</h1>
+      <p>${COMPANY_DETAILS.address}</p>
+      <hr />
+      <h2>Invoice - Order ${viewingOrder.id}</h2>
+      <p><strong>Customer:</strong> ${customer.name}</p>
+      <table border="1" cellspacing="0" cellpadding="8" width="100%">
+        <tr><th>Product</th><th>Qty</th><th>Price</th><th>Subtotal</th></tr>
+        ${(viewingOrder.orderItems ?? []).map(item => {
+          const product = products.find(p => p.id === item.productId);
+          const subtotal = item.price * item.quantity;
+          return `
+            <tr>
+              <td>${product?.name || 'Unknown'}</td>
+              <td>${item.quantity}</td>
+              <td>${formatCurrency(item.price, currency)}</td>
+              <td>${formatCurrency(subtotal, currency)}</td>
+            </tr>
+          `;
+        }).join('')}
+      </table>
+      <h3 style="text-align:right;">Total: ${formatCurrency(viewingOrder.total, currency)}</h3>
+    </div>
+  `;
 
-          <h3>Items Ordered</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Product</th>
-                <th class="text-right">Qty</th>
-                <th class="text-right">Price</th>
-                <th class="text-right">Discount</th>
-                <th class="text-right">Subtotal</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${(viewingOrder.orderItems ?? []).map(item => {
-                const product = products.find(p => p.id === item.productId);
-                if (!product) return '';
-                const subtotal = item.price * item.quantity * (1 - (item.discount || 0) / 100);
-                return `
-                  <tr>
-                    <td>${product.name}</td>
-                    <td class="text-right">${item.quantity}</td>
-                    <td class="text-right">${formatCurrency(item.price, currency)}</td>
-                    <td class="text-right">${item.discount || 0}%</td>
-                    <td class="text-right"><strong>${formatCurrency(subtotal, currency)}</strong></td>
-                  </tr>
-                `;
-              }).join('')}
-            </tbody>
-          </table>
+   document.body.appendChild(tempDiv);
 
-          ${(viewingOrder.backorderedItems && viewingOrder.backorderedItems.length > 0) ? `
-            <h3 style="color: #b45309;">Backordered Items</h3>
-            <table>
-              <thead>
-                <tr>
-                  <th>Product</th>
-                  <th class="text-right">Quantity Held</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${viewingOrder.backorderedItems.map(item => {
-                  const product = products.find(p => p.id === item.productId);
-                  return `
-                    <tr>
-                      <td>${product?.name || 'Unknown Product'}</td>
-                      <td class="text-right">${item.quantity}</td>
-                    </tr>
-                  `;
-                }).join('')}
-              </tbody>
-            </table>
-          ` : ''}
-
-          <div class="total-section">
-            <div>
-              <span>Total Items:</span>
-              <span><strong>${viewingOrder.orderItems?.reduce((sum, item) => sum + item.quantity, 0) ?? 0}</strong></span>
-            </div>
-            <div class="grand-total">
-              <span>Grand Total:</span>
-              <span>${formatCurrency(viewingOrder.total, currency)}</span>
-            </div>
-            <div>
-              <span>Return Amount:</span>
-              <span style="color: #2563eb;"><strong>${formatCurrency(viewingOrder.returnAmount || 0, currency)}</strong></span>
-            </div>
-            <div>
-              <span>Amount Paid:</span>
-              <span style="color: #059669;"><strong>${formatCurrency(editableAmountPaid, currency)}</strong></span>
-            </div>
-            <div>
-              <span>Pending Cheque:</span>
-              <span style="color: #d97706;"><strong>${formatCurrency(editableChequeBalance, currency)}</strong></span>
-            </div>
-            <div>
-              <span>Credit Balance:</span>
-              <span style="color: #dc2626;"><strong>${formatCurrency(editableCreditBalance, currency)}</strong></span>
-            </div>
-            <div style="border-top: 2px solid #333; padding-top: 10px; margin-top: 10px; font-size: 16px;">
-              <span><strong>Balance Due:</strong></span>
-              <span style="color: #dc2626;"><strong>${formatCurrency(editableChequeBalance + editableCreditBalance, currency)}</strong></span>
-            </div>
-          </div>
-
-          <div class="thank-you">
-            <p>Thank you for your business!</p>
-          </div>
-        </body>
-      </html>
-    `;
-
-    printWindow.document.write(billHTML);
-    printWindow.document.close();
-    
-    // Wait for content to load then trigger download
-    printWindow.onload = () => {
-      printWindow.print();
-      printWindow.close();
+    // Convert to PDF and download
+    const element = tempDiv.querySelector('#invoice-content');
+    const options = {
+      margin: 0.5,
+      filename: `Invoice-${viewingOrder.id}.pdf`,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2 },
+      jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
     };
+
+    html2pdf().set(options).from(element).save().then(() => {
+      document.body.removeChild(tempDiv);
+    });
   };
 
   // ...existing code...
