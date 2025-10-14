@@ -1016,50 +1016,78 @@ export const Orders: React.FC = () => {
     const customer = customers.find(c => c.id === viewingOrder.customerId);
     if (!customer) return;
 
-    // Generate bill HTML content
-    const tempDiv = document.createElement('div');
-  tempDiv.innerHTML = `
-    <div id="invoice-content" style="font-family: Arial, sans-serif; color: #333;">
-      <h1>${COMPANY_DETAILS.name}</h1>
-      <p>${COMPANY_DETAILS.address}</p>
-      <hr />
-      <h2>Invoice - Order ${viewingOrder.id}</h2>
-      <p><strong>Customer:</strong> ${customer.name}</p>
-      <table border="1" cellspacing="0" cellpadding="8" width="100%">
-        <tr><th>Product</th><th>Qty</th><th>Price</th><th>Subtotal</th></tr>
-        ${(viewingOrder.orderItems ?? []).map(item => {
-          const product = products.find(p => p.id === item.productId);
-          const subtotal = item.price * item.quantity;
-          return `
-            <tr>
-              <td>${product?.name || 'Unknown'}</td>
-              <td>${item.quantity}</td>
-              <td>${formatCurrency(item.price, currency)}</td>
-              <td>${formatCurrency(subtotal, currency)}</td>
-            </tr>
-          `;
-        }).join('')}
-      </table>
-      <h3 style="text-align:right;">Total: ${formatCurrency(viewingOrder.total, currency)}</h3>
-    </div>
-  `;
+    // Generate the bill HTML as before
+    const billHTML = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Invoice - Order ${viewingOrder.id}</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 20px; color: #333; }
+            .header { display: flex; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
+            .company-info h1 { margin: 0; font-size: 24px; }
+            .invoice-info { text-align: right; }
+            table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+            th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
+            th { background-color: #f5f5f5; font-weight: bold; }
+            .total-section { text-align: right; margin-top: 20px; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="company-info">
+              <h1>${COMPANY_DETAILS.name}</h1>
+              <p>${COMPANY_DETAILS.address}</p>
+            </div>
+            <div class="invoice-info">
+              <h2>INVOICE</h2>
+              <p><strong>Order ID:</strong> ${viewingOrder.id}</p>
+              <p><strong>Date:</strong> ${viewingOrder.date}</p>
+            </div>
+          </div>
+          <p><strong>Customer:</strong> ${customer.name}</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>Qty</th>
+                <th>Price</th>
+                <th>Subtotal</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${(viewingOrder.orderItems ?? []).map(item => {
+                const product = products.find(p => p.id === item.productId);
+                const subtotal = item.price * item.quantity;
+                return `
+                  <tr>
+                    <td>${product?.name || 'Unknown'}</td>
+                    <td>${item.quantity}</td>
+                    <td>${formatCurrency(item.price, currency)}</td>
+                    <td>${formatCurrency(subtotal, currency)}</td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+          <div class="total-section">
+            <p><strong>Grand Total:</strong> ${formatCurrency(viewingOrder.total, currency)}</p>
+          </div>
+          <p style="text-align:center; margin-top:30px;">Thank you for your business!</p>
+        </body>
+      </html>
+    `;
 
-   document.body.appendChild(tempDiv);
-
-    // Convert to PDF and download
-    const element = tempDiv.querySelector('#invoice-content');
-    const options = {
-      margin: 0.5,
-      filename: `Invoice-${viewingOrder.id}.pdf`,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2 },
-      jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
-    };
-
-    html2pdf().set(options).from(element).save().then(() => {
-      document.body.removeChild(tempDiv);
-    });
+    // Create a downloadable HTML file
+    const blob = new Blob([billHTML], { type: 'text/html' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `Invoice-${viewingOrder.id}.html`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
+
 
   // ...existing code...
   // Place the return statement here, after all hooks and functions
