@@ -1018,7 +1018,7 @@ export const Orders: React.FC = () => {
   -----------------------------
   Order: ${viewingOrder.id}
   Date: ${viewingOrder.date}
-  Customer: ${customer.name}
+  Customer: ${viewingOrder.name}
   -----------------------------
   ${viewingOrder.orderItems.map(item => {
     const product = products.find(p => p.id === item.productId);
