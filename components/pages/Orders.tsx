@@ -1088,12 +1088,12 @@ export const Orders: React.FC = () => {
       link.click();
       document.body.removeChild(link);
     } else {
-      const printWindow = window.open('', '_blank');
+      const printWindow = window.open('', '_self');
       printWindow.document.write(billHTML);
       printWindow.document.close();
-      printWindow.focus();
-      printWindow.print();
-      printWindow.close();
+      setTimeout(() => {
+        printWindow.print();
+      }, 500);
     }
   };
 
