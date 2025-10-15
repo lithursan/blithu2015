@@ -1011,6 +1011,25 @@ export const Orders: React.FC = () => {
     }
   };
 
+  const printToRawBT = () => {
+  const data = `
+${COMPANY_DETAILS.name}
+Order ID: ${viewingOrder.id}
+Date: ${viewingOrder.date}
+
+${viewingOrder.orderItems.map(i => {
+  const product = products.find(p => p.id === i.productId);
+  return `${product?.name || ''} x${i.quantity} - ${formatCurrency(i.price, currency)}`;
+}).join('\n')}
+
+Total: ${formatCurrency(viewingOrder.total, currency)}
+Thank you!
+`;
+
+  window.location.href = `rawbt://print?data=${encodeURIComponent(data)}`;
+};
+
+
   const generateAndDownloadBill = (status) => {
     if (!viewingOrder) return;
     const customer = customers.find(c => c.id === viewingOrder.customerId);
@@ -1088,13 +1107,7 @@ export const Orders: React.FC = () => {
       link.click();
       document.body.removeChild(link);
     } else {
-      const printWindow = window.open('', '_blank');
-      printWindow.document.write(billHTML);
-      printWindow.document.close();
-      printWindow.onload = () => {
-        printWindow.focus();
-        printWindow.print();
-      };
+      printToRawBT()
     }
   };
 
