@@ -1011,14 +1011,28 @@ export const Orders: React.FC = () => {
     }
   };
 
-  const printBill = (html) => {
-    if (window.AndroidBridge) {
-      // 'AndroidBridge' is the name you gave the native interface
-      window.AndroidBridge.printBill(html);
-    } else {
-      console.error("Android bridge not available for printing.");
-    }
-  };  
+  const handleRawBTPrint = () => {
+  const text = `
+  ${COMPANY_DETAILS.name}
+  ${COMPANY_DETAILS.address}
+  -----------------------------
+  Order: ${viewingOrder.id}
+  Date: ${viewingOrder.date}
+  Customer: ${customer.name}
+  -----------------------------
+  ${viewingOrder.orderItems.map(item => {
+    const product = products.find(p => p.id === item.productId);
+    return `${product?.name || 'Unknown'} x${item.quantity} - ${formatCurrency(item.price, currency)}`;
+  }).join('\n')}
+  -----------------------------
+  Total: ${formatCurrency(viewingOrder.total, currency)}
+  Thank you!
+  `;
+
+  const encoded = encodeURIComponent(text);
+  window.location.href = `rawbt://print?data=${encoded}`;
+};
+
 
   const generateAndDownloadBill = (status) => {
     if (!viewingOrder) return;
@@ -1097,7 +1111,7 @@ export const Orders: React.FC = () => {
       link.click();
       document.body.removeChild(link);
     } else {
-      printBill(billHTML)
+      handleRawBTPrint()
     }
   };
 
@@ -1872,7 +1886,7 @@ export const Orders: React.FC = () => {
                                   className="text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-4 py-2 text-center disabled:bg-blue-400 disabled:cursor-not-allowed"
                                   disabled={billLoading}
                               >
-                                  {billLoading ? 'Processing...' : (viewingOrder.status === OrderStatus.Delivered ? '📄 Download Bill' : '📄 Download Bill & Confirm Sale')}
+                                  {billLoading ? 'Processing...' : (viewingOrder.status === OrderStatus.Delivered ? '📄 Downloads Bill' : '📄 Downloads Bill & Confirm Sale')}
                               </button>
                             )}
                             <button onClick={closeViewModal} type="button" className="text-white bg-slate-600 hover:bg-slate-700 focus:ring-4 focus:outline-none focus:ring-slate-300 font-medium rounded-lg text-sm px-4 py-2 text-center">
