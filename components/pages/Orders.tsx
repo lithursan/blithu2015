@@ -1011,23 +1011,43 @@ export const Orders: React.FC = () => {
     }
   };
 
-  const printToRawBT = () => {
-  const data = `
-${COMPANY_DETAILS.name}
-Order ID: ${viewingOrder.id}
-Date: ${viewingOrder.date}
+  const handleRawBTPrint = () => {
+  if (!viewingOrder) return;
 
-${viewingOrder.orderItems.map(i => {
-  const product = products.find(p => p.id === i.productId);
-  return `${product?.name || ''} x${i.quantity} - ${formatCurrency(i.price, currency)}`;
-}).join('\n')}
+  const customer = customers.find(c => c.id === viewingOrder.customerId);
+  if (!customer) return;
 
-Total: ${formatCurrency(viewingOrder.total, currency)}
-Thank you!
-`;
+  // Format the bill text (simple thermal receipt style)
+  let text = "";
+  text += `${COMPANY_DETAILS.name}\n`;
+  text += `${COMPANY_DETAILS.address}\n`;
+  text += "-----------------------------\n";
+  text += `Order ID: ${viewingOrder.id}\n`;
+  text += `Date: ${viewingOrder.date}\n`;
+  text += `Customer: ${customer.name}\n`;
+  text += "-----------------------------\n";
 
-  window.location.href = `rawbt://print?data=${encodeURIComponent(data)}`;
+  (viewingOrder.orderItems ?? []).forEach(item => {
+    const product = products.find(p => p.id === item.productId);
+    const name = product?.name || "Unknown";
+    const qty = item.quantity;
+    const price = item.price.toFixed(2);
+    const subtotal = (item.price * item.quantity).toFixed(2);
+    text += `${name}\n  ${qty} x ${price} = ${subtotal}\n`;
+  });
+
+  text += "-----------------------------\n";
+  text += `TOTAL: ${viewingOrder.total.toFixed(2)} ${currency}\n`;
+  text += "-----------------------------\n";
+  text += "Thank you for your business!\n\n\n";
+
+  // Encode for RawBT
+  const encoded = encodeURIComponent(text);
+
+  // Call RawBT app
+  window.location.href = `rawbt://print?data=${encoded}`;
 };
+
 
 
   const generateAndDownloadBill = (status) => {
@@ -1107,7 +1127,7 @@ Thank you!
       link.click();
       document.body.removeChild(link);
     } else {
-      printToRawBT()
+      handleRawBTPrint()
     }
   };
 
