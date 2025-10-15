@@ -1011,44 +1011,14 @@ export const Orders: React.FC = () => {
     }
   };
 
-  const handleRawBTPrint = () => {
-  if (!viewingOrder) return;
-
-  const customer = customers.find(c => c.id === viewingOrder.customerId);
-  if (!customer) return;
-
-  // Format the bill text (simple thermal receipt style)
-  let text = "";
-  text += `${COMPANY_DETAILS.name}\n`;
-  text += `${COMPANY_DETAILS.address}\n`;
-  text += "-----------------------------\n";
-  text += `Order ID: ${viewingOrder.id}\n`;
-  text += `Date: ${viewingOrder.date}\n`;
-  text += `Customer: ${customer.name}\n`;
-  text += "-----------------------------\n";
-
-  (viewingOrder.orderItems ?? []).forEach(item => {
-    const product = products.find(p => p.id === item.productId);
-    const name = product?.name || "Unknown";
-    const qty = item.quantity;
-    const price = item.price.toFixed(2);
-    const subtotal = (item.price * item.quantity).toFixed(2);
-    text += `${name}\n  ${qty} x ${price} = ${subtotal}\n`;
-  });
-
-  text += "-----------------------------\n";
-  text += `TOTAL: ${viewingOrder.total.toFixed(2)} ${currency}\n`;
-  text += "-----------------------------\n";
-  text += "Thank you for your business!\n\n\n";
-
-  // Encode for RawBT
-  const encoded = encodeURIComponent(text);
-
-  // Call RawBT app
-  window.location.href = `rawbt://print?data=${encoded}`;
-};
-
-
+  const printBill = (html) => {
+    if (window.AndroidBridge) {
+      // 'AndroidBridge' is the name you gave the native interface
+      window.AndroidBridge.printBill(html);
+    } else {
+      console.error("Android bridge not available for printing.");
+    }
+  };  
 
   const generateAndDownloadBill = (status) => {
     if (!viewingOrder) return;
@@ -1127,7 +1097,7 @@ export const Orders: React.FC = () => {
       link.click();
       document.body.removeChild(link);
     } else {
-      handleRawBTPrint()
+      printBill(billHTML)
     }
   };
 
