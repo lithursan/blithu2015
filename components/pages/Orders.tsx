@@ -1011,28 +1011,6 @@ export const Orders: React.FC = () => {
     }
   };
 
-  const handleRawBTPrint = () => {
-  const text = `
-  ${COMPANY_DETAILS.name}
-  ${COMPANY_DETAILS.address}
-  -----------------------------
-  Order: ${viewingOrder.id}
-  Date: ${viewingOrder.date}
-  Customer: ${viewingOrder.name}
-  -----------------------------
-  ${viewingOrder.orderItems.map(item => {
-    const product = products.find(p => p.id === item.productId);
-    return `${product?.name || 'Unknown'} x${item.quantity} - ${formatCurrency(item.price, currency)}`;
-  }).join('\n')}
-  -----------------------------
-  Total: ${formatCurrency(viewingOrder.total, currency)}
-  Thank you!
-  `;
-
-  const encoded = encodeURIComponent(text);
-  window.location.href = `rawbt://print?data=${encoded}`;
-};
-
 
   const generateAndDownloadBill = (status) => {
     if (!viewingOrder) return;
@@ -1040,7 +1018,8 @@ export const Orders: React.FC = () => {
     if (!customer) return;
 
     // Generate the bill HTML as before
-    const billHTML = `
+    const billElement = document.createElement("div");
+    billElement.innerHTML = `
       <!DOCTYPE html>
       <html>
         <head>
@@ -1101,18 +1080,7 @@ export const Orders: React.FC = () => {
       </html>
     `;
 
-    if(status !== OrderStatus.Delivered){
-      // Create a downloadable HTML file
-      const blob = new Blob([billHTML], { type: 'text/html' });
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
-      link.download = `Invoice-${viewingOrder.id}.html`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    } else {
-      handleRawBTPrint()
-    }
+    html2pdf().from(billElement).save(`Invoice-${viewingOrder.id}.pdf`);
   };
 
 
