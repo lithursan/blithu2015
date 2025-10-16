@@ -1018,69 +1018,157 @@ export const Orders: React.FC = () => {
     if (!customer) return;
 
     // Generate the bill HTML as before
-    const billElement = document.createElement("div");
-    billElement.innerHTML = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Invoice - Order ${viewingOrder.id}</title>
-          <style>
-            body { font-family: Arial, sans-serif; margin: 20px; color: #333; }
-            .header { display: flex; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
-            .company-info h1 { margin: 0; font-size: 24px; }
-            .invoice-info { text-align: right; }
-            table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-            th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
-            th { background-color: #f5f5f5; font-weight: bold; }
-            .total-section { text-align: right; margin-top: 20px; }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <div class="company-info">
-              <h1>${COMPANY_DETAILS.name}</h1>
-              <p>${COMPANY_DETAILS.address}</p>
-            </div>
-            <div class="invoice-info">
-              <h2>INVOICE</h2>
-              <p><strong>Order ID:</strong> ${viewingOrder.id}</p>
-              <p><strong>Date:</strong> ${viewingOrder.date}</p>
-            </div>
+    const billHTML = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>Invoice - Order ${viewingOrder.id}</title>
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            margin: 5px;
+            color: #333;
+            width: 58mm; /* 👈 fit thermal width */
+          }
+          .header {
+            border-bottom: 1px dashed #000;
+            padding-bottom: 5px;
+            margin-bottom: 8px;
+          }
+          .company-info h1 {
+            margin: 0;
+            font-size: 14px;
+            text-align: center;
+          }
+          .company-info p {
+            margin: 2px 0;
+            font-size: 10px;
+            text-align: center;
+          }
+          .invoice-info {
+            text-align: left;
+            font-size: 10px;
+            margin-top: 4px;
+          }
+          .billTo {
+            font-size: 10px;
+          }
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 10px;
+          }
+          th, td {
+            padding: 4px 0;
+            border-bottom: 1px dashed #ccc;
+          }
+          th {
+            text-align: left;
+          }
+          td.text-right {
+            text-align: right;
+          }
+          .total-section {
+            border-top: 1px dashed #000;
+            margin-top: 6px;
+            padding-top: 4px;
+            font-size: 10px;
+          }
+          .total-section div {
+            display: flex;
+            justify-content: space-between;
+            margin: 2px 0;
+          }
+          .grand-total {
+            font-size: 11px;
+            font-weight: bold;
+            border-top: 1px solid #000;
+            margin-top: 5px;
+            padding-top: 5px;
+          }
+          .thank-you {
+            text-align: center;
+            font-size: 9px;
+            margin-top: 6px;
+            margin-bottom: 10px;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div class="company-info">
+            <h1>${COMPANY_DETAILS.name}</h1>
+            <p>${COMPANY_DETAILS.address}</p>
+            <p>${COMPANY_DETAILS.email}</p>
+            <p>${COMPANY_DETAILS.phone}</p>
           </div>
-          <p><strong>Customer:</strong> ${customer.name}</p>
-          <table>
-            <thead>
-              <tr>
-                <th>Product</th>
-                <th>Qty</th>
-                <th>Price</th>
-                <th>Subtotal</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${(viewingOrder.orderItems ?? []).map(item => {
-                const product = products.find(p => p.id === item.productId);
-                const subtotal = item.price * item.quantity;
-                return `
-                  <tr>
-                    <td>${product?.name || 'Unknown'}</td>
-                    <td>${item.quantity}</td>
-                    <td>${formatCurrency(item.price, currency)}</td>
-                    <td>${formatCurrency(subtotal, currency)}</td>
-                  </tr>
-                `;
-              }).join('')}
-            </tbody>
-          </table>
-          <div class="total-section">
-            <p><strong>Grand Total:</strong> ${formatCurrency(viewingOrder.total, currency)}</p>
+          <div class="invoice-info">
+            <p><strong>Order ID:</strong> ${viewingOrder.id}</p>
+            <p><strong>Date:</strong> ${viewingOrder.date}</p>
+            <p><strong>Status:</strong> ${viewingOrder.status}</p>
           </div>
-          <p style="text-align:center; margin-top:30px;">Thank you for your business!</p>
-        </body>
-      </html>
-    `;
+        </div>
 
-    html2pdf().from(billElement).save(`Invoice-${viewingOrder.id}.pdf`);
+        <p class="billTo"><strong>Bill To:</strong> ${customer.name}</p>
+        <p class="billTo">${customer.location || ''}</p>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th class="text-right">Qty</th>
+              <th class="text-right">Price</th>
+              <th class="text-right">Subtotal</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${(viewingOrder.orderItems ?? []).map(item => {
+              const product = products.find(p => p.id === item.productId);
+              const subtotal = item.price * item.quantity * (1 - (item.discount || 0) / 100);
+              return `
+                <tr>
+                  <td>${product?.name || 'Unknown'}</td>
+                  <td class="text-right">${item.quantity}</td>
+                  <td class="text-right">${formatCurrency(item.price, currency)}</td>
+                  <td class="text-right">${formatCurrency(subtotal, currency)}</td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+
+        <div class="total-section">
+          <div><span>Total Items:</span><span>${viewingOrder.orderItems?.reduce((sum, item) => sum + item.quantity, 0) ?? 0}</span></div>
+          <div><span>Return Amount:</span><span>${formatCurrency(viewingOrder.returnAmount || 0, currency)}</span></div>
+          <div><span>Paid:</span><span>${formatCurrency(editableAmountPaid, currency)}</span></div>
+          <div><span>Cheque:</span><span>${formatCurrency(editableChequeBalance, currency)}</span></div>
+          <div><span>Credit:</span><span>${formatCurrency(editableCreditBalance, currency)}</span></div>
+          <br/>
+          <div class="grand-total"><span>Balance Due:</span><span>${formatCurrency(editableChequeBalance + editableCreditBalance, currency)}</span></div>
+        </div>
+
+        <div class="thank-you">
+          <p>Thank you for your business!</p>
+        </div>
+
+        <div style="margin-top: 50px; text-align: right;">
+          <div style="border-top: 1px solid #000; width: 200px; margin-left: auto;"></div>
+          <p style="margin-bottom: 6px; font-size: 10px;">Customer Signature</p>
+        </div>
+      </body>
+    </html>
+  `;
+ 
+    const options = {
+      margin: 5,
+      filename: `Invoice-${viewingOrder.id}.pdf`,
+      image: { type: "jpeg" as const, quality: 1 },
+      html2canvas: { scale: 2 },
+      jsPDF: { unit: "mm", format: [80, 200], orientation: "portrait" as const }
+    };
+
+    html2pdf().set(options).from(billHTML).save();
   };
 
 
@@ -1854,7 +1942,7 @@ export const Orders: React.FC = () => {
                                   className="text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-4 py-2 text-center disabled:bg-blue-400 disabled:cursor-not-allowed"
                                   disabled={billLoading}
                               >
-                                  {billLoading ? 'Processing...' : (viewingOrder.status === OrderStatus.Delivered ? '📄 Downloads Bill' : '📄 Downloads Bill & Confirm Sale')}
+                                  {billLoading ? 'Processing...' : (viewingOrder.status === OrderStatus.Delivered ? '📄 Download Bill' : '📄 Download Bill & Confirm Sale')}
                               </button>
                             )}
                             <button onClick={closeViewModal} type="button" className="text-white bg-slate-600 hover:bg-slate-700 focus:ring-4 focus:outline-none focus:ring-slate-300 font-medium rounded-lg text-sm px-4 py-2 text-center">
