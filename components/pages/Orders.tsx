@@ -1038,26 +1038,31 @@ export const Orders: React.FC = () => {
           }
           .company-info h1 {
             margin: 0;
-            font-size: 14px;
+            font-size: 16px;
             text-align: center;
+            font-weight: bold;
           }
           .company-info p {
             margin: 2px 0;
-            font-size: 10px;
+            font-size: 12px;
             text-align: center;
+            font-weight: bold;
           }
           .invoice-info {
             text-align: left;
-            font-size: 10px;
+            font-size: 12px;
             margin-top: 4px;
+            font-weight: bold;
           }
           .billTo {
-            font-size: 10px;
+            font-size: 14px;
+            font-weight: bold;
           }
           table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 10px;
+            font-size: 12px;
+            font-weight: bold;
           }
           th, td {
             padding: 4px 0;
@@ -1073,7 +1078,8 @@ export const Orders: React.FC = () => {
             border-top: 1px dashed #000;
             margin-top: 6px;
             padding-top: 4px;
-            font-size: 10px;
+            font-size: 12px;
+            font-weight: bold;
           }
           .total-section div {
             display: flex;
@@ -1081,7 +1087,7 @@ export const Orders: React.FC = () => {
             margin: 2px 0;
           }
           .grand-total {
-            font-size: 11px;
+            font-size: 13px;
             font-weight: bold;
             border-top: 1px solid #000;
             margin-top: 5px;
@@ -1089,9 +1095,10 @@ export const Orders: React.FC = () => {
           }
           .thank-you {
             text-align: center;
-            font-size: 9px;
+            font-size: 11px;
             margin-top: 6px;
             margin-bottom: 10px;
+            font-weight: bold;
           }
         </style>
       </head>
@@ -1154,14 +1161,14 @@ export const Orders: React.FC = () => {
 
         <div style="margin-top: 50px; text-align: right;">
           <div style="border-top: 1px solid #000; width: 200px; margin-left: auto;"></div>
-          <p style="margin-bottom: 6px; font-size: 10px;">Customer Signature</p>
+          <p style="margin-bottom: 6px; font-size: 12px;font-weight: bold;">Customer Signature</p>
         </div>
       </body>
     </html>
   `;
  
     const options = {
-      margin: 5,
+      margin: 1,
       filename: `Invoice-${viewingOrder.id}.pdf`,
       image: { type: "jpeg" as const, quality: 1 },
       html2canvas: { scale: 2 },
