@@ -1130,7 +1130,7 @@ export const Orders: React.FC = () => {
         <table>
           <thead>
             <tr>
-              <th>Product</th>
+              <th style="width: 40%">Product</th>
               <th class="text-right">Qty</th>
               <th class="text-right">Price</th>
               <th class="text-right">Subtotal</th>
