@@ -16,6 +16,13 @@ const formatCurrency = (amount: number, currency: string) => {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency, minimumFractionDigits: 2 }).format(amount).replace('$', `${currency} `);
 };
 
+const format = (amount: number) => {
+  return new Intl.NumberFormat('en-US', { 
+    minimumFractionDigits: 2, 
+    maximumFractionDigits: 2 
+  }).format(amount);
+};
+
 
 // --- Printable Bill Component ---
 interface OrderBillProps {
@@ -84,7 +91,7 @@ const OrderBill: React.FC<OrderBillProps> = ({ order, customer, products, curren
                 <tr key={item.productId} className="border-b">
                   <td className="py-3 px-4">{product.name}</td>
                   <td className="py-3 px-4 text-right">{item.quantity}</td>
-                  <td className="py-3 px-4 text-right">{formatCurrency(item.price, currency)}</td>
+                  <td className="py-3 px-4 text-right">{item.price}</td>
                   <td className="py-3 px-4 text-right">{item.discount || 0}%</td>
                   <td className="py-3 px-4 text-right font-semibold">{formatCurrency(subtotal, currency)}</td>
                 </tr>
@@ -1137,8 +1144,8 @@ export const Orders: React.FC = () => {
                 <tr>
                   <td>${product?.name || 'Unknown'}</td>
                   <td class="text-right">${item.quantity}</td>
-                  <td class="text-right">${formatCurrency(item.price, currency)}</td>
-                  <td class="text-right">${formatCurrency(subtotal, currency)}</td>
+                  <td class="text-right">${format(item.price)}</td>
+                  <td class="text-right">${format(subtotal)}</td>
                 </tr>
               `;
             }).join('')}
