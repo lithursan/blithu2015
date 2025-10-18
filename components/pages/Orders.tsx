@@ -417,7 +417,6 @@ export const Orders: React.FC = () => {
     return filteredOrders.reduce((acc, order) => {
       let supplierName = 'Unassigned';
       if ((order.orderItems ?? []).length > 0) {
-        // Determine primary supplier based on highest value item in order
         let primaryProductInfo = { supplier: 'Unassigned', value: 0 };
         (order.orderItems ?? []).forEach(item => {
             const product = products.find(p => p.id === item.productId);
@@ -436,7 +435,7 @@ export const Orders: React.FC = () => {
       acc[supplierName].push(order);
       return acc;
     }, {} as Record<string, Order[]>);
-  }, [filteredOrders, products]);
+  }, [filteredOrders, products])
 
   const openCreateModal = () => {
     setCurrentOrder(null);
