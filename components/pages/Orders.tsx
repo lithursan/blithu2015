@@ -417,6 +417,7 @@ export const Orders: React.FC = () => {
     return filteredOrders.reduce((acc, order) => {
       let supplierName = 'Unassigned';
       if ((order.orderItems ?? []).length > 0) {
+        // Determine primary supplier based on highest value item in order
         let primaryProductInfo = { supplier: 'Unassigned', value: 0 };
         (order.orderItems ?? []).forEach(item => {
             const product = products.find(p => p.id === item.productId);
@@ -435,7 +436,7 @@ export const Orders: React.FC = () => {
       acc[supplierName].push(order);
       return acc;
     }, {} as Record<string, Order[]>);
-  }, [filteredOrders, products])
+  }, [filteredOrders, products]);
 
   const openCreateModal = () => {
     setCurrentOrder(null);
@@ -639,6 +640,13 @@ export const Orders: React.FC = () => {
         return num > max ? num : max;
       }, 0);
 
+      // compute cost amount from products' costPrice * qty (for inventory cost tracking)
+      const costAmount = newOrderItems.reduce((sum, item) => {
+        const prod = products.find(p => p.id === item.productId);
+        const cp = prod && typeof prod.costPrice === 'number' ? prod.costPrice : 0;
+        return sum + (cp * (item.quantity || 0));
+      }, 0);
+
       const newOrder = {
         id: `ORD${(maxIdNum + 1).toString().padStart(3, '0')}`,
         customerid: customer.id,
@@ -650,15 +658,51 @@ export const Orders: React.FC = () => {
         expecteddeliverydate: expectedDeliveryDate || null,
         orderdate: expectedDeliveryDate || new Date().toISOString().slice(0, 10),
         totalamount: total,
+        costamount: costAmount,
         status: OrderStatus.Pending,
         notes: orderNotes || '',
         chequebalance: 0,
         creditbalance: 0,
       };
       
-      const { error } = await supabase.from('orders').insert([newOrder]);
-      if (error) {
-        alert('Error adding order: ' + error.message);
+      // Try inserting with costamount; if the DB doesn't have the column yet, retry without it
+      let insertPayload: any = { ...newOrder };
+      try {
+        // Log the payload so we can inspect what is being POSTed to Supabase
+        console.log('Inserting order payload to Supabase:', insertPayload);
+
+        // Use .select('*') to get the representation back and surface more detailed errors
+        const { data: insertData, error } = await supabase.from('orders').insert([insertPayload]).select('*');
+        console.log('Supabase insert response:', { insertData, error });
+
+        if (error) {
+          // Provide richer debug info to the developer
+          console.error('Supabase insert error details:', {
+            message: error.message,
+            details: (error as any).details,
+            hint: (error as any).hint,
+            code: (error as any).code,
+          });
+
+          const msg = (error.message || '').toLowerCase();
+          if (msg.includes("could not find the 'costamount' column") || msg.includes('costamount')) {
+            // Retry without costamount
+            const payloadNoCost = ((({ costamount, ...rest }) => rest)(insertPayload));
+            console.log('Retrying insert without costamount:', payloadNoCost);
+            const { data: retryData, error: retryError } = await supabase.from('orders').insert([payloadNoCost]).select('*');
+            console.log('Supabase retry response:', { retryData, retryError });
+            if (retryError) {
+              alert('Error adding order after retry: ' + retryError.message + '\n\nSee console for details.');
+              return;
+            }
+          } else {
+            alert('Error adding order: ' + error.message + '\n\nSee console for details.');
+            return;
+          }
+        }
+      } catch (err) {
+        console.error('Unexpected insert exception:', err);
+        alert('Unexpected error adding order. Check console for details.');
         return;
       }
       
@@ -689,15 +733,37 @@ export const Orders: React.FC = () => {
         expecteddeliverydate: expectedDeliveryDate || null,
         orderdate: expectedDeliveryDate || currentOrder.orderdate || new Date().toISOString().slice(0, 10),
         totalamount: total,
+          // update costamount when editing
+          costamount: newOrderItems.reduce((sum, item) => {
+            const prod = products.find(p => p.id === item.productId);
+            const cp = prod && typeof prod.costPrice === 'number' ? prod.costPrice : 0;
+            return sum + (cp * (item.quantity || 0));
+          }, 0),
         status: currentOrder.status ?? OrderStatus.Pending,
         notes: orderNotes || '',
         chequebalance: currentOrder.chequeBalance || 0,
         creditbalance: currentOrder.creditBalance || 0,
       };
       
-      const { error } = await supabase.from('orders').update(updatedOrder).eq('id', currentOrder.id);
-      if (error) {
-        alert('Error updating order: ' + error.message);
+      try {
+        const { error } = await supabase.from('orders').update(updatedOrder).eq('id', currentOrder.id);
+        if (error) {
+          const msg = (error.message || '').toLowerCase();
+          if (msg.includes("could not find the 'costamount' column") || msg.includes('costamount')) {
+            // Retry without costamount
+            const { error: retryError } = await supabase.from('orders').update(((({ costamount, ...rest }) => rest)(updatedOrder))).eq('id', currentOrder.id);
+            if (retryError) {
+              alert('Error updating order after retry: ' + retryError.message);
+              return;
+            }
+          } else {
+            alert('Error updating order: ' + error.message);
+            return;
+          }
+        }
+      } catch (err) {
+        console.error('Unexpected update error:', err);
+        alert('Unexpected error updating order. Check console for details.');
         return;
       }
       
@@ -1178,7 +1244,8 @@ export const Orders: React.FC = () => {
       filename: `Invoice-${viewingOrder.id}.pdf`,
       image: { type: "jpeg" as const, quality: 1 },
       html2canvas: { scale: 2 },
-      jsPDF: { unit: "mm", format: [80, 200], orientation: "portrait" as const }
+      // Cast format to a fixed tuple to satisfy TypeScript definitions
+      jsPDF: { unit: "mm", format: [80, 200] as [number, number], orientation: "portrait" as const }
     };
 
     html2pdf().set(options).from(billHTML).save();

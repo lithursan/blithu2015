@@ -313,3 +313,27 @@ export const mockDriverSales: DriverSale[] = [
         notes: 'Promised to pay balance by EOD'
     }
 ];
+
+export const mockExpenses = [
+  {
+    id: 'EXP001',
+    date: new Date().toISOString().split('T')[0],
+    amount: 1250.5,
+    category: 'Fuel',
+    note: 'Fuel for delivery vehicle (route A)',
+  },
+  {
+    id: 'EXP002',
+    date: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString().split('T')[0],
+    amount: 4500,
+    category: 'Purchase',
+    note: 'Emergency stock purchase from local supplier',
+  },
+  {
+    id: 'EXP003',
+    date: new Date(Date.now() - 1000 * 60 * 60 * 24 * 3).toISOString().split('T')[0],
+    amount: 300,
+    category: 'Misc',
+    note: 'Office supplies and stationery',
+  },
+];

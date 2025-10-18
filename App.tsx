@@ -5,6 +5,7 @@ import { Header } from './components/layout/Header';
 import { Dashboard } from './components/pages/Dashboard';
 import { Products } from './components/pages/Products';
 import { Orders } from './components/pages/Orders';
+import { Deliveries } from './components/pages/Deliveries';
 import { Customers } from './components/pages/Customers';
 import { UserManagement } from './components/pages/UserManagement';
 import { Settings } from './components/pages/Settings';
@@ -12,6 +13,7 @@ import { Login } from './components/pages/Login';
 import { Drivers } from './components/pages/Drivers';
 import { Suppliers } from './components/pages/Suppliers';
 import { Collections } from './components/pages/Collections';
+import Expenses from './components/pages/Expenses';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { DataProvider } from './contexts/DataContext';
@@ -19,6 +21,13 @@ import { DataProvider } from './contexts/DataContext';
 const ProtectedRoute = () => {
   const { currentUser } = useAuth();
   return currentUser ? <MainLayout /> : <Navigate to="/login" />;
+};
+
+const RoleProtectedRoute: React.FC<{ allowedRoles: string[]; element: React.ReactElement }> = ({ allowedRoles, element }) => {
+  const { currentUser } = useAuth();
+  if (!currentUser) return <Navigate to="/login" />;
+  if (!allowedRoles.includes(currentUser.role)) return <Navigate to="/" />;
+  return element;
 };
 
 const MainLayout = () => {
@@ -36,10 +45,12 @@ const MainLayout = () => {
                         <Route path="/" element={<Dashboard />} />
                         <Route path="/products" element={<Products />} />
                         <Route path="/orders" element={<Orders />} />
+                        <Route path="/deliveries" element={<RoleProtectedRoute allowedRoles={["Admin", "Manager"]} element={<Deliveries />} />} />
                         <Route path="/customers" element={<Customers />} />
                         <Route path="/suppliers" element={<Suppliers />} />
                         <Route path="/collections" element={<Collections />} />
                         <Route path="/drivers" element={<Drivers />} />
+                        <Route path="/expenses" element={<RoleProtectedRoute allowedRoles={["Admin", "Manager"]} element={<Expenses />} />} />
                         <Route path="/users" element={<UserManagement />} />
                         <Route path="/settings" element={<Settings />} />
                         {/* Redirect any other nested routes to dashboard */}

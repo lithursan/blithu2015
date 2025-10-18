@@ -304,8 +304,9 @@ export const Dashboard: React.FC = () => {
     // Stats based on filtered data
     // Calculate total cost for delivered orders in current period
     const totalSales = filteredOrders.reduce((sum, order) => order.status === 'Delivered' ? sum + order.total : sum, 0);
-    // Sum all orders' cost price (order-wise), not just delivered
+    // Sum cost only for delivered orders in the current filtered period
     const totalCost = filteredOrders.reduce((sum, order) => {
+      if (order.status !== OrderStatus.Delivered) return sum;
       if (!order.orderItems) return sum;
       const orderCost = order.orderItems.reduce((itemSum, item) => {
         const product = safeProducts.find(p => p.id === item.productId);
@@ -363,6 +364,35 @@ export const Dashboard: React.FC = () => {
     // Stats that remain unfiltered (inventory-wide)
     const totalProducts = products.length;
     const lowStockItems = products.filter(p => p.stock < 100).length;
+
+  // Total inventory value (sum of costPrice * stock) - unfiltered
+  const totalInventoryValue = safeProducts.reduce((sum, p) => {
+    const cost = (typeof p.costPrice === 'number' && !isNaN(p.costPrice)) ? p.costPrice : 0;
+    const stock = (typeof p.stock === 'number' && !isNaN(p.stock)) ? p.stock : 0;
+    return sum + (cost * stock);
+  }, 0);
+
+  // Modal state for inventory/delivery cost details
+  const [isInventoryModalOpen, setInventoryModalOpen] = useState(false);
+
+  // Today's delivered orders (used for cost breakdown)
+  const todayStr = new Date().toISOString().split('T')[0];
+  const todaysDeliveredOrders = orders.filter(o => {
+    try {
+      const d = new Date(o.date).toISOString().split('T')[0];
+      return d === todayStr && o.status === OrderStatus.Delivered;
+    } catch { return false; }
+  });
+
+  const todaysDeliveryCost = todaysDeliveredOrders.reduce((sum, order) => {
+    if (!order.orderItems) return sum;
+    const cost = order.orderItems.reduce((s, item) => {
+      const prod = safeProducts.find(p => p.id === item.productId);
+      const cp = (prod && typeof prod.costPrice === 'number') ? prod.costPrice : 0;
+      return s + (cp * (item.quantity || 0));
+    }, 0);
+    return sum + cost;
+  }, 0);
 
     return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-8">
@@ -474,18 +504,120 @@ export const Dashboard: React.FC = () => {
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>Total Cost</CardTitle>
-            <CardDescription>Cost of goods for delivered orders</CardDescription>
+            <CardTitle>
+              <button onClick={() => setInventoryModalOpen(true)} className="text-left w-full">
+                Total Inventory
+              </button>
+            </CardTitle>
+            <CardDescription>Sum of product cost × stock (unfiltered). Click for today's delivered cost.</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="flex justify-between items-start">
               <div>
-                <p className="text-3xl font-bold text-slate-900 dark:text-white">{formatCurrency(totalCost, currency)}</p>
-                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Current period</p>
+                <button onClick={() => setInventoryModalOpen(true)} className="text-3xl font-bold text-slate-900 dark:text-white text-left">
+                  {formatCurrency(totalInventoryValue, currency)}
+                </button>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Current inventory value</p>
               </div>
             </div>
           </CardContent>
         </Card>
+
+        {/* Inventory / Today's delivery cost modal */}
+        {isInventoryModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/50" onClick={() => setInventoryModalOpen(false)} />
+            <div className="relative bg-white dark:bg-slate-800 rounded-lg w-full max-w-3xl p-6 z-10">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-semibold">Today's Delivered Cost Breakdown</h3>
+                <button onClick={() => setInventoryModalOpen(false)} className="text-sm text-slate-600 dark:text-slate-300">Close</button>
+              </div>
+              <div className="max-h-72 overflow-y-auto space-y-4">
+                {/* Today's Delivered Orders */}
+                <div>
+                  <h4 className="font-medium">Today's Delivered Cost</h4>
+                  {todaysDeliveredOrders.length === 0 ? (
+                    <p className="text-sm text-slate-500">No delivered orders for today.</p>
+                  ) : (
+                    <table className="w-full text-sm text-left">
+                      <thead className="text-xs text-slate-700 uppercase bg-slate-50 dark:bg-slate-700 dark:text-slate-400">
+                        <tr>
+                          <th className="px-3 py-2">Order ID</th>
+                          <th className="px-3 py-2">Customer</th>
+                          <th className="px-3 py-2">Cost</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {todaysDeliveredOrders.map(order => {
+                          const cost = order.orderItems?.reduce((s, item) => {
+                            const prod = safeProducts.find(p => p.id === item.productId);
+                            const cp = (prod && typeof prod.costPrice === 'number') ? prod.costPrice : 0;
+                            return s + (cp * (item.quantity || 0));
+                          }, 0) || 0;
+                          return (
+                            <tr key={order.id} className="border-b dark:border-slate-700">
+                              <td className="px-3 py-2 font-medium">{order.id}</td>
+                              <td className="px-3 py-2">{order.customerName}</td>
+                              <td className="px-3 py-2">{formatCurrency(cost, currency)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      <tfoot>
+                        <tr>
+                          <td className="px-3 py-2 font-semibold">Total</td>
+                          <td />
+                          <td className="px-3 py-2 font-semibold">{formatCurrency(todaysDeliveryCost, currency)}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  )}
+                </div>
+
+                {/* Filtered period delivered cost */}
+                <div>
+                  <h4 className="font-medium">Current Period Delivered Cost</h4>
+                  {filteredOrders.filter(o => o.status === OrderStatus.Delivered).length === 0 ? (
+                    <p className="text-sm text-slate-500">No delivered orders in the current period / filters.</p>
+                  ) : (
+                    <table className="w-full text-sm text-left">
+                      <thead className="text-xs text-slate-700 uppercase bg-slate-50 dark:bg-slate-700 dark:text-slate-400">
+                        <tr>
+                          <th className="px-3 py-2">Order ID</th>
+                          <th className="px-3 py-2">Customer</th>
+                          <th className="px-3 py-2">Cost</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredOrders.filter(o => o.status === OrderStatus.Delivered).map(order => {
+                          const cost = order.orderItems?.reduce((s, item) => {
+                            const prod = safeProducts.find(p => p.id === item.productId);
+                            const cp = (prod && typeof prod.costPrice === 'number') ? prod.costPrice : 0;
+                            return s + (cp * (item.quantity || 0));
+                          }, 0) || 0;
+                          return (
+                            <tr key={order.id} className="border-b dark:border-slate-700">
+                              <td className="px-3 py-2 font-medium">{order.id}</td>
+                              <td className="px-3 py-2">{order.customerName}</td>
+                              <td className="px-3 py-2">{formatCurrency(cost, currency)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      <tfoot>
+                        <tr>
+                          <td className="px-3 py-2 font-semibold">Total</td>
+                          <td />
+                          <td className="px-3 py-2 font-semibold">{formatCurrency(totalCost, currency)}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         <Card>
           <CardHeader>
             <CardTitle>Total Orders</CardTitle>
@@ -498,6 +630,21 @@ export const Dashboard: React.FC = () => {
                 <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Current period</p>
               </div>
               <ChangeIndicator change={ordersChange} />
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Delivered Cost</CardTitle>
+            <CardDescription>Cost of delivered orders (current period)</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="text-3xl font-bold text-slate-900 dark:text-white">{formatCurrency(totalCost, currency)}</p>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Current period delivered cost</p>
+              </div>
+              <ChangeIndicator change={calculateChange(totalCost, 0)} />
             </div>
           </CardContent>
         </Card>

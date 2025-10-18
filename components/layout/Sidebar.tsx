@@ -24,7 +24,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ isSidebarOpen, closeSidebar })
     if (item.path === '/users') {
       return currentUser?.role === UserRole.Admin;
     }
-     if (item.path === '/drivers' || item.path === '/suppliers' || item.path === '/collections') {
+    // Limit deliveries and expenses to Admin and Manager
+    if (item.path === '/deliveries' || item.path === '/expenses') {
+      return currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Manager;
+    }
+    if (item.path === '/drivers' || item.path === '/suppliers' || item.path === '/collections') {
       return currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Manager;
     }
     return true;

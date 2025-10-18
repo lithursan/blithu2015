@@ -442,6 +442,78 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 }));
                 setUsers(mappedUsers);
             }
+            // Fetch driver_allocations
+            try {
+                const { data: allocationsData, error: allocationsError } = await supabase.from('driver_allocations').select('*');
+                if (!allocationsError && allocationsData) {
+                    const mappedAllocations = allocationsData.map((row: any) => ({
+                        id: row.id,
+                        driverId: row.driver_id ?? row.driverid,
+                        driverName: row.driver_name ?? row.drivername,
+                        date: row.date,
+                        allocatedItems: (() => {
+                            if (row.allocated_items) {
+                                if (typeof row.allocated_items === 'string') {
+                                    try { return JSON.parse(row.allocated_items); } catch { return []; }
+                                }
+                                return row.allocated_items;
+                            }
+                            if (row.allocateditems) {
+                                if (typeof row.allocateditems === 'string') {
+                                    try { return JSON.parse(row.allocateditems); } catch { return []; }
+                                }
+                                return row.allocateditems;
+                            }
+                            return [];
+                        })(),
+                        returnedItems: (() => {
+                            if (row.returned_items) {
+                                if (typeof row.returned_items === 'string') {
+                                    try { return JSON.parse(row.returned_items); } catch { return null; }
+                                }
+                                return row.returned_items;
+                            }
+                            if (row.returneditems) {
+                                if (typeof row.returneditems === 'string') {
+                                    try { return JSON.parse(row.returneditems); } catch { return null; }
+                                }
+                                return row.returneditems;
+                            }
+                            return null;
+                        })(),
+                        salesTotal: row.sales_total ?? row.salestotal ?? 0,
+                        status: row.status ?? 'Allocated',
+                    }));
+                    setDriverAllocations(mappedAllocations);
+                }
+            } catch (err) {
+                console.error('Error fetching driver_allocations in refetchData:', err);
+            }
+
+            // Fetch driver_sales
+            try {
+                const { data: salesData, error: salesError } = await supabase.from('driver_sales').select('*');
+                if (!salesError && salesData) {
+                    const mappedSales = salesData.map((row: any) => ({
+                        id: row.id,
+                        driverId: row.driver_id,
+                        allocationId: row.allocation_id,
+                        date: row.date,
+                        soldItems: typeof row.sold_items === 'string' ? JSON.parse(row.sold_items) : (row.sold_items || []),
+                        total: row.total || 0,
+                        customerName: row.customer_name,
+                        customerId: row.customer_id,
+                        amountPaid: row.amount_paid || 0,
+                        creditAmount: row.credit_amount || 0,
+                        paymentMethod: row.payment_method,
+                        paymentReference: row.payment_reference,
+                        notes: row.notes,
+                    }));
+                    setDriverSales(mappedSales);
+                }
+            } catch (err) {
+                console.error('Error fetching driver_sales in refetchData:', err);
+            }
         } catch (error) {
             console.error('Refetch data error:', error);
         }

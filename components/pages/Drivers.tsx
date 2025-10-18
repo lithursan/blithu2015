@@ -37,13 +37,14 @@ export const Drivers: React.FC = () => {
     const currency = currentUser?.settings.currency || 'LKR';
 
     const [selectedDriver, setSelectedDriver] = useState<User | null>(null);
+    const [selectedDate, setSelectedDate] = useState<string>(todayStr);
     const [modal, setModal] = useState<'closed' | 'allocate' | 'log'>('closed');
     const [allocationQuantities, setAllocationQuantities] = useState<Record<string, number>>({});
     const [isEditMode, setIsEditMode] = useState(false);
     const [allocationSupplier, setAllocationSupplier] = useState<string>('');
     
     const drivers = useMemo(() => users.filter(u => u.role === UserRole.Driver && u.status === UserStatus.Active), [users]);
-    const todayAllocations = useMemo(() => driverAllocations.filter(alloc => alloc.date === todayStr), [driverAllocations]);
+    const todayAllocations = useMemo(() => driverAllocations.filter(alloc => alloc.date === selectedDate), [driverAllocations, selectedDate]);
 
     // Move fallback UI after all hooks
     let fallbackUI: React.ReactNode = null;
@@ -244,7 +245,7 @@ export const Drivers: React.FC = () => {
                     id: crypto.randomUUID(),
                     driverId: selectedDriver.id,
                     driverName: selectedDriver.name,
-                    date: todayStr,
+                    date: selectedDate,
                     allocatedItems: newAllocatedItems,
                     returnedItems: null,
                     salesTotal: 0,
@@ -347,7 +348,10 @@ export const Drivers: React.FC = () => {
                     >
                         📋 Allocations Excel
                     </button>
-                    <p className="text-lg text-slate-500 dark:text-slate-400">Date: {todayStr}</p>
+                    <div className="flex items-center gap-3">
+                        <label htmlFor="selectedDate" className="text-sm text-slate-500 dark:text-slate-400">Date:</label>
+                        <input id="selectedDate" name="selectedDate" type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="p-2 border rounded bg-white dark:bg-slate-700" />
+                    </div>
                 </div>
             </div>
 
@@ -434,6 +438,7 @@ export const Drivers: React.FC = () => {
                                         <input
                                             type="number"
                                             id={`alloc-${product.id}`}
+                                            name={`alloc-${product.id}`}
                                             value={allocationQuantities[product.id] || ''}
                                             onChange={e => handleAllocationChange(product.id, parseInt(e.target.value, 10) || 0, maxAllocatable)}
                                             min="0"
@@ -894,11 +899,25 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
     }
     
     const collections = salesForAllocation.reduce((acc, sale) => {
-        acc.total += sale.total;
-        acc.paid += sale.amountPaid;
-        acc.credit += sale.creditAmount;
+        acc.total += sale.total || 0;
+        acc.paid += sale.amountPaid || 0;
+        acc.credit += sale.creditAmount || 0;
+        const method = sale.paymentMethod || '';
+        // Breakdown collected amounts by payment method when possible
+        if (method === 'Cheque') {
+            acc.cheque += sale.amountPaid || 0;
+        } else if (method === 'Cash') {
+            acc.cash += sale.amountPaid || 0;
+        } else if (method === 'Bank') {
+            acc.bank += sale.amountPaid || 0;
+        } else if (method === 'Mixed') {
+            // Mixed payments: amountPaid may include cheque/bank/cash combined
+            acc.mixed += sale.amountPaid || 0;
+        } else if (method === 'Credit') {
+            // credit only - amountPaid is likely 0
+        }
         return acc;
-    }, { total: 0, paid: 0, credit: 0 });
+    }, { total: 0, paid: 0, credit: 0, cheque: 0, cash: 0, bank: 0, mixed: 0 });
 
     return (
       <Modal isOpen={true} onClose={onClose} title={`Daily Log: ${driver.name} (${todayStr})`}>
@@ -918,9 +937,10 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
                             Add Sale
                          </button>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-center">
                         <div className="p-4 rounded-lg bg-blue-50 dark:bg-blue-900/40"><p className="text-xs text-blue-600 dark:text-blue-300">Total Sales</p><p className="text-xl font-bold text-blue-800 dark:text-blue-200">{formatCurrency(collections.total, currency)}</p></div>
                         <div className="p-4 rounded-lg bg-green-50 dark:bg-green-900/40"><p className="text-xs text-green-600 dark:text-green-300">Total Collected</p><p className="text-xl font-bold text-green-800 dark:text-green-200">{formatCurrency(collections.paid, currency)}</p></div>
+                        <div className="p-4 rounded-lg bg-yellow-50 dark:bg-yellow-900/40"><p className="text-xs text-yellow-600 dark:text-yellow-300">Collected (Cheque)</p><p className="text-xl font-bold text-yellow-800 dark:text-yellow-200">{formatCurrency(collections.cheque, currency)}</p></div>
                         <div className="p-4 rounded-lg bg-red-50 dark:bg-red-900/40"><p className="text-xs text-red-600 dark:text-red-300">Outstanding Credit</p><p className="text-xl font-bold text-red-800 dark:text-red-200">{formatCurrency(collections.credit, currency)}</p></div>
                     </div>
                      <div className="space-y-3">
@@ -976,6 +996,8 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
                                             <td className={`py-1 px-4 text-center ${discrepancy ? 'bg-red-100 dark:bg-red-900/50' : ''}`}>
                                                 <input
                                                     type="number"
+                                                    id={`returned-${productId}`}
+                                                    name={`returned-${productId}`}
                                                     value={returnedQuantities[productId] || ''}
                                                     onChange={e => handleReturnedQtyChange(productId, parseInt(e.target.value, 10) || 0)}
                                                     placeholder="0"
@@ -1015,12 +1037,14 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
                              return (
                                  <div key={productId} className="flex justify-between items-center bg-slate-50 dark:bg-slate-700/50 p-2 rounded-lg">
                                     <p>{product.name} <span className="text-xs text-slate-500">(In van: {remaining})</span></p>
-                                     <input
-                                        type="number" min="0" max={remaining}
-                                        value={saleQuantities[productId] || ''}
-                                        onChange={e => handleSaleQuantityChange(productId, parseInt(e.target.value) || 0)}
-                                        className="w-20 p-1 border rounded-md text-center dark:bg-slate-600 dark:border-slate-500"
-                                     />
+                                                 <input
+                                                     type="number" min="0" max={remaining}
+                                                     id={`saleqty-${productId}`}
+                                                     name={`saleqty-${productId}`}
+                                                     value={saleQuantities[productId] || ''}
+                                                     onChange={e => handleSaleQuantityChange(productId, parseInt(e.target.value) || 0)}
+                                                     className="w-20 p-1 border rounded-md text-center dark:bg-slate-600 dark:border-slate-500"
+                                                 />
                                  </div>
                              )
                         })}
