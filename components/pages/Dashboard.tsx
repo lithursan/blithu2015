@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { SalesChart } from '../charts/SalesChart';
@@ -6,6 +6,7 @@ import { TopProductsChart } from '../charts/TopProductsChart';
 import { OrderStatus, Product, UserRole } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
+import { supabase } from '../../supabaseClient';
 
 const getStatusBadgeVariant = (status: OrderStatus) => {
     switch (status) {
@@ -19,6 +20,266 @@ const getStatusBadgeVariant = (status: OrderStatus) => {
 
 const formatCurrency = (amount: number, currency: string) => {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency, minimumFractionDigits: 0 }).format(amount).replace('$', `${currency} `);
+};
+
+// Expenses Card Component
+const ExpensesCard: React.FC<{ currency: string; dateRange: { start: string; end: string } }> = ({ currency, dateRange }) => {
+    const [expenses, setExpenses] = useState<any[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    const fetchExpenses = async () => {
+        try {
+            setLoading(true);
+            const { data, error } = await supabase.from('expenses').select('*').order('date', { ascending: false });
+            
+            if (error) {
+                // If error, try localStorage fallback
+                try {
+                    const local = localStorage.getItem('app_expenses_v1');
+                    setExpenses(local ? JSON.parse(local) : []);
+                } catch {
+                    setExpenses([]);
+                }
+            } else {
+                setExpenses(data || []);
+            }
+        } catch (error) {
+            console.error('Error fetching expenses:', error);
+            setExpenses([]);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchExpenses();
+    }, []);
+
+    // Filter expenses based on date range
+    const filteredExpenses = useMemo(() => {
+        if (!dateRange.start && !dateRange.end) {
+            // If no date filter, show current month
+            const currentMonth = new Date().getMonth();
+            const currentYear = new Date().getFullYear();
+            return expenses.filter(expense => {
+                const expenseDate = new Date(expense.date);
+                return expenseDate.getMonth() === currentMonth && expenseDate.getFullYear() === currentYear;
+            });
+        }
+
+        return expenses.filter(expense => {
+            const expenseDate = new Date(expense.date);
+            
+            if (dateRange.start && expenseDate < new Date(dateRange.start)) {
+                return false;
+            }
+            
+            if (dateRange.end) {
+                const endDate = new Date(dateRange.end);
+                endDate.setDate(endDate.getDate() + 1); // Make end date inclusive
+                if (expenseDate >= endDate) {
+                    return false;
+                }
+            }
+            
+            return true;
+        });
+    }, [expenses, dateRange]);
+
+    // Calculate total expenses
+    const totalExpenses = filteredExpenses.reduce((sum, expense) => sum + (expense.amount || 0), 0);
+
+    // Calculate previous period for comparison
+    const previousPeriodExpenses = useMemo(() => {
+        if (!dateRange.start || !dateRange.end) {
+            // Default: previous month comparison
+            const lastMonth = new Date();
+            lastMonth.setMonth(lastMonth.getMonth() - 1);
+            
+            return expenses.filter(expense => {
+                const expenseDate = new Date(expense.date);
+                return expenseDate.getMonth() === lastMonth.getMonth() && 
+                       expenseDate.getFullYear() === lastMonth.getFullYear();
+            });
+        }
+
+        // Calculate previous period based on selected date range
+        const startDate = new Date(dateRange.start);
+        const endDate = new Date(dateRange.end);
+        const periodDuration = endDate.getTime() - startDate.getTime();
+        
+        const prevEndDate = new Date(startDate.getTime() - 1);
+        const prevStartDate = new Date(prevEndDate.getTime() - periodDuration);
+
+        return expenses.filter(expense => {
+            const expenseDate = new Date(expense.date);
+            return expenseDate >= prevStartDate && expenseDate <= prevEndDate;
+        });
+    }, [expenses, dateRange]);
+
+    const prevTotalExpenses = previousPeriodExpenses.reduce((sum, expense) => sum + (expense.amount || 0), 0);
+    
+    // Calculate percentage change
+    const expensesChange = prevTotalExpenses > 0 ? ((totalExpenses - prevTotalExpenses) / prevTotalExpenses) * 100 : 0;
+
+    return (
+        <Card className="border-2 border-red-200 dark:border-red-800">
+          <CardHeader>
+            <CardTitle className="text-red-700 dark:text-red-400">Total Expenses</CardTitle>
+            <CardDescription>Total expenses for current period</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex justify-between items-start">
+              <div>
+                {loading ? (
+                  <p className="text-3xl font-bold text-red-600">Loading...</p>
+                ) : (
+                  <p className="text-3xl font-bold text-red-600">{formatCurrency(totalExpenses, currency)}</p>
+                )}
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                  {filteredExpenses.length} expense{filteredExpenses.length !== 1 ? 's' : ''}
+                </p>
+              </div>
+              <ChangeIndicator change={expensesChange} />
+            </div>
+          </CardContent>
+        </Card>
+    );
+};
+
+// Net Profit Card Component - Admin Only
+const NetProfitCard: React.FC<{ 
+    currency: string; 
+    dateRange: { start: string; end: string }; 
+    totalSales: number; 
+    totalCost: number; 
+}> = ({ currency, dateRange, totalSales, totalCost }) => {
+    const [expenses, setExpenses] = useState<any[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    const fetchExpenses = async () => {
+        try {
+            setLoading(true);
+            const { data, error } = await supabase.from('expenses').select('*').order('date', { ascending: false });
+            
+            if (error) {
+                // If error, try localStorage fallback
+                try {
+                    const local = localStorage.getItem('app_expenses_v1');
+                    setExpenses(local ? JSON.parse(local) : []);
+                } catch {
+                    setExpenses([]);
+                }
+            } else {
+                setExpenses(data || []);
+            }
+        } catch (error) {
+            console.error('Error fetching expenses for net profit:', error);
+            setExpenses([]);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchExpenses();
+    }, []);
+
+    // Filter expenses based on date range (same logic as ExpensesCard)
+    const filteredExpenses = useMemo(() => {
+        if (!dateRange.start && !dateRange.end) {
+            // If no date filter, show current month
+            const currentMonth = new Date().getMonth();
+            const currentYear = new Date().getFullYear();
+            return expenses.filter(expense => {
+                const expenseDate = new Date(expense.date);
+                return expenseDate.getMonth() === currentMonth && expenseDate.getFullYear() === currentYear;
+            });
+        }
+
+        return expenses.filter(expense => {
+            const expenseDate = new Date(expense.date);
+            
+            if (dateRange.start && expenseDate < new Date(dateRange.start)) {
+                return false;
+            }
+            
+            if (dateRange.end) {
+                const endDate = new Date(dateRange.end);
+                endDate.setDate(endDate.getDate() + 1); // Make end date inclusive
+                if (expenseDate >= endDate) {
+                    return false;
+                }
+            }
+            
+            return true;
+        });
+    }, [expenses, dateRange]);
+
+    // Calculate total expenses for the period
+    const totalExpenses = filteredExpenses.reduce((sum, expense) => sum + (expense.amount || 0), 0);
+    
+    // Calculate gross profit (Sales - Cost)
+    const grossProfit = totalSales - totalCost;
+    
+    // Calculate net profit (Gross Profit - Expenses)
+    const netProfit = grossProfit - totalExpenses;
+    
+    // Calculate net profit margin
+    const netProfitMargin = totalSales > 0 ? (netProfit / totalSales * 100) : 0;
+    
+    // Determine card color based on profit/loss
+    const isProfit = netProfit >= 0;
+    const cardBorderColor = isProfit 
+        ? "border-2 border-emerald-200 dark:border-emerald-800" 
+        : "border-2 border-red-200 dark:border-red-800";
+    
+    const titleColor = isProfit 
+        ? "text-emerald-700 dark:text-emerald-400" 
+        : "text-red-700 dark:text-red-400";
+    
+    const amountColor = isProfit 
+        ? "text-emerald-600" 
+        : "text-red-600";
+
+    return (
+        <Card className={cardBorderColor}>
+          <CardHeader>
+            <CardTitle className={titleColor}>
+                🏆 Net Profit (Admin)
+            </CardTitle>
+            <CardDescription>Gross Profit - Total Expenses = Net Profit</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex justify-between items-start">
+              <div className="flex-1">
+                {loading ? (
+                  <p className="text-3xl font-bold text-slate-600">Loading...</p>
+                ) : (
+                  <>
+                    <p className={`text-3xl font-bold ${amountColor}`}>
+                        {formatCurrency(netProfit, currency)}
+                    </p>
+                    <div className="text-sm text-slate-500 dark:text-slate-400 mt-1 space-y-1">
+                        <p>Gross Profit: {formatCurrency(grossProfit, currency)}</p>
+                        <p>Total Expenses: {formatCurrency(totalExpenses, currency)}</p>
+                        <p className="text-xs">
+                            = {formatCurrency(totalSales, currency)} - {formatCurrency(totalCost, currency)} - {formatCurrency(totalExpenses, currency)}
+                        </p>
+                    </div>
+                    <p className={`text-xs mt-2 font-semibold ${amountColor}`}>
+                        Net Margin: {netProfitMargin.toFixed(1)}% | {isProfit ? '📈 Profit' : '📉 Loss'}
+                    </p>
+                  </>
+                )}
+              </div>
+              <div className="ml-4">
+                <ChangeIndicator change={netProfit > 0 ? 5.2 : -8.5} />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+    );
 };
 
 // Percentage change indicator component
@@ -708,6 +969,32 @@ export const Dashboard: React.FC = () => {
             </div>
           </CardContent>
         </Card>
+        {/* Total Profit Card - Admin Only */}
+        {isAdmin && (
+          <Card className="border-2 border-green-200 dark:border-green-800">
+            <CardHeader>
+              <CardTitle className="text-green-700 dark:text-green-400">💰 Total Profit (Admin)</CardTitle>
+              <CardDescription>Sales - Delivered Cost = Profit</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex justify-between items-start">
+                <div>
+                  <p className="text-3xl font-bold text-green-600">{formatCurrency(totalSales - totalCost, currency)}</p>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                    {formatCurrency(totalSales, currency)} - {formatCurrency(totalCost, currency)}
+                  </p>
+                  <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
+                    Profit Margin: {totalSales > 0 ? ((totalSales - totalCost) / totalSales * 100).toFixed(1) : 0}%
+                  </p>
+                </div>
+                <ChangeIndicator change={calculateChange(totalSales - totalCost, 0)} />
+              </div>
+            </CardContent>
+          </Card>
+        )}
+        <ExpensesCard currency={currency} dateRange={dateRange} />
+        {/* Net Profit Card - Admin Only */}
+        {isAdmin && <NetProfitCard currency={currency} dateRange={dateRange} totalSales={totalSales} totalCost={totalCost} />}
       </div>
 
       {/* Monthly Comparison Summary */}

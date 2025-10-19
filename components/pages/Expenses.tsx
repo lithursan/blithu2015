@@ -75,7 +75,7 @@ const Expenses: React.FC = () => {
         });
         return () => { sub?.subscription?.unsubscribe?.(); };
     }, [pendingDeletes]);
-    const { currentUser } = useAuth();
+    const { currentUser, refreshAuth } = useAuth();
 
     const fetchExpenses = async () => {
         setLoading(true);
@@ -208,11 +208,6 @@ const Expenses: React.FC = () => {
 
     return (
         <div className="p-4 sm:p-6 lg:p-8">
-            {/* Debug info - remove this later */}
-            <div className="mb-2 text-xs text-gray-400 bg-gray-800 p-2 rounded">
-                Debug: User role: "{currentUser?.role || 'No role'}" | Admin role value: "{UserRole.Admin}" | Is Admin: {currentUser?.role === UserRole.Admin ? 'Yes' : 'No'} | User ID: {currentUser?.id || 'No ID'}
-            </div>
-            
             {fallbackMode && !dismissBanner && (
                 <div className="mb-4 p-3 bg-yellow-900 text-white border border-yellow-700 rounded flex justify-between items-center">
                     <div>Running in local fallback mode — expenses are stored in your browser (localStorage). Run migration <code className="bg-black/10 px-1 py-0.5 rounded">supabase_migrations/create_expenses.sql</code> to enable DB persistence.</div>
@@ -231,11 +226,6 @@ const Expenses: React.FC = () => {
                 </div>
             )}
             <h1 className="text-3xl font-bold mb-4">Expenses</h1>
-            <div className="mb-4 text-sm text-slate-500">
-                <button onClick={async () => { const u = await supabase.auth.getUser(); console.log('auth.getUser()', u); alert('Check console for auth.getUser()'); }} className="mr-2 px-2 py-1 bg-slate-700 text-white rounded">Debug: auth.getUser()</button>
-                <button onClick={async () => { const s = await supabase.auth.getSession(); console.log('auth.getSession()', s); alert('Check console for auth.getSession()'); }} className="mr-2 px-2 py-1 bg-slate-700 text-white rounded">Debug: auth.getSession()</button>
-                <button onClick={() => { fetchExpenses(); alert('Re-fetching expenses'); }} className="px-2 py-1 bg-slate-700 text-white rounded">Re-fetch</button>
-            </div>
             <Card className="mb-6">
                 <CardHeader>
                     <CardTitle>Add Expense</CardTitle>
@@ -280,22 +270,6 @@ const Expenses: React.FC = () => {
                         <input id="filter-details" name="filter-details" placeholder="Search details" value={detailsFilter} onChange={e => setDetailsFilter(e.target.value)} className="p-2 border rounded bg-slate-800 text-slate-100 placeholder-slate-400" />
                         <button onClick={() => { setMonthFilter(''); setDetailsFilter(''); }} className="ml-2 px-3 py-1 bg-slate-800 text-slate-100 border border-slate-700 rounded">Clear</button>
                     </div>
-                    {pendingDeletes.length > 0 && (
-                        <div className="mb-4 p-3 bg-yellow-800 text-white rounded">
-                            <div className="flex items-center justify-between">
-                                <div>Pending DB deletes: {pendingDeletes.length} rows (deleted locally)</div>
-                                <div>
-                                    <button onClick={() => {
-                                        const sql = pendingDeletes.map(id => `DELETE FROM public.expenses WHERE id = '${id}';`).join('\n');
-                                        navigator.clipboard?.writeText(sql);
-                                        alert('SQL copied to clipboard. Paste into Supabase SQL editor as admin to remove rows.');
-                                    }} className="px-3 py-1 bg-gray-700 text-white rounded mr-2">Copy SQL</button>
-                                    <button onClick={() => { try { localStorage.removeItem('expenses_pending_deletes_v1'); setPendingDeletes([]); alert('Cleared pending deletes (local only)'); } catch {}}} className="px-3 py-1 bg-slate-700 text-white rounded mr-2">Clear</button>
-                                    <button onClick={() => attemptPendingDeletes()} className="px-3 py-1 bg-green-600 text-white rounded">Retry pending deletes</button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
                     {loading ? <p>Loading...</p> : (
                         <div className="mb-4 flex items-center justify-between">
                             <div className="text-sm text-slate-500">Total: <span className="font-bold">{formatCurrency(totalFiltered)}</span></div>
@@ -325,78 +299,93 @@ const Expenses: React.FC = () => {
                                                 {(currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Manager) && (
                                                     <button
                                                         onClick={async () => {
-                                                            console.log('Delete button clicked! Current user role:', currentUser?.role);
+                                                            console.log('Delete button clicked for expense ID:', exp.id);
+                                                            
+                                                            // Confirm deletion
                                                             if (!confirm('Delete this expense?')) return;
+                                                            
                                                             try {
                                                                 if (fallbackMode) {
+                                                                    // Handle localStorage fallback mode
                                                                     const local = localStorage.getItem('app_expenses_v1');
                                                                     const arr = local ? JSON.parse(local) : [];
-                                                                    const filtered = arr.filter((r:any) => r.id !== exp.id);
+                                                                    const filtered = arr.filter((r: any) => r.id !== exp.id);
                                                                     localStorage.setItem('app_expenses_v1', JSON.stringify(filtered));
                                                                     setExpenses(filtered);
-                                                                } else {
-                                                        // Check authentication status
-                                                        console.log('Current user from context:', currentUser);
-                                                        const userRes = await supabase.auth.getUser();
-                                                        const authUser = userRes?.data?.user;
-                                                        console.log('Auth user from supabase:', authUser);
-                                                        
-                                                        if (!authUser) {
-                                                            alert('Authentication required. Please refresh the page and sign in again.');
-                                                            window.location.reload();
-                                                            return;
-                                                        }
-                                                        
-                                                        if (!currentUser) {
-                                                            alert('User context not loaded. Please refresh the page.');
-                                                            window.location.reload();
-                                                            return;
-                                                        }
-                                                        
-                                                        try {
-                                                                            const { error } = await supabase.from('expenses').delete().eq('id', exp.id);
-                                                                            if (error) {
-                                                                                console.error('Delete error:', error);
-                                                                                const isRls = ((error.code || '').toString() === '42501') || (error.message || '').toLowerCase().includes('row-level');
-                                                                                // If RLS or network prevents deleting, fall back to a local pending-deletes approach
-                                                                                if (isRls || (error.message || '').toLowerCase().includes('failed to fetch')) {
-                                                                                    // remove from UI and store pending delete
-                                                                                    const newList = expenses.filter((r:any) => r.id !== exp.id);
-                                                                                    setExpenses(newList);
-                                                                                    const pending = [...pendingDeletes, exp.id];
-                                                                                    setPendingDeletes(pending);
-                                                                                    try { localStorage.setItem('expenses_pending_deletes_v1', JSON.stringify(pending)); } catch {}
-                                                                                    alert('Removed locally. The row could not be removed from the DB (network or RLS). You can run the provided SQL in Supabase SQL editor to delete it permanently.');
-                                                                                    return;
-                                                                                }
-                                                                                alert('Failed to delete expense: ' + (error.message || JSON.stringify(error)));
-                                                                                return;
-                                                                            }
-                                                                        } catch (networkErr: any) {
-                                                                            console.error('Network/delete failed:', networkErr);
-                                                                            // fallback to local pending delete
-                                                                            const newList = expenses.filter((r:any) => r.id !== exp.id);
-                                                                            setExpenses(newList);
-                                                                            const pending = [...pendingDeletes, exp.id];
-                                                                            setPendingDeletes(pending);
-                                                                            try { localStorage.setItem('expenses_pending_deletes_v1', JSON.stringify(pending)); } catch {}
-                                                                            alert('Network error while deleting. Removed locally and queued for manual deletion from DB later.');
-                                                                            return;
-                                                                        }
-                                                                    // refresh list
-                                                                    fetchExpenses();
+                                                                    alert('Expense deleted locally.');
+                                                                    return;
                                                                 }
-                                                            } catch (err) {
-                                                                console.error('Delete failed', err);
-                                                                    // If unexpected, still fallback to local removal
-                                                                    try {
-                                                                        const newList = expenses.filter((r:any) => r.id !== exp.id);
+
+                                                                // Check authentication first
+                                                                const { data: { user }, error: authError } = await supabase.auth.getUser();
+                                                                console.log('Auth check before delete:', { user, authError });
+                                                                
+                                                                // Handle missing Supabase auth session
+                                                                if ((authError || !user) && currentUser) {
+                                                                    console.log('No Supabase auth session detected. This is expected with custom auth system.');
+                                                                    console.log('Proceeding with delete attempt - RLS may block this operation.');
+                                                                } else if (!currentUser) {
+                                                                    alert('Please log in to delete expenses.');
+                                                                    return;
+                                                                }
+
+                                                                // Try to delete from Supabase
+                                                                console.log('Attempting to delete expense from database...', exp.id);
+                                                                const deleteResult = await supabase.from('expenses').delete().eq('id', exp.id);
+                                                                console.log('Delete result:', deleteResult);
+                                                                
+                                                                if (deleteResult.error) {
+                                                                    console.error('Delete error details:', deleteResult.error);
+                                                                    
+                                                                    // Handle JWT/Auth errors (most common with custom auth + RLS)
+                                                                    if (deleteResult.error.message?.toLowerCase().includes('jwt') || 
+                                                                        deleteResult.error.message?.toLowerCase().includes('invalid token') ||
+                                                                        deleteResult.error.message?.toLowerCase().includes('row level security') || 
+                                                                        deleteResult.error.code === '42501' ||
+                                                                        deleteResult.error.code === 'PGRST301') {
+                                                                        
+                                                                        // RLS/Auth error - remove locally and queue for manual deletion
+                                                                        const newList = expenses.filter((r: any) => r.id !== exp.id);
                                                                         setExpenses(newList);
                                                                         const pending = [...pendingDeletes, exp.id];
                                                                         setPendingDeletes(pending);
                                                                         localStorage.setItem('expenses_pending_deletes_v1', JSON.stringify(pending));
-                                                                    } catch {}
-                                                                    alert('Failed to delete expense remotely — removed locally and queued for manual DB deletion.');
+                                                                        
+                                                                        alert(`Authentication issue: ${deleteResult.error.message}\n\nExpense removed from display. Admin will need to delete from database manually or configure RLS policies.`);
+                                                                        return;
+                                                                    }
+                                                                    
+                                                                    alert(`Delete failed: ${deleteResult.error.message}\n\nError code: ${deleteResult.error.code || 'Unknown'}`);
+                                                                    return;
+                                                                }
+                                                                
+                                                                // Verify the delete actually worked by checking the count
+                                                                const { count, error: countError } = await supabase
+                                                                    .from('expenses')
+                                                                    .select('*', { count: 'exact', head: true })
+                                                                    .eq('id', exp.id);
+                                                                
+                                                                console.log('Verification count after delete:', { count, countError });
+                                                                
+                                                                if (count && count > 0) {
+                                                                    console.warn('Delete appeared successful but record still exists!');
+                                                                    alert('Delete may have failed - record still exists in database. Removing from display and queuing for cleanup.');
+                                                                    const newList = expenses.filter((r: any) => r.id !== exp.id);
+                                                                    setExpenses(newList);
+                                                                    const pending = [...pendingDeletes, exp.id];
+                                                                    setPendingDeletes(pending);
+                                                                    localStorage.setItem('expenses_pending_deletes_v1', JSON.stringify(pending));
+                                                                    return;
+                                                                }
+                                                                
+                                                                // Success - refresh the expenses list
+                                                                console.log('Delete verified successful');
+                                                                await fetchExpenses();
+                                                                alert('Expense deleted successfully from database.');
+                                                                
+                                                            } catch (err: any) {
+                                                                console.error('Unexpected delete error:', err);
+                                                                alert('Delete failed. Please try again.');
                                                             }
                                                         }}
                                                         className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-sm rounded transition-colors"
