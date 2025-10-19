@@ -1380,8 +1380,8 @@ export const Orders: React.FC = () => {
                       <table className="w-full text-sm text-left text-slate-500 dark:text-slate-400">
                         <thead className="text-xs text-slate-700 uppercase bg-slate-50 dark:bg-slate-700 dark:text-slate-400">
                           <tr>
-                            <th scope="col" className="px-6 py-3 z-20 sticky left-0">Order ID</th>
-                            <th scope="col" className="px-6 py-3 z-20 sticky left-[112px]">Customer Name</th>
+                            <th scope="col" className="px-6 py-3 z-20 sticky left-0 bg-slate-50 dark:bg-slate-700 min-w-[112px]">Order ID</th>
+                            <th scope="col" className="px-6 py-3 z-20 sticky left-[112px] bg-slate-50 dark:bg-slate-700">Customer Name</th>
                             {isManagerView && <th scope="col" className="px-6 py-3">Assigned To</th>}
                             <th scope="col" className="px-6 py-3">Date</th>
                             <th scope="col" className="px-6 py-3">Total</th>
@@ -1389,7 +1389,7 @@ export const Orders: React.FC = () => {
                             <th scope="col" className="px-6 py-3">Items</th>
                             <th scope="col" className="px-6 py-3">Status</th>
                             {currentUser?.role !== UserRole.Driver && <th scope="col" className="px-6 py-3">Outstanding</th>}
-                            <th scope="col" className="px-6 py-3 z-20 sticky right-0">Actions</th>
+                            <th scope="col" className="px-6 py-3 z-20 sticky right-0 bg-slate-50 dark:bg-slate-700">Actions</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1412,8 +1412,8 @@ export const Orders: React.FC = () => {
                 }
                 return (
                   <tr key={order.id} className="border-b dark:bg-slate-800 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600">
-                    <td className="px-6 py-4 font-medium text-slate-900 dark:text-white z-10 sticky left-0">{order.id}</td>
-                    <td className="px-6 py-4 z-10 sticky left-[112px]">{order.customerName}</td>
+                    <td className="px-6 py-4 font-medium text-slate-900 dark:text-white z-10 sticky left-0 bg-white dark:bg-slate-800 min-w-[112px]">{order.id}</td>
+                    <td className="px-6 py-4 z-10 sticky left-[112px] bg-white dark:bg-slate-800">{order.customerName}</td>
                     {isManagerView && (
                       <td className="px-6 py-4">
                         {assignedUser ? (
@@ -1472,14 +1472,16 @@ export const Orders: React.FC = () => {
                         </div>
                       </td>
                     )}
-                    <td className="px-6 py-4 flex items-center space-x-3 z-10 sticky right-0">
-                    <button onClick={() => openViewModal(order)} className="font-medium text-slate-600 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-300">View</button>
-                    {canEdit && (
-                      <>
-                        <button onClick={() => openEditModal(order)} className="font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">Edit</button>
-                        {canDelete && <button onClick={() => openDeleteModal(order)} className="font-medium text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300">Delete</button>}
-                      </>
-                    )}
+                    <td className="px-6 py-4 z-10 sticky right-0 bg-white dark:bg-slate-800 border-l border-slate-200 dark:border-slate-600">
+                      <div className="flex items-center space-x-3">
+                        <button onClick={() => openViewModal(order)} className="font-medium text-slate-600 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-300">View</button>
+                        {canEdit && (
+                          <>
+                            <button onClick={() => openEditModal(order)} className="font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">Edit</button>
+                            {canDelete && <button onClick={() => openDeleteModal(order)} className="font-medium text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300">Delete</button>}
+                          </>
+                        )}
+                      </div>
                     </td>
                   </tr>
                               );
@@ -1500,241 +1502,233 @@ export const Orders: React.FC = () => {
         </Card>
 
         <Modal isOpen={modalState === 'create' || modalState === 'edit'} onClose={closeModal} title={modalState === 'create' ? 'Create New Order' : `Edit Order ${currentOrder?.id}`}>
-          <div className="p-6 space-y-6 max-h-[80vh] overflow-y-auto">
-            {/* Customer and Delivery Date Section */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="relative" ref={customerDropdownRef}>
-                <label htmlFor="customer" className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">Customer</label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    id="customer"
-                    value={customerSearch}
-                    onChange={(e) => {
-                      setCustomerSearch(e.target.value);
-                      setIsCustomerDropdownOpen(true);
-                    }}
-                    onFocus={() => setIsCustomerDropdownOpen(true)}
-                    placeholder="Search and select customer..."
-                    className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 pr-10 dark:bg-slate-700 dark:border-slate-600 dark:placeholder-slate-400 dark:text-white"
-                  />
-                  <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                    <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                    </svg>
-                  </div>
-                  
-                  {isCustomerDropdownOpen && (
-                    <div className="absolute z-50 w-full mt-1 bg-white border border-slate-300 rounded-lg shadow-lg max-h-60 overflow-y-auto dark:bg-slate-700 dark:border-slate-600">
-                      {customers
-                        .filter(customer => 
+          <div className="flex flex-col h-[700px] max-h-[90vh]">
+            {/* Fixed Top Section - Customer and Search */}
+            <div className="p-3 border-b border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 flex-shrink-0">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                <div className="relative" ref={customerDropdownRef}>
+                  <label htmlFor="customer" className="block mb-1 text-sm font-medium text-slate-900 dark:text-white">Customer</label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      id="customer"
+                      value={customerSearch}
+                      onChange={(e) => {
+                        setCustomerSearch(e.target.value);
+                        setIsCustomerDropdownOpen(true);
+                      }}
+                      onFocus={() => setIsCustomerDropdownOpen(true)}
+                      placeholder="Search and select customer..."
+                      className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 pr-10 dark:bg-slate-700 dark:border-slate-600 dark:placeholder-slate-400 dark:text-white"
+                    />
+                    <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                      <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                      </svg>
+                    </div>
+                    
+                    {isCustomerDropdownOpen && (
+                      <div className="absolute z-50 w-full mt-1 bg-white border border-slate-300 rounded-lg shadow-lg max-h-60 overflow-y-auto dark:bg-slate-700 dark:border-slate-600">
+                        {customers
+                          .filter(customer => 
+                            customer.name.toLowerCase().includes(customerSearch.toLowerCase()) ||
+                            customer.email?.toLowerCase().includes(customerSearch.toLowerCase()) ||
+                            customer.phone?.toLowerCase().includes(customerSearch.toLowerCase())
+                          )
+                          .map(customer => (
+                            <div
+                              key={customer.id}
+                              onClick={() => {
+                                setSelectedCustomer(customer.id);
+                                setCustomerSearch(customer.name);
+                                setIsCustomerDropdownOpen(false);
+                              }}
+                              className={`p-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-600 border-b border-slate-200 dark:border-slate-600 last:border-b-0 ${
+                                selectedCustomer === customer.id ? 'bg-blue-50 dark:bg-blue-900/30' : ''
+                              }`}
+                            >
+                              <div className="font-medium text-slate-900 dark:text-white">{customer.name}</div>
+                              {customer.email && (
+                                <div className="text-sm text-slate-500 dark:text-slate-400">{customer.email}</div>
+                              )}
+                              {customer.phone && (
+                                <div className="text-sm text-slate-500 dark:text-slate-400">{customer.phone}</div>
+                              )}
+                            </div>
+                          ))
+                        }
+                        {customers.filter(customer => 
                           customer.name.toLowerCase().includes(customerSearch.toLowerCase()) ||
                           customer.email?.toLowerCase().includes(customerSearch.toLowerCase()) ||
                           customer.phone?.toLowerCase().includes(customerSearch.toLowerCase())
-                        )
-                        .map(customer => (
-                          <div
-                            key={customer.id}
-                            onClick={() => {
-                              setSelectedCustomer(customer.id);
-                              setCustomerSearch(customer.name);
-                              setIsCustomerDropdownOpen(false);
-                            }}
-                            className={`p-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-600 border-b border-slate-200 dark:border-slate-600 last:border-b-0 ${
-                              selectedCustomer === customer.id ? 'bg-blue-50 dark:bg-blue-900/30' : ''
-                            }`}
-                          >
-                            <div className="font-medium text-slate-900 dark:text-white">{customer.name}</div>
-                            {customer.email && (
-                              <div className="text-sm text-slate-500 dark:text-slate-400">{customer.email}</div>
-                            )}
-                            {customer.phone && (
-                              <div className="text-sm text-slate-500 dark:text-slate-400">{customer.phone}</div>
-                            )}
+                        ).length === 0 && (
+                          <div className="p-3 text-sm text-slate-500 dark:text-slate-400 text-center">
+                            No customers found
                           </div>
-                        ))
-                      }
-                      {customers.filter(customer => 
-                        customer.name.toLowerCase().includes(customerSearch.toLowerCase()) ||
-                        customer.email?.toLowerCase().includes(customerSearch.toLowerCase()) ||
-                        customer.phone?.toLowerCase().includes(customerSearch.toLowerCase())
-                      ).length === 0 && (
-                        <div className="p-3 text-sm text-slate-500 dark:text-slate-400 text-center">
-                          No customers found
-                        </div>
-                      )}
-                    </div>
-                  )}
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div>
+                    <label htmlFor="deliveryDate" className="block mb-1 text-sm font-medium text-slate-900 dark:text-white">Expected Delivery Date</label>
+                    <input
+                        type="date"
+                        id="deliveryDate"
+                        value={expectedDeliveryDate}
+                        onChange={(e) => setExpectedDeliveryDate(e.target.value)}
+                        className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2 dark:bg-slate-700 dark:border-slate-600 dark:placeholder-slate-400 dark:text-white"
+                    />
                 </div>
               </div>
+              
               <div>
-                  <label htmlFor="deliveryDate" className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">Expected Delivery Date</label>
+                <label className="block mb-1 text-sm font-medium text-slate-900 dark:text-white">Products</label>
+                <div className="relative">
                   <input
-                      type="date"
-                      id="deliveryDate"
-                      value={expectedDeliveryDate}
-                      onChange={(e) => setExpectedDeliveryDate(e.target.value)}
-                      className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:placeholder-slate-400 dark:text-white"
+                    type="text"
+                    placeholder="Search products by name, category, or SKU..."
+                    value={productSearchTerm}
+                    onChange={(e) => setProductSearchTerm(e.target.value)}
+                    className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2 pr-8 dark:bg-slate-700 dark:border-slate-600 dark:placeholder-slate-400 dark:text-white"
                   />
+                  {productSearchTerm && (
+                    <button
+                      onClick={() => setProductSearchTerm('')}
+                      className="absolute right-2 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                      title="Clear search"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
-            
-            {/* Products Section */}
-            <div>
-              <label className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">Products</label>
-              
-              {/* Product Search Input */}
-              <div className="mb-4 relative">
-                <input
-                  type="text"
-                  placeholder="Search products by name, category, or SKU..."
-                  value={productSearchTerm}
-                  onChange={(e) => setProductSearchTerm(e.target.value)}
-                  className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 pr-10 dark:bg-slate-700 dark:border-slate-600 dark:placeholder-slate-400 dark:text-white"
-                />
-                {productSearchTerm && (
-                  <button
-                    onClick={() => setProductSearchTerm('')}
-                    className="absolute right-2 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
-                    title="Clear search"
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
-              
-              {/* Products List */}
-              <div className="space-y-3 border border-slate-200 dark:border-slate-600 rounded-lg p-3 bg-slate-50 dark:bg-slate-800">
-                {availableProductsForOrder.length === 0 ? (
-                  <div className="text-center py-4 text-slate-500 dark:text-slate-400">
-                    {productSearchTerm.trim() ? 'No products found matching your search.' : 'No products available.'}
-                  </div>
-                ) : (
-                  availableProductsForOrder.map(product => {
-                  const isOutOfStock = getEffectiveStock(product) === 0;
-                  const isHeld = heldItems.has(product.id);
-                  const isUnavailable = isHeld || isOutOfStock;
-                  
-                  return (
-                    <div key={product.id} className={`grid grid-cols-12 gap-2 items-center p-2 rounded-lg transition-colors ${isHeld ? 'bg-yellow-50 dark:bg-yellow-900/40' : 'bg-slate-50 dark:bg-slate-700'} ${isOutOfStock && !isHeld ? 'opacity-70' : ''}`}>
-                      <div className="flex items-center space-x-3 col-span-12 sm:col-span-4">
-                        <img src={product.imageUrl} alt={product.name} className="w-10 h-10 rounded-md" />
-                        <div>
-                          <p className="font-medium text-slate-900 dark:text-white">{product.name}</p>
-                           <p className="text-xs text-slate-500 dark:text-slate-400">
-                            {isOutOfStock ? <span className="text-red-500 font-semibold ml-1">Out of Stock</span> : (
-                              currentUser?.role === UserRole.Driver 
-                                ? ` Allocated: ${getEffectiveStock(product)}`
-                                : ` Stock: ${getEffectiveStock(product)}`
-                            )}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="col-span-4 sm:col-span-2">
-                        <label htmlFor={`price-${product.id}`} className="sr-only">Unit Price for {product.name}</label>
-                        <div className="relative">
-                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm">{currency}</span>
-                            <input
-                                type="number"
-                                id={`price-${product.id}`}
-                                min="0"
-                                step="0.01"
-                                value={orderItemPrices[product.id] ?? ''}
-                                placeholder={product.price.toFixed(2)}
-                                onChange={(e) => handlePriceChange(product.id, parseFloat(e.target.value) || 0)}
-                                className="w-full p-1.5 border border-slate-300 rounded-md dark:bg-slate-600 dark:border-slate-500 dark:text-white text-center pl-10"
-                                disabled={isUnavailable}
-                            />
-                        </div>
-                      </div>
-                      <div className="col-span-4 sm:col-span-2">
-                        <label htmlFor={`discount-${product.id}`} className="sr-only">Discount for {product.name}</label>
-                         <div className="relative">
-                            <input
-                                type="number"
-                                id={`discount-${product.id}`}
-                                min="0"
-                                max="100"
-                                value={orderDiscounts[product.id] || ''}
-                                placeholder="0"
-                                onChange={(e) => handleDiscountChange(product.id, parseInt(e.target.value, 10) || 0)}
-                                className="w-full p-1.5 border border-slate-300 rounded-md dark:bg-slate-600 dark:border-slate-500 dark:text-white text-center disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:cursor-not-allowed"
-                                disabled={isUnavailable}
-                            />
-                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm">%</span>
-                         </div>
-                      </div>
-                       <div className="col-span-4 sm:col-span-2">
-                        <label htmlFor={`quantity-${product.id}`} className="sr-only">Quantity for {product.name}</label>
-                        <input
-                            type="number"
-                            id={`quantity-${product.id}`}
-                            min="0"
-                            max={isUnavailable ? undefined : getEffectiveStock(product)}
-                            value={orderItems[product.id] || ''}
-                            placeholder="0"
-                            onChange={(e) => handleQuantityChange(product.id, parseInt(e.target.value, 10) || 0)}
-                            className="w-full p-1.5 border border-slate-300 rounded-md dark:bg-slate-600 dark:border-slate-500 dark:text-white text-center"
-                        />
-                      </div>
-                       <div className="col-span-12 sm:col-span-2">
-                          <button
-                            onClick={() => toggleHoldItem(product.id)}
-                            className={`w-full py-1.5 text-xs font-medium rounded-md transition-colors ${isHeld ? 'bg-yellow-400 text-yellow-900 hover:bg-yellow-500' : 'bg-slate-200 dark:bg-slate-600 hover:bg-slate-300 dark:hover:bg-slate-500'}`}
-                            >
-                            {isHeld ? 'Unhold' : 'Hold'}
-                          </button>
-                      </div>
+
+            {/* Scrollable Products Section */}
+            <div className="flex-1 overflow-y-auto min-h-0">
+              <div className="p-3">
+                <div className="space-y-2 border border-slate-200 dark:border-slate-600 rounded-lg p-2 bg-slate-50 dark:bg-slate-800">
+                  {availableProductsForOrder.length === 0 ? (
+                    <div className="text-center py-4 text-slate-500 dark:text-slate-400">
+                      {productSearchTerm.trim() ? 'No products found matching your search.' : 'No products available.'}
                     </div>
-                  )
-                }))}
+                  ) : (
+                    availableProductsForOrder.map(product => {
+                    const isOutOfStock = getEffectiveStock(product) === 0;
+                    const isHeld = heldItems.has(product.id);
+                    const isUnavailable = isHeld || isOutOfStock;
+                    
+                    return (
+                      <div key={product.id} className={`grid grid-cols-10 gap-2 items-center p-2 rounded-lg transition-colors ${isHeld ? 'bg-yellow-50 dark:bg-yellow-900/40' : 'bg-slate-50 dark:bg-slate-700'} ${isOutOfStock && !isHeld ? 'opacity-70' : ''}`}>
+                        <div className="flex items-center space-x-3 col-span-10 sm:col-span-5">
+                          <img src={product.imageUrl} alt={product.name} className="w-10 h-10 rounded-md" />
+                          <div>
+                            <p className="font-medium text-slate-900 dark:text-white">{product.name}</p>
+                             <p className="text-xs text-slate-500 dark:text-slate-400">
+                              {isOutOfStock ? <span className="text-red-500 font-semibold ml-1">Out of Stock</span> : (
+                                currentUser?.role === UserRole.Driver 
+                                  ? ` Allocated: ${getEffectiveStock(product)}`
+                                  : ` Stock: ${getEffectiveStock(product)}`
+                              )}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="col-span-5 sm:col-span-2">
+                          <label htmlFor={`price-${product.id}`} className="sr-only">Unit Price for {product.name}</label>
+                          <div className="relative">
+                              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm">{currency}</span>
+                              <input
+                                  type="number"
+                                  id={`price-${product.id}`}
+                                  min="0"
+                                  step="1"
+                                  value={orderItemPrices[product.id] ?? product.price}
+                                  onChange={(e) => handlePriceChange(product.id, parseFloat(e.target.value) || product.price)}
+                                  className="w-full p-1.5 border border-slate-300 rounded-md dark:bg-slate-600 dark:border-slate-500 dark:text-white text-center pl-10 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                  disabled={isUnavailable}
+                                  title="Enter price manually"
+                              />
+                          </div>
+                        </div>
+
+                         <div className="col-span-3 sm:col-span-2">
+                          <label htmlFor={`quantity-${product.id}`} className="sr-only">Quantity for {product.name}</label>
+                          <input
+                              type="number"
+                              id={`quantity-${product.id}`}
+                              min="0"
+                              max={isUnavailable ? undefined : getEffectiveStock(product)}
+                              value={orderItems[product.id] || ''}
+                              placeholder="0"
+                              onChange={(e) => handleQuantityChange(product.id, parseInt(e.target.value, 10) || 0)}
+                              className="w-full p-1.5 border border-slate-300 rounded-md dark:bg-slate-600 dark:border-slate-500 dark:text-white text-center"
+                          />
+                        </div>
+                         <div className="col-span-2 sm:col-span-1">
+                            <button
+                              onClick={() => toggleHoldItem(product.id)}
+                              className={`w-full py-1.5 text-xs font-medium rounded-md transition-colors ${isHeld ? 'bg-yellow-400 text-yellow-900 hover:bg-yellow-500' : 'bg-slate-200 dark:bg-slate-600 hover:bg-slate-300 dark:hover:bg-slate-500'}`}
+                              >
+                              {isHeld ? 'Unhold' : 'Hold'}
+                            </button>
+                        </div>
+                      </div>
+                    )
+                  }))}
+                </div>
               </div>
-              
-              {/* Order Summary */}
-              <div className="mt-6 p-4 bg-slate-50 dark:bg-slate-800 rounded-lg">
-                <h4 className="text-sm font-medium text-slate-900 dark:text-white mb-3">Order Summary</h4>
-                <div className="text-sm space-y-2">
-                  <div className="flex justify-between">
-                    <span className="text-slate-600 dark:text-slate-300">Items (In Stock):</span>
-                    <span className="font-bold text-slate-900 dark:text-white">{inStockItems}</span>
-                  </div>
-                  {heldItemsCount > 0 && (
+            </div>
+
+            {/* Fixed Bottom Section - Summary, Notes, Buttons */}
+            <div className="border-t border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-800 flex-shrink-0">
+              <div className="p-3 space-y-3">
+                {/* Order Summary */}
+                <div className="p-3 bg-white dark:bg-slate-700 rounded-lg">
+                  <h4 className="text-sm font-medium text-slate-900 dark:text-white mb-2">Order Summary</h4>
+                  <div className="text-sm space-y-1">
                     <div className="flex justify-between">
-                      <span className="text-yellow-600 dark:text-yellow-400">Items (Held/OOS):</span>
-                      <span className="font-bold text-yellow-600 dark:text-yellow-400">{heldItemsCount}</span>
+                      <span className="text-slate-600 dark:text-slate-300">Items (In Stock):</span>
+                      <span className="font-bold text-slate-900 dark:text-white">{inStockItems}</span>
                     </div>
-                  )}
-                  <div className="flex justify-between text-base border-t pt-2 mt-2">
-                    <span className="text-slate-700 dark:text-slate-300">Total Price:</span>
-                    <span className="font-bold text-slate-900 dark:text-white">{formatCurrency(total, currency)}</span>
+                    {heldItemsCount > 0 && (
+                      <div className="flex justify-between">
+                        <span className="text-yellow-600 dark:text-yellow-400">Items (Held/OOS):</span>
+                        <span className="font-bold text-yellow-600 dark:text-yellow-400">{heldItemsCount}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-base border-t pt-1 mt-1">
+                      <span className="text-slate-700 dark:text-slate-300">Total Price:</span>
+                      <span className="font-bold text-slate-900 dark:text-white">{formatCurrency(total, currency)}</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-              
-              {/* Order Notes and Payment Method */}
-              <div className="space-y-4">
-                <div>
-                  <label htmlFor="orderNotes" className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">Order Notes</label>
-                  <input type="text" id="orderNotes" value={orderNotes} onChange={e => setOrderNotes(e.target.value)} className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white" />
+                
+                {/* Order Notes and Payment Method */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label htmlFor="orderNotes" className="block mb-1 text-sm font-medium text-slate-900 dark:text-white">Order Notes</label>
+                    <input type="text" id="orderNotes" value={orderNotes} onChange={e => setOrderNotes(e.target.value)} className="bg-white border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2 dark:bg-slate-600 dark:border-slate-500 dark:text-white" />
+                  </div>
+                  <div>
+                    <label htmlFor="orderMethod" className="block mb-1 text-sm font-medium text-slate-900 dark:text-white">Payment Method</label>
+                    <input type="text" id="orderMethod" value={orderMethod} onChange={e => setOrderMethod(e.target.value)} className="bg-white border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2 dark:bg-slate-600 dark:border-slate-500 dark:text-white" />
+                  </div>
                 </div>
-                <div>
-                  <label htmlFor="orderMethod" className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">Payment Method</label>
-                  <input type="text" id="orderMethod" value={orderMethod} onChange={e => setOrderMethod(e.target.value)} className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white" />
-                </div>
-              </div>
-              
-              {/* Footer Buttons */}
-              <div className="flex items-center justify-between pt-6 border-t border-slate-200 dark:border-slate-600">
-                <div className="text-sm text-slate-600 dark:text-slate-400">
-                  Total Items: <span className="font-medium">{inStockItems + heldItemsCount}</span>
-                </div>
-                <div className="flex space-x-3">
-                  <button onClick={closeModal} type="button" className="text-slate-500 bg-white hover:bg-slate-100 focus:ring-4 focus:outline-none focus:ring-blue-300 rounded-lg border border-slate-200 text-sm font-medium px-5 py-2.5 hover:text-slate-900 focus:z-10 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-500 dark:hover:text-white dark:hover:bg-slate-600">
-                    Cancel
-                  </button>
-                  <button onClick={handleSaveOrder} type="button" className="text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-blue-600 dark:hover:bg-blue-700 disabled:bg-blue-400 dark:disabled:bg-blue-800 disabled:cursor-not-allowed" disabled={(inStockItems + heldItemsCount) === 0 || !selectedCustomer}>
-                    {modalState === 'create' ? 'Create Order' : 'Save Changes'}
-                  </button>
+                
+                {/* Footer Buttons */}
+                <div className="flex items-center justify-between pt-2 border-t border-slate-200 dark:border-slate-600">
+                  <div className="text-sm text-slate-600 dark:text-slate-400">
+                    Total Items: <span className="font-medium">{inStockItems + heldItemsCount}</span>
+                  </div>
+                  <div className="flex space-x-3">
+                    <button onClick={closeModal} type="button" className="text-slate-500 bg-white hover:bg-slate-100 focus:ring-4 focus:outline-none focus:ring-blue-300 rounded-lg border border-slate-200 text-sm font-medium px-5 py-2.5 hover:text-slate-900 focus:z-10 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-500 dark:hover:text-white dark:hover:bg-slate-600">
+                      Cancel
+                    </button>
+                    <button onClick={handleSaveOrder} type="button" className="text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-blue-600 dark:hover:bg-blue-700 disabled:bg-blue-400 dark:disabled:bg-blue-800 disabled:cursor-not-allowed" disabled={(inStockItems + heldItemsCount) === 0 || !selectedCustomer}>
+                      {modalState === 'create' ? 'Create Order' : 'Save Changes'}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

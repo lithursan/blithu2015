@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useData } from '../../contexts/DataContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { User, UserRole, UserStatus, Product, DriverAllocation, DriverSale } from '../../types';
@@ -483,7 +483,7 @@ interface DailyLogProps {
 }
 
 const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
-    const { products, setProducts, customers, setCustomers, driverAllocations, setDriverAllocations, driverSales, setDriverSales } = useData();
+    const { products, setProducts, customers, setCustomers, driverAllocations, setDriverAllocations, driverSales, setDriverSales, orders, refetchData } = useData();
     const [activeTab, setActiveTab] = useState<'log' | 'reconcile'>('log');
     const [isSaleModalOpen, setIsSaleModalOpen] = useState(false);
     const [viewingSaleInvoice, setViewingSaleInvoice] = useState<DriverSale | null>(null);
@@ -498,6 +498,11 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
     
     // State for reconciliation
     const [returnedQuantities, setReturnedQuantities] = useState<Record<string, number>>({});
+    
+    // Refresh data when Daily Log opens to ensure we have latest orders
+    useEffect(() => {
+        refetchData();
+    }, [driver.id, refetchData]);
     
     const allocation = useMemo(() => 
         driverAllocations.find(a => a.driverId === driver.id && a.date === todayStr), 
@@ -898,26 +903,81 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
         return <Modal isOpen={true} onClose={onClose} title="Error"><div className="p-6">No allocation found for this driver today.</div></Modal>;
     }
     
-    const collections = salesForAllocation.reduce((acc, sale) => {
-        acc.total += sale.total || 0;
-        acc.paid += sale.amountPaid || 0;
-        acc.credit += sale.creditAmount || 0;
-        const method = sale.paymentMethod || '';
-        // Breakdown collected amounts by payment method when possible
-        if (method === 'Cheque') {
-            acc.cheque += sale.amountPaid || 0;
-        } else if (method === 'Cash') {
-            acc.cash += sale.amountPaid || 0;
-        } else if (method === 'Bank') {
-            acc.bank += sale.amountPaid || 0;
-        } else if (method === 'Mixed') {
-            // Mixed payments: amountPaid may include cheque/bank/cash combined
-            acc.mixed += sale.amountPaid || 0;
-        } else if (method === 'Credit') {
-            // credit only - amountPaid is likely 0
-        }
-        return acc;
-    }, { total: 0, paid: 0, credit: 0, cheque: 0, cash: 0, bank: 0, mixed: 0 });
+    // Calculate collections from both driver sales and today's delivered orders
+    const collections = useMemo(() => {
+        const todayStr = new Date().toISOString().slice(0, 10);
+        
+        console.log('Recalculating collections for driver:', driver.name);
+        console.log('Total orders available:', orders.length);
+        
+        // Get today's delivered orders for this driver
+        const todayOrders = orders.filter(order => {
+            const isAssignedToDriver = order.assignedUserId === driver.id;
+            const isDelivered = order.status === 'Delivered';
+            const orderDate = order.orderdate || order.date;
+            const isTodayOrder = orderDate === todayStr || 
+                                (orderDate && new Date(orderDate).toISOString().slice(0, 10) === todayStr);
+            
+            console.log(`Order ${order.id}:`, {
+                assignedToDriver: isAssignedToDriver,
+                isDelivered,
+                orderDate,
+                isTodayOrder,
+                shouldInclude: isAssignedToDriver && isDelivered && isTodayOrder
+            });
+            
+            return isAssignedToDriver && isDelivered && isTodayOrder;
+        });
+        
+        console.log('Filtered today orders for driver:', todayOrders.length);
+        
+        // Start with driver sales data
+        let result = salesForAllocation.reduce((acc, sale) => {
+            acc.total += sale.total || 0;
+            acc.paid += sale.amountPaid || 0;
+            acc.credit += sale.creditAmount || 0;
+            const method = sale.paymentMethod || '';
+            // Breakdown collected amounts by payment method when possible
+            if (method === 'Cheque') {
+                acc.cheque += sale.amountPaid || 0;
+            } else if (method === 'Cash') {
+                acc.cash += sale.amountPaid || 0;
+            } else if (method === 'Bank') {
+                acc.bank += sale.amountPaid || 0;
+            } else if (method === 'Mixed') {
+                // Mixed payments: amountPaid may include cheque/bank/cash combined
+                acc.mixed += sale.amountPaid || 0;
+            } else if (method === 'Credit') {
+                // credit only - amountPaid is likely 0
+            }
+            return acc;
+        }, { total: 0, paid: 0, credit: 0, cheque: 0, cash: 0, bank: 0, mixed: 0 });
+        
+        console.log('Result after driver sales:', result);
+        
+        // Add data from today's delivered orders
+        todayOrders.forEach(order => {
+            const orderTotal = order.total || 0;
+            const orderPaid = order.amountPaid || (orderTotal - (order.chequeBalance || 0) - (order.creditBalance || 0));
+            const orderCredit = order.creditBalance || 0;
+            const orderCheque = order.chequeBalance || 0;
+            
+            console.log(`Adding order ${order.id}:`, {
+                total: orderTotal,
+                paid: orderPaid,
+                credit: orderCredit,
+                cheque: orderCheque
+            });
+            
+            result.total += orderTotal;
+            result.paid += orderPaid;
+            result.credit += orderCredit;
+            result.cheque += orderCheque;
+        });
+        
+        console.log('Final result:', result);
+        return result;
+    }, [salesForAllocation, orders, driver.id, driver.name]);
 
     return (
       <Modal isOpen={true} onClose={onClose} title={`Daily Log: ${driver.name} (${todayStr})`}>

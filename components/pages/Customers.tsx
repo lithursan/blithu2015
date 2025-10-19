@@ -123,7 +123,6 @@ export const Customers: React.FC = () => {
             alert(`Error adding customer: ${error.message}`);
             return;
           }
-          alert('Customer added successfully!');
           // Refresh customers data
           await refetchData();
         } else {
