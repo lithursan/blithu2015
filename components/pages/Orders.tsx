@@ -1371,63 +1371,77 @@ export const Orders: React.FC = () => {
         </div>
 
         <Card>
-          <CardHeader className="sticky top-0 z-30 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
+          <CardHeader>
             <CardTitle>{isManagerView ? 'Order History' : 'My Orders'}</CardTitle>
             <CardDescription>
                 {isManagerView ? 'View and manage all customer orders.' : 'View and manage orders assigned to you.'}
             </CardDescription>
-            <div className="pt-4 flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4">
-              <input
-                type="text"
-                placeholder="Search by Order ID or Customer..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full max-w-sm px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value as OrderStatus | 'all')}
-                  className="px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                  <option value="all">All Statuses</option>
-                  <option value={OrderStatus.Pending}>Pending</option>
-                  <option value={OrderStatus.Delivered}>Delivered</option>
-              </select>
-              <select
-                  value={dateRangeFilter}
-                  onChange={(e) => {
-                      setDateRangeFilter(e.target.value as 'today' | 'this_week' | 'this_month' | 'all');
-                      setDeliveryDateFilter(''); // Clear specific date when range is selected
-                  }}
-                  className="px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                  <option value="all">All Delivery Dates</option>
-                  <option value="today">Today's Deliveries</option>
-                  <option value="this_week">This Week</option>
-                  <option value="this_month">This Month</option>
-              </select>
-              <input
-                  type="date"
-                  value={deliveryDateFilter}
-                  onChange={(e) => {
-                      setDeliveryDateFilter(e.target.value);
-                      setDateRangeFilter('all'); // Clear range when specific date is selected
-                  }}
-                  className="px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  title="Filter by specific delivery date"
-              />
-              {(deliveryDateFilter || dateRangeFilter !== 'all') && (
-                  <button
-                      onClick={() => {
-                          setDeliveryDateFilter('');
-                          setDateRangeFilter('all');
-                      }}
-                      className="px-3 py-2 text-sm bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50 rounded-lg transition-colors"
-                      title="Clear date filters"
-                  >
-                      Clear Date
-                  </button>
-              )}
+            <div className="pt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="md:col-span-2">
+                <input
+                  type="text"
+                  placeholder="Search by Order ID or Customer..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value as OrderStatus | 'all')}
+                    className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                    <option value="all">All Statuses</option>
+                    <option value={OrderStatus.Pending}>Pending</option>
+                    <option value={OrderStatus.Delivered}>Delivered</option>
+                </select>
+              </div>
+              <div>
+                <select
+                    value={dateRangeFilter}
+                    onChange={(e) => {
+                        setDateRangeFilter(e.target.value as 'today' | 'this_week' | 'this_month' | 'all');
+                        setDeliveryDateFilter(''); // Clear specific date when range is selected
+                    }}
+                    className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                    <option value="all">All Delivery Dates</option>
+                    <option value="today">Today's Deliveries</option>
+                    <option value="this_week">This Week</option>
+                    <option value="this_month">This Month</option>
+                </select>
+              </div>
+            </div>
+            
+            <div className="pt-2 grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+              <div>
+                <input
+                    type="date"
+                    value={deliveryDateFilter}
+                    onChange={(e) => {
+                        setDeliveryDateFilter(e.target.value);
+                        setDateRangeFilter('all'); // Clear range when specific date is selected
+                    }}
+                    className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    title="Filter by specific delivery date"
+                />
+              </div>
+              <div></div> {/* Empty space */}
+              <div className="flex justify-end">
+                {(deliveryDateFilter || dateRangeFilter !== 'all') && (
+                    <button
+                        onClick={() => {
+                            setDeliveryDateFilter('');
+                            setDateRangeFilter('all');
+                        }}
+                        className="px-4 py-2 bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50 rounded-lg transition-colors font-medium"
+                        title="Clear date filters"
+                    >
+                        Clear Filters
+                    </button>
+                )}
+              </div>
             </div>
           </CardHeader>
           <CardContent>

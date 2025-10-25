@@ -545,9 +545,9 @@ export const Customers: React.FC = () => {
                     <table className="w-full text-sm text-left text-slate-500 dark:text-slate-400">
                       <thead className="text-xs text-slate-700 uppercase bg-slate-50 dark:bg-slate-700 dark:text-slate-400">
                         <tr>
-                          <th scope="col" className="px-6 py-3 z-20 sticky left-0">Customer</th>
-                          <th scope="col" className="px-6 py-3">Join Date</th>
-                          <th scope="col" className="px-6 py-3 z-20 sticky right-0">Outstanding & Actions</th>
+                          <th scope="col" className="px-4 py-3 w-1/2">Customer</th>
+                          <th scope="col" className="px-4 py-3 w-1/4">Join Date</th>
+                          <th scope="col" className="px-4 py-3 w-1/4">Outstanding & Actions</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -593,32 +593,34 @@ export const Customers: React.FC = () => {
                           
                           return (
                             <tr key={customer.id} className="border-b dark:bg-slate-800 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600">
-                              <td className="px-6 py-4 font-medium text-slate-900 dark:text-white z-10 sticky left-0">
+                              <td className="px-4 py-4 font-medium text-slate-900 dark:text-white w-1/2">
                                 <div className="flex items-center space-x-3">
-                                  <img src={customer.avatarUrl} alt={customer.name} className="w-10 h-10 rounded-full" />
-                                  <div>
-                                    <span className="block">{customer.name}</span>
-                                    <p className="text-xs text-slate-500">{customer.location}</p>
-                                    <p className="text-xs text-blue-600">{customer.phone}</p>
+                                  <img src={customer.avatarUrl} alt={customer.name} className="w-12 h-12 rounded-full flex-shrink-0" />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="font-semibold text-sm truncate">{customer.name}</div>
+                                    <div className="text-xs text-slate-500 dark:text-slate-400 truncate">{customer.location}</div>
+                                    <div className="text-xs text-blue-600 dark:text-blue-400 truncate">{customer.phone}</div>
                                   </div>
                                 </div>
                               </td>
-                              <td className="px-6 py-4 text-sm">
-                                {customer.joinDate ? new Date(customer.joinDate).toLocaleDateString('en-GB') : 'N/A'}
+                              <td className="px-4 py-4 text-sm w-1/4">
+                                <div className="font-medium">
+                                  {customer.joinDate ? new Date(customer.joinDate).toLocaleDateString('en-GB') : 'N/A'}
+                                </div>
                               </td>
-                              <td className="px-6 py-4 z-10 sticky right-0">
+                              <td className="px-4 py-4 w-1/4">
                                 <div className="flex flex-col space-y-2">
-                                  <div className={`font-bold text-sm ${(customerOutstandingMap[customer.id] || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                  <div className={`font-bold text-lg ${(customerOutstandingMap[customer.id] || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
                                     {formatCurrency(customerOutstandingMap[customer.id] || 0, currency)}
                                   </div>
-                                  <div className="flex flex-col space-y-1">
+                                  <div className="flex flex-wrap gap-1">
                                     {canEdit && (
-                                      <button onClick={() => openModal('edit', customer)} className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 font-medium text-xs text-left">
+                                      <button onClick={() => openModal('edit', customer)} className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 font-medium text-xs bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded">
                                         Edit
                                       </button>
                                     )}
                                     {canDelete && (
-                                      <button onClick={() => openDeleteConfirm(customer)} className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 font-medium text-xs text-left">
+                                      <button onClick={() => openDeleteConfirm(customer)} className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 font-medium text-xs bg-red-50 dark:bg-red-900/20 px-2 py-1 rounded">
                                         Delete
                                       </button>
                                     )}
