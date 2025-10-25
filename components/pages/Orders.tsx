@@ -1584,10 +1584,10 @@ export const Orders: React.FC = () => {
         </Card>
 
         <Modal isOpen={modalState === 'create' || modalState === 'edit'} onClose={closeModal} title={modalState === 'create' ? '🛒 Create New Order' : `📝 Edit Order ${currentOrder?.id}`}>
-          <div className="flex flex-col h-[85vh] sm:h-[650px] lg:h-[700px] max-h-[90vh] bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-slate-900 dark:to-slate-800">
-            {/* Ultra Compact Header Section */}
-            <div className="p-1.5 sm:p-4 border-b border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-800 flex-shrink-0">
-              <div className="space-y-1.5 sm:space-y-4">
+          <div className="flex flex-col h-[85vh] sm:h-[90vh] lg:h-[800px] max-h-[90vh] bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-slate-900 dark:to-slate-800">
+            {/* Compact Header Section */}
+            <div className="p-1 sm:p-2 border-b border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-800 flex-shrink-0">
+              <div className="space-y-1">
                 {/* Ultra Compact Customer Selection */}
                 <div className="relative" ref={customerDropdownRef}>
                   <label htmlFor="customer" className="block mb-0.5 text-xs font-medium text-slate-700 dark:text-slate-300">
@@ -1832,9 +1832,9 @@ export const Orders: React.FC = () => {
               </div>
             </div>
 
-            {/* Ultra Compact Bottom Section */}
+            {/* Compact Bottom Section */}
             <div className="border-t border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 flex-shrink-0">
-              <div className="p-1.5 space-y-1.5">
+              <div className="p-0.5 sm:p-1 space-y-1">
                 {/* Ultra Compact Order Summary */}
                 <div className="p-1.5 bg-slate-50 dark:bg-slate-700 rounded border border-slate-300 dark:border-slate-500">
                   <div className="flex items-center justify-between text-xs">
@@ -1865,23 +1865,24 @@ export const Orders: React.FC = () => {
                   />
                 </div>
                 
-                {/* Ultra Compact Action Buttons */}
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-xs text-slate-600 dark:text-slate-400">
+                {/* Compact Action Section */}
+                <div className="space-y-1">
+                  <div className="text-center text-xs font-medium text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-800 p-1 sm:p-1.5 rounded">
                     Items: {inStockItems + heldItemsCount}
                   </div>
-                  <div className="flex gap-1.5">
+                  
+                  <div className="flex gap-1 sm:gap-2 w-full">
                     <button 
                       onClick={closeModal} 
                       type="button" 
-                      className="px-2 py-1.5 text-slate-600 bg-white hover:bg-slate-50 border border-slate-200 text-xs font-medium rounded transition-all duration-200 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-500"
+                      className="flex-1 px-2 py-1.5 sm:px-3 sm:py-2 text-slate-600 bg-white hover:bg-slate-50 border border-slate-200 text-xs font-medium rounded transition-all duration-200 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-500"
                     >
                       Cancel
                     </button>
                     <button 
                       onClick={handleSaveOrder} 
                       type="button" 
-                      className="px-2 py-1.5 text-white bg-blue-600 hover:bg-blue-700 border border-blue-600 text-xs font-semibold rounded transition-all duration-200 disabled:bg-slate-400 disabled:cursor-not-allowed" 
+                      className="flex-1 px-2 py-1.5 sm:px-3 sm:py-2 text-white bg-blue-600 hover:bg-blue-700 border border-blue-600 text-xs font-semibold rounded transition-all duration-200 disabled:bg-slate-400 disabled:cursor-not-allowed" 
                       disabled={(inStockItems + heldItemsCount) === 0 || !selectedCustomer}
                     >
                       {modalState === 'create' ? 'Create' : 'Save'}
@@ -1889,6 +1890,8 @@ export const Orders: React.FC = () => {
                   </div>
                 </div>
               </div>
+              {/* Safe area padding for mobile devices */}
+              <div className="h-4 sm:h-0 bg-white dark:bg-slate-800 flex-shrink-0"></div>
             </div>
           </div>
         </Modal>

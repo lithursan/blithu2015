@@ -54,7 +54,7 @@ export const Customers: React.FC = () => {
       setCurrentCustomer({ ...customer });
     } else {
       // For add mode, set default values
-      setCurrentCustomer({ name: '', email: '', phone: '', location: '', outstandingBalance: 0, avatarUrl: `https://i.pravatar.cc/100?u=new` });
+      setCurrentCustomer({ name: '', email: '', phone: '', location: '', outstandingBalance: 0, avatarUrl: `/lord-shiva-avatar.jpg` });
     }
     setIsModalOpen(true);
   };
@@ -120,7 +120,7 @@ export const Customers: React.FC = () => {
             joindate: new Date().toISOString().split('T')[0],
             totalspent: 0,
             outstandingbalance: 0,
-            avatarurl: currentCustomer.avatarUrl || `https://i.pravatar.cc/40?u=${currentCustomer.email || 'new'}`,
+            avatarurl: currentCustomer.avatarUrl || `/lord-shiva-avatar.jpg`,
           };
           
           const { error } = await supabase.from('customers').insert([newCustomer]);
@@ -649,7 +649,7 @@ export const Customers: React.FC = () => {
             <div className="p-6 space-y-4">
                 <div className="flex flex-col items-center space-y-2">
                     <img 
-                        src={currentCustomer.avatarUrl || 'https://i.pravatar.cc/100?u=default'} 
+                        src={currentCustomer.avatarUrl || '/lord-shiva-avatar.jpg'} 
                         alt="Avatar preview" 
                         className="w-24 h-24 rounded-full object-cover border-4 border-slate-200 dark:border-slate-600"
                     />
