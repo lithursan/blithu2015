@@ -56,7 +56,7 @@ export interface OrderItem {
   productId: string;
   quantity: number;
   price: number; // price at the time of order to prevent changes if product price updates
-  discount?: number; // discount percentage
+  free?: number; // free quantity given with this item
   isReturn?: boolean; // true if this item is a returned product
 }
 
@@ -70,6 +70,7 @@ export interface Order {
   status: OrderStatus;
   orderItems: OrderItem[];
   backorderedItems?: OrderItem[];
+  freeItems?: OrderItem[]; // Free items given with the order
   chequeBalance?: number;
   creditBalance?: number;
   assignedUserId?: string; // ID of the user (Sales Rep or Driver) who created/manages the order

@@ -39,6 +39,11 @@ export const Customers: React.FC = () => {
     [currentUser]
   );
 
+  const canDelete = useMemo(() => 
+    currentUser?.role === UserRole.Admin,
+    [currentUser]
+  );
+
 
 
 
@@ -199,6 +204,15 @@ export const Customers: React.FC = () => {
   const filteredCustomers = useMemo(() => {
     let filtered = customers;
 
+    // Sales Rep filter - show only customers with orders assigned to them
+    if (currentUser?.role === UserRole.Sales) {
+      filtered = filtered.filter(customer => {
+        // Check if this customer has any orders assigned to the current sales rep
+        const customerOrders = orders.filter(o => o.customerId === customer.id && o.assignedUserId === currentUser.id);
+        return customerOrders.length > 0;
+      });
+    }
+
     // Search filter
     if (searchTerm) {
       filtered = filtered.filter(customer =>
@@ -316,8 +330,17 @@ export const Customers: React.FC = () => {
         return acc;
     }, {} as Record<string, Customer[]>);
 
+    // Sort customers within each supplier group by outstanding amount (highest first)
+    Object.keys(grouped).forEach(supplierName => {
+        grouped[supplierName].sort((a, b) => {
+            const outstandingA = customerOutstandingMap[a.id] || 0;
+            const outstandingB = customerOutstandingMap[b.id] || 0;
+            return outstandingB - outstandingA; // Descending order (highest outstanding first)
+        });
+    });
+
     return grouped;
-  }, [filteredCustomers, orders, products]);
+  }, [filteredCustomers, orders, products, customerOutstandingMap]);
 
   const allCustomers = Object.values(customersBySupplier).flat() as Customer[];
   // Total outstanding from orders table
@@ -523,38 +546,88 @@ export const Customers: React.FC = () => {
                       <thead className="text-xs text-slate-700 uppercase bg-slate-50 dark:bg-slate-700 dark:text-slate-400">
                         <tr>
                           <th scope="col" className="px-6 py-3 z-20 sticky left-0">Customer</th>
-                          <th scope="col" className="px-6 py-3 z-20 sticky left-[112px]">Contact</th>
-                          <th scope="col" className="px-6 py-3">Total Spent</th>
-                          <th scope="col" className="px-6 py-3">Outstanding</th>
-                          {canEdit && <th scope="col" className="px-6 py-3 z-20 sticky right-0">Actions</th>}
+                          <th scope="col" className="px-6 py-3">Join Date</th>
+                          <th scope="col" className="px-6 py-3 z-20 sticky right-0">Outstanding & Actions</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {(supplierCustomers as Customer[]).map((customer) => (
-                          <tr key={customer.id} className="border-b dark:bg-slate-800 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600">
-                            <td className="px-6 py-4 font-medium text-slate-900 dark:text-white z-10 sticky left-0">
+                        {(supplierCustomers as Customer[]).map((customer) => {
+                          // Calculate primary supplier for this customer
+                          const customerOrders = orders.filter(o => o.customerId === customer.id);
+                          let primarySupplier = 'Unassigned';
+                          let primaryCategory = 'N/A';
+                          
+                          if (customerOrders.length > 0) {
+                            // Calculate primary supplier based on spending
+                            const spendingBySupplier: Record<string, number> = {};
+                            const categoryCount: Record<string, number> = {};
+                            
+                            customerOrders.forEach(order => {
+                              order.orderItems.forEach(item => {
+                                const product = products.find(p => p.id === item.productId);
+                                if (product) {
+                                  // Supplier calculation
+                                  const supplier = product.supplier || 'Unassigned';
+                                  const itemTotal = item.price * item.quantity * (1 - (item.discount || 0) / 100);
+                                  spendingBySupplier[supplier] = (spendingBySupplier[supplier] || 0) + itemTotal;
+                                  
+                                  // Category calculation
+                                  categoryCount[product.category] = (categoryCount[product.category] || 0) + item.quantity;
+                                }
+                              });
+                            });
+                            
+                            // Get primary supplier and category
+                            if (Object.keys(spendingBySupplier).length > 0) {
+                              primarySupplier = Object.keys(spendingBySupplier).reduce((a, b) => 
+                                spendingBySupplier[a] > spendingBySupplier[b] ? a : b
+                              );
+                            }
+                            
+                            if (Object.keys(categoryCount).length > 0) {
+                              primaryCategory = Object.keys(categoryCount).reduce((a, b) => 
+                                categoryCount[a] > categoryCount[b] ? a : b
+                              );
+                            }
+                          }
+                          
+                          return (
+                            <tr key={customer.id} className="border-b dark:bg-slate-800 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600">
+                              <td className="px-6 py-4 font-medium text-slate-900 dark:text-white z-10 sticky left-0">
                                 <div className="flex items-center space-x-3">
-                                    <img src={customer.avatarUrl} alt={customer.name} className="w-10 h-10 rounded-full" />
-                                    <div>
-                                        <span>{customer.name}</span>
-                                        <p className="text-xs text-slate-500">{customer.location}</p>
-                                    </div>
+                                  <img src={customer.avatarUrl} alt={customer.name} className="w-10 h-10 rounded-full" />
+                                  <div>
+                                    <span className="block">{customer.name}</span>
+                                    <p className="text-xs text-slate-500">{customer.location}</p>
+                                    <p className="text-xs text-blue-600">{customer.phone}</p>
+                                  </div>
                                 </div>
-                            </td>
-                            <td className="px-6 py-4 z-10 sticky left-[112px]">
-                                <div>{customer.email}</div>
-                                <div className="text-xs text-slate-500">{customer.phone}</div>
-                            </td>
-                            <td className="px-6 py-4">{formatCurrency(customerTotalSpentMap[customer.id] || 0, currency)}</td>
-                            <td className={`px-6 py-4 font-bold ${(customerOutstandingMap[customer.id] || 0) > 0 ? 'text-red-500' : 'text-green-500'}`}>{formatCurrency(customerOutstandingMap[customer.id] || 0, currency)}</td>
-              {canEdit && (
-                <td className="px-6 py-4 flex items-center space-x-2 z-10 sticky right-0">
-                                <button onClick={() => openModal('edit', customer)} className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">Edit</button>
-                                <button onClick={() => openDeleteConfirm(customer)} className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300">Delete</button>
-                                </td>
-                            )}
-                          </tr>
-                        ))}
+                              </td>
+                              <td className="px-6 py-4 text-sm">
+                                {customer.joinDate ? new Date(customer.joinDate).toLocaleDateString('en-GB') : 'N/A'}
+                              </td>
+                              <td className="px-6 py-4 z-10 sticky right-0">
+                                <div className="flex flex-col space-y-2">
+                                  <div className={`font-bold text-sm ${(customerOutstandingMap[customer.id] || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                    {formatCurrency(customerOutstandingMap[customer.id] || 0, currency)}
+                                  </div>
+                                  <div className="flex flex-col space-y-1">
+                                    {canEdit && (
+                                      <button onClick={() => openModal('edit', customer)} className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 font-medium text-xs text-left">
+                                        Edit
+                                      </button>
+                                    )}
+                                    {canDelete && (
+                                      <button onClick={() => openDeleteConfirm(customer)} className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 font-medium text-xs text-left">
+                                        Delete
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>

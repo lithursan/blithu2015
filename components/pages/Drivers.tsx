@@ -8,6 +8,7 @@ import { Badge } from '../ui/Badge';
 import { COMPANY_DETAILS } from '../../constants';
 import { supabase } from '../../supabaseClient';
 import { exportDriverAllocations, exportDriverSales } from '../../utils/exportUtils';
+import { LoadingSpinner } from '@/hooks/useLoading';
 
 const formatCurrency = (amount: number, currency: string) => {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency, minimumFractionDigits: 2 }).format(amount).replace('$', `${currency} `);
@@ -50,16 +51,7 @@ export const Drivers: React.FC = () => {
     let fallbackUI: React.ReactNode = null;
     if (!drivers || drivers.length === 0) {
         fallbackUI = (
-            <div className="p-8 text-center">
-                <Card className="max-w-md mx-auto">
-                    <CardHeader>
-                        <CardTitle>No Active Drivers Found</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <p className="text-slate-600 dark:text-slate-400">No drivers are currently active in the system. Please add drivers or check your database.</p>
-                    </CardContent>
-                </Card>
-            </div>
+            <LoadingSpinner size="lg"/>
         );
     }
 

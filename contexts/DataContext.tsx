@@ -88,9 +88,15 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             if (!ordersError && ordersData) {
                 const mappedOrders = ordersData.map((row: DatabaseOrder & { returnamount?: number }) => {
                     const orderItemsResult = safeJsonParse(row.orderitems, [], 'orderitems', row.id);
+                    const freeItemsResult = safeJsonParse(row.freeitems, [], 'freeitems', row.id);
+                    
                     if (!orderItemsResult.success) {
                         // Log error but continue with fallback
                         console.warn(`Using empty array for order items in order ${row.id}`);
+                    }
+                    if (!freeItemsResult.success) {
+                        // Log error but continue with fallback
+                        console.warn(`Using empty array for free items in order ${row.id}`);
                     }
 
                     return {
@@ -105,6 +111,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                         assignedUserId: row.assigneduserid,
                         orderItems: orderItemsResult.success ? orderItemsResult.data : [],
                         backorderedItems: [],
+                        freeItems: freeItemsResult.success ? freeItemsResult.data : [],
                         expectedDeliveryDate: row.expecteddeliverydate,
                         chequeBalance: row.chequebalance == null || isNaN(Number(row.chequebalance)) ? 0 : Number(row.chequebalance),
                         creditBalance: row.creditbalance == null || isNaN(Number(row.creditbalance)) ? 0 : Number(row.creditbalance),

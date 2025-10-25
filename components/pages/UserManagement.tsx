@@ -316,14 +316,39 @@ export const UserManagement: React.FC = () => {
                                 </tr>
                             </thead>
                             <tbody>
-                                {filteredUsers.map((user) => (
-                                    <tr key={user.id} className="bg-white border-b dark:bg-slate-800 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600">
-                                        <td className="px-6 py-4 font-medium text-slate-900 dark:text-white">
-                                            <div className="flex items-center space-x-3">
-                                                <img src={user.avatarUrl} alt={user.name} className="w-10 h-10 rounded-full" />
-                                                <span>{user.name}</span>
+                                {filteredUsers.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={6} className="px-6 py-8 text-center">
+                                            <div className="flex flex-col items-center space-y-2">
+                                                <svg className="w-12 h-12 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
+                                                </svg>
+                                                <p className="text-slate-500 dark:text-slate-400 font-medium">
+                                                    {searchTerm ? `No users found matching "${searchTerm}"` : 'No users found'}
+                                                </p>
+                                                <p className="text-xs text-slate-400 dark:text-slate-500">
+                                                    Total users: {users.length} | Filtered: {filteredUsers.length}
+                                                </p>
+                                                {!searchTerm && (
+                                                    <button
+                                                        onClick={() => openModal('add')}
+                                                        className="mt-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
+                                                    >
+                                                        Add First User
+                                                    </button>
+                                                )}
                                             </div>
                                         </td>
+                                    </tr>
+                                ) : (
+                                    filteredUsers.map((user) => (
+                                        <tr key={user.id} className="bg-white border-b dark:bg-slate-800 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600">
+                                            <td className="px-6 py-4 font-medium text-slate-900 dark:text-white">
+                                                <div className="flex items-center space-x-3">
+                                                    <img src={user.avatarUrl} alt={user.name} className="w-10 h-10 rounded-full" />
+                                                    <span>{user.name}</span>
+                                                </div>
+                                            </td>
                                         <td className="px-6 py-4">
                                             <div>{user.email}</div>
                                             <div className="text-xs text-slate-500">{user.phone || 'No phone'}</div>
@@ -365,7 +390,8 @@ export const UserManagement: React.FC = () => {
                                             <button onClick={() => openDeleteConfirm(user)} className="font-medium text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300">Delete</button>
                                         </td>
                                     </tr>
-                                ))}
+                                    ))
+                                )}
                             </tbody>
                         </table>
                     </div>

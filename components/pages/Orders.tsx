@@ -77,8 +77,8 @@ const OrderBill: React.FC<OrderBillProps> = ({ order, customer, products, curren
             <tr>
               <th className="py-2 px-4 text-left font-semibold">Product</th>
               <th className="py-2 px-4 text-right font-semibold">Qty</th>
+              <th className="py-2 px-4 text-right font-semibold">Free</th>
               <th className="py-2 px-4 text-right font-semibold">Price</th>
-              <th className="py-2 px-4 text-right font-semibold">Discount</th>
               <th className="py-2 px-4 text-right font-semibold">Subtotal</th>
             </tr>
           </thead>
@@ -86,13 +86,13 @@ const OrderBill: React.FC<OrderBillProps> = ({ order, customer, products, curren
             {(order.orderItems ?? []).map(item => {
               const product = findProduct(item.productId);
               if (!product) return null;
-              const subtotal = item.price * item.quantity * (1 - (item.discount || 0) / 100);
+              const subtotal = item.price * item.quantity;
               return (
                 <tr key={item.productId} className="border-b">
                   <td className="py-3 px-4">{product.name}</td>
                   <td className="py-3 px-4 text-right">{item.quantity}</td>
+                  <td className="py-3 px-4 text-right font-bold text-green-600">{item.free || 0}</td>
                   <td className="py-3 px-4 text-right">{item.price}</td>
-                  <td className="py-3 px-4 text-right">{item.discount || 0}%</td>
                   <td className="py-3 px-4 text-right font-semibold">{formatCurrency(subtotal, currency)}</td>
                 </tr>
               );
@@ -173,7 +173,6 @@ export const Orders: React.FC = () => {
 
 // printWindow.print() and printWindow.close() should only be inside generateAndDownloadBill, not at the top level
   const [orderNotes, setOrderNotes] = useState('');
-  const [orderMethod, setOrderMethod] = useState('');
   // ...existing code...
   const { orders, setOrders, customers, products, setProducts, users, driverAllocations, setDriverAllocations, refetchData } = useData();
   const { currentUser } = useAuth();
@@ -194,6 +193,7 @@ export const Orders: React.FC = () => {
   const [orderItems, setOrderItems] = useState<Record<string, number>>({});
   const [orderDiscounts, setOrderDiscounts] = useState<Record<string, number>>({});
   const [orderItemPrices, setOrderItemPrices] = useState<Record<string, number>>({});
+  const [freeItems, setFreeItems] = useState<Record<string, number>>({});
   const [heldItems, setHeldItems] = useState<Set<string>>(new Set());
   const [orderToDelete, setOrderToDelete] = useState<Order | null>(null);
   const [viewingOrder, setViewingOrder] = useState<Order | null>(null);
@@ -347,6 +347,11 @@ export const Orders: React.FC = () => {
         );
     } 
     
+    // Filter orders based on user role
+    if (currentUser?.role === UserRole.Sales) {
+      // Sales rep can only see orders assigned to them
+      displayOrders = displayOrders.filter(order => order.assignedUserId === currentUser.id);
+    }
     // Remove driver filter: show all orders for driver login
     // else if (currentUser?.role === UserRole.Driver) {
     //   displayOrders = displayOrders.filter(order => order.assignedUserId === currentUser.id);
@@ -410,6 +415,37 @@ export const Orders: React.FC = () => {
         });
     }
 
+    // For drivers: sort by status and outstanding amount
+    if (currentUser?.role === UserRole.Driver) {
+      return displayOrders.sort((a, b) => {
+        // Calculate outstanding amounts
+        const outstandingA = ((typeof a.chequeBalance === 'number' && !isNaN(a.chequeBalance) ? a.chequeBalance : 0) + (typeof a.creditBalance === 'number' && !isNaN(a.creditBalance) ? a.creditBalance : 0));
+        const outstandingB = ((typeof b.chequeBalance === 'number' && !isNaN(b.chequeBalance) ? b.chequeBalance : 0) + (typeof b.creditBalance === 'number' && !isNaN(b.creditBalance) ? b.creditBalance : 0));
+        
+        // Priority order: Orange (Pending) = 1, Red (Delivered with outstanding) = 2, Green (Delivered no outstanding) = 3
+        const getOrderPriority = (order: any) => {
+          const outstanding = ((typeof order.chequeBalance === 'number' && !isNaN(order.chequeBalance) ? order.chequeBalance : 0) + (typeof order.creditBalance === 'number' && !isNaN(order.creditBalance) ? order.creditBalance : 0));
+          
+          if (order.status === 'Pending') return 1; // Orange - Top priority
+          if (order.status === 'Delivered' && outstanding > 0) return 2; // Red - Second priority
+          if (order.status === 'Delivered' && outstanding === 0) return 3; // Green - Last priority
+          return 4; // Other statuses
+        };
+        
+        const priorityA = getOrderPriority(a);
+        const priorityB = getOrderPriority(b);
+        
+        // If same priority, sort by date (newest first)
+        if (priorityA === priorityB) {
+          return new Date(b.date).getTime() - new Date(a.date).getTime();
+        }
+        
+        // Otherwise sort by priority
+        return priorityA - priorityB;
+      });
+    }
+    
+    // For non-drivers: keep original date sorting
     return displayOrders.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [orders, products, statusFilter, searchTerm, currentUser, deliveryDateFilter, dateRangeFilter]);
     
@@ -444,6 +480,7 @@ export const Orders: React.FC = () => {
     setCustomerSearch(customers[0]?.name || '');
     setOrderItems({});
     setOrderDiscounts({});
+    setFreeItems({});
     const initialPrices = products.reduce((acc, p) => {
         acc[p.id] = p.price;
         return acc;
@@ -465,8 +502,11 @@ export const Orders: React.FC = () => {
       acc[item.productId] = item.quantity;
       return acc;
     }, {} as Record<string, number>);
-    const discounts = (order.orderItems ?? []).reduce((acc, item) => {
-      acc[item.productId] = item.discount || 0;
+    const discounts = {} as Record<string, number>; // Remove discount functionality
+    const frees = allItems.reduce((acc, item) => {
+      if (item.free && item.free > 0) {
+        acc[item.productId] = item.free;
+      }
       return acc;
     }, {} as Record<string, number>);
     const prices = allItems.reduce((acc, item) => {
@@ -482,6 +522,7 @@ export const Orders: React.FC = () => {
     const backorderedIds = new Set((order.backorderedItems ?? []).map(item => item.productId));
     setOrderItems(items);
     setOrderDiscounts(discounts);
+    setFreeItems(frees);
     setOrderItemPrices(prices);
     setHeldItems(backorderedIds);
     setExpectedDeliveryDate(order.expectedDeliveryDate || '');
@@ -553,6 +594,14 @@ export const Orders: React.FC = () => {
     setOrderItemPrices(prev => ({ ...prev, [productId]: newPrice }));
 };
 
+  const handleFreeQuantityChange = (productId: string, quantity: number) => {
+    const product = products.find(p => p.id === productId);
+    if (!product) return;
+    
+    const newQuantity = Math.max(0, quantity);
+    setFreeItems(prev => ({ ...prev, [productId]: newQuantity }));
+  };
+
   const toggleHoldItem = (productId: string) => {
     setHeldItems(prev => {
         const newSet = new Set(prev);
@@ -609,15 +658,21 @@ export const Orders: React.FC = () => {
       const isHeld = heldItems.has(productId);
       const isOutOfStock = getEffectiveStock(product) === 0;
       const price = orderItemPrices[productId] ?? product?.price ?? 0;
+      const freeQuantity = freeItems[productId] || 0;
 
       if (isHeld || isOutOfStock) {
-        newBackorderedItems.push({ productId, quantity, price });
+        newBackorderedItems.push({ 
+          productId, 
+          quantity, 
+          price,
+          free: freeQuantity
+        });
       } else {
          newOrderItems.push({ 
           productId, 
           quantity, 
           price: price,
-          discount: orderDiscounts[productId] || 0,
+          free: freeQuantity, // Include free quantity in regular order item
         });
       }
     });
@@ -654,7 +709,8 @@ export const Orders: React.FC = () => {
         assigneduserid: currentUser?.id ?? '',
         orderitems: JSON.stringify(newOrderItems),
         backordereditems: JSON.stringify(newBackorderedItems),
-        method: orderMethod || '',
+        freeitems: JSON.stringify([]), // Keep empty for backward compatibility
+        method: '',
         expecteddeliverydate: expectedDeliveryDate || null,
         orderdate: expectedDeliveryDate || new Date().toISOString().slice(0, 10),
         totalamount: total,
@@ -729,7 +785,8 @@ export const Orders: React.FC = () => {
         assigneduserid: currentOrder.assigneduserid ?? '',
         orderitems: JSON.stringify(newOrderItems),
         backordereditems: JSON.stringify(newBackorderedItems),
-        method: orderMethod || '',
+        freeitems: JSON.stringify([]), // Keep empty for backward compatibility
+        method: '',
         expecteddeliverydate: expectedDeliveryDate || null,
         orderdate: expectedDeliveryDate || currentOrder.orderdate || new Date().toISOString().slice(0, 10),
         totalamount: total,
@@ -838,8 +895,7 @@ export const Orders: React.FC = () => {
     }
     
     const newTotal = updatedOrder.orderItems.reduce((sum: number, item: OrderItem) => {
-        const discount = item.discount || 0;
-        const subtotal = item.price * item.quantity * (1 - discount / 100);
+        const subtotal = item.price * item.quantity;
         return sum + subtotal;
     }, 0);
     updatedOrder.total = newTotal;
@@ -941,19 +997,19 @@ export const Orders: React.FC = () => {
 
 
 
-  const handleConfirmFinalize = async (orderToProcess?: Order) => {
+  const handleConfirmFinalize = async (orderToProcess?: Order): Promise<boolean> => {
   const targetOrder = orderToProcess || orderToFinalize;
-  if (!targetOrder) return;
+  if (!targetOrder) return false;
   // Prevent double delivery logic
   if (targetOrder.status === OrderStatus.Delivered) {
     // Already delivered, skip all allocation/stock logic
-    return;
+    return true;
   }
   // Integrity check
   if (!targetOrder || !targetOrder.orderItems || targetOrder.orderItems.length === 0) {
     alert("Cannot finalize an order with no items.");
     if (!orderToProcess) setOrderToFinalize(null);
-    return;
+    return false;
   }
   // Check stock levels before proceeding
   let stockSufficient = true;
@@ -967,7 +1023,7 @@ export const Orders: React.FC = () => {
   }
   if (!stockSufficient) {
     if (!orderToProcess) setOrderToFinalize(null);
-    return; // Abort the finalization
+    return false; // Abort the finalization
   }
   // --- Update sold column in orders table ---
   const soldQty = targetOrder.orderItems.reduce((sum, i) => sum + i.quantity, 0);
@@ -1035,6 +1091,7 @@ export const Orders: React.FC = () => {
     // 2. Update order status
     const updatedOrder: Order = { ...targetOrder, status: OrderStatus.Delivered };
     // End of handleConfirmFinalize function
+    return true;
   }
   
   const [billLoading, setBillLoading] = useState(false);
@@ -1060,7 +1117,12 @@ export const Orders: React.FC = () => {
         return;
       }
       try {
-        await handleConfirmFinalize(viewingOrder); // This will update status to Delivered and reduce stock/allocation
+        const success = await handleConfirmFinalize(viewingOrder); // This will update status to Delivered and reduce stock/allocation
+        if (!success) {
+          // Stock validation failed, don't print bill and keep status as pending
+          setBillLoading(false);
+          return;
+        }
         // Update viewingOrder status in UI immediately for live sync
         if (setViewingOrder) setViewingOrder({ ...viewingOrder, status: OrderStatus.Delivered });
         // Also update the order in the orders list if present
@@ -1178,7 +1240,8 @@ export const Orders: React.FC = () => {
         <div class="header">
           <div class="company-info">
             <h1>${COMPANY_DETAILS.name}</h1>
-            <p>${COMPANY_DETAILS.address}</p>
+            <p>A9 Road, Kanthaswamy Kovil, Kilinochchi,</p>
+            <p>Sri Lanka.</p>
             <p>${COMPANY_DETAILS.email}</p>
             <p>${COMPANY_DETAILS.phone}</p>
           </div>
@@ -1204,7 +1267,7 @@ export const Orders: React.FC = () => {
           <tbody>
             ${(viewingOrder.orderItems ?? []).map(item => {
               const product = products.find(p => p.id === item.productId);
-              const subtotal = item.price * item.quantity * (1 - (item.discount || 0) / 100);
+              const subtotal = item.price * item.quantity;
               return `
                 <tr>
                   <td>${product?.name || 'Unknown'}</td>
@@ -1218,6 +1281,7 @@ export const Orders: React.FC = () => {
         </table>
 
         <div class="total-section">
+          <div><span>Invoice Total:</span><span>${formatCurrency(viewingOrder.total || 0, currency)}</span></div>
           <div><span>Total Items:</span><span>${viewingOrder.orderItems?.reduce((sum, item) => sum + item.quantity, 0) ?? 0}</span></div>
           <div><span>Return Amount:</span><span>${formatCurrency(viewingOrder.returnAmount || 0, currency)}</span></div>
           <div><span>Paid:</span><span>${formatCurrency(editableAmountPaid, currency)}</span></div>
@@ -1307,7 +1371,7 @@ export const Orders: React.FC = () => {
         </div>
 
         <Card>
-          <CardHeader>
+          <CardHeader className="sticky top-0 z-30 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
             <CardTitle>{isManagerView ? 'Order History' : 'My Orders'}</CardTitle>
             <CardDescription>
                 {isManagerView ? 'View and manage all customer orders.' : 'View and manage orders assigned to you.'}
@@ -1380,16 +1444,8 @@ export const Orders: React.FC = () => {
                       <table className="w-full text-sm text-left text-slate-500 dark:text-slate-400">
                         <thead className="text-xs text-slate-700 uppercase bg-slate-50 dark:bg-slate-700 dark:text-slate-400">
                           <tr>
-                            <th scope="col" className="px-6 py-3 z-20 sticky left-0 bg-slate-50 dark:bg-slate-700 min-w-[112px]">Order ID</th>
-                            <th scope="col" className="px-6 py-3 z-20 sticky left-[112px] bg-slate-50 dark:bg-slate-700">Customer Name</th>
-                            {isManagerView && <th scope="col" className="px-6 py-3">Assigned To</th>}
-                            <th scope="col" className="px-6 py-3">Date</th>
-                            <th scope="col" className="px-6 py-3">Total</th>
-                            {isManagerView && <th scope="col" className="px-6 py-3">Cost Price</th>}
-                            <th scope="col" className="px-6 py-3">Items</th>
-                            <th scope="col" className="px-6 py-3">Status</th>
-                            {currentUser?.role !== UserRole.Driver && <th scope="col" className="px-6 py-3">Outstanding</th>}
-                            <th scope="col" className="px-6 py-3 z-20 sticky right-0 bg-slate-50 dark:bg-slate-700">Actions</th>
+                            <th scope="col" className="px-4 py-3 z-10 sticky left-0 bg-slate-50 dark:bg-slate-700 min-w-[250px]">Order Details</th>
+                            <th scope="col" className="px-6 py-3 z-10 sticky right-0 bg-slate-50 dark:bg-slate-700 min-w-[200px]">Status, Outstanding & Actions</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1412,75 +1468,87 @@ export const Orders: React.FC = () => {
                 }
                 return (
                   <tr key={order.id} className="border-b dark:bg-slate-800 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600">
-                    <td className="px-6 py-4 font-medium text-slate-900 dark:text-white z-10 sticky left-0 bg-white dark:bg-slate-800 min-w-[112px]">{order.id}</td>
-                    <td className="px-6 py-4 z-10 sticky left-[112px] bg-white dark:bg-slate-800">{order.customerName}</td>
-                    {isManagerView && (
-                      <td className="px-6 py-4">
-                        {assignedUser ? (
-                          <div className="flex items-center space-x-2">
-                            {assignedUser.avatarUrl && <img src={assignedUser.avatarUrl} alt={assignedUser.name} className="w-6 h-6 rounded-full" />}
-                            <span className="text-xs">{assignedUser.name}</span>
-                          </div>
-                        ) : (
-                          <span className="text-xs text-slate-400">N/A</span>
-                        )}
-                      </td>
-                    )}
-                    <td className="px-6 py-4">{
-                                        order.date
-                                          ? (() => {
-                                              const d = new Date(order.date);
-                                              return isNaN(d.getTime())
-                                                ? <span className="text-xs text-red-500">{order.date}</span>
-                                                : d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
-                                            })()
-                                          : 'N/A'
-                                      }</td>
-                    <td className="px-6 py-4">{typeof order.total === 'number' ? `LKR${order.total.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : 'LKR0'}</td>
-                    {isManagerView && (
-                      <td className="px-6 py-4">{
-                        (() => {
-                          if (!order.orderItems || !Array.isArray(order.orderItems)) return 'LKR0';
-                          const totalCost = order.orderItems.reduce((sum, item) => {
-                            const product = products.find(p => p.id === item.productId);
-                            return sum + ((product?.costPrice || 0) * (item.quantity || 0));
-                          }, 0);
-                          return `LKR${totalCost.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
-                        })()
-                      }</td>
-                    )}
-                    <td className="px-6 py-4">
-                      <div className="flex items-center space-x-2">
-                        <span className="inline-block bg-blue-100 dark:bg-blue-700 px-2 py-1 rounded text-xs text-blue-800 dark:text-blue-200">
-                          {(order.orderItems ?? []).reduce((total, item) => total + item.quantity, 0)} items
-                        </span>
-                        <span className="text-xs text-slate-500 dark:text-slate-400">
-                          (View details to see items)
-                        </span>
+                    <td className={`px-4 py-4 font-medium z-5 sticky left-0 bg-white dark:bg-slate-800 min-w-[250px] ${
+                      (() => {
+                        const outstandingAmount = ((typeof order.chequeBalance === 'number' && !isNaN(order.chequeBalance) ? order.chequeBalance : 0) + (typeof order.creditBalance === 'number' && !isNaN(order.creditBalance) ? order.creditBalance : 0));
+                        
+                        if (order.status === 'Pending') {
+                          // Pending - Orange text
+                          return 'text-orange-700 dark:text-orange-400';
+                        } else if (order.status === 'Delivered') {
+                          if (outstandingAmount === 0) {
+                            // Delivered + Outstanding = 0 - Green text
+                            return 'text-green-700 dark:text-green-400';
+                          } else {
+                            // Delivered + Outstanding ≠ 0 - Red text
+                            return 'text-red-700 dark:text-red-400';
+                          }
+                        }
+                        return 'text-slate-900 dark:text-white';
+                      })()
+                    }`}>
+                      <div>
+                        <div className="font-bold text-sm">{order.id}</div>
+                        <div className="text-xs text-slate-600 dark:text-slate-400">{order.customerName}</div>
+                        <div className="text-xs text-blue-600 dark:text-blue-400 mt-1">{
+                          order.date
+                            ? (() => {
+                                const d = new Date(order.date);
+                                return isNaN(d.getTime())
+                                  ? order.date
+                                  : d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                              })()
+                            : 'N/A'
+                        }</div>
                       </div>
                     </td>
-                    <td className="px-6 py-4">
-                      <Badge variant={getStatusBadgeVariant(order.status)}>{order.status}</Badge>
-                    </td>
-                    {currentUser?.role !== UserRole.Driver && (
-                      <td className="px-6 py-4">
-                        <div>
-                          <span className="block text-xs text-slate-600">Cheque: <span className="font-bold">{typeof order.chequeBalance === 'number' && !isNaN(order.chequeBalance) ? `LKR${order.chequeBalance.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : 'LKR0.00'}</span></span>
-                          <span className="block text-xs text-slate-600">Credit: <span className="font-bold">{typeof order.creditBalance === 'number' && !isNaN(order.creditBalance) ? `LKR${order.creditBalance.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : 'LKR0.00'}</span></span>
-                          <span className="block text-xs text-blue-600">Return Amount: <span className="font-bold">{typeof order.returnAmount === 'number' && !isNaN(order.returnAmount) ? `LKR${order.returnAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : 'LKR0.00'}</span></span>
-                          <span className="block text-xs text-red-600">Outstanding: <span className="font-bold">{'LKR' + ((typeof order.chequeBalance === 'number' && !isNaN(order.chequeBalance) ? order.chequeBalance : 0) + (typeof order.creditBalance === 'number' && !isNaN(order.creditBalance) ? order.creditBalance : 0)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span></span>
+                    <td className="px-6 py-4 z-5 sticky right-0 bg-white dark:bg-slate-800 border-l border-slate-200 dark:border-slate-600">
+                      <div className="flex flex-col space-y-2">
+                        <div className={`text-xs font-bold ${
+                          (() => {
+                            const outstandingAmount = ((typeof order.chequeBalance === 'number' && !isNaN(order.chequeBalance) ? order.chequeBalance : 0) + (typeof order.creditBalance === 'number' && !isNaN(order.creditBalance) ? order.creditBalance : 0));
+                            
+                            if (order.status === 'Pending') {
+                              return 'text-orange-600 dark:text-orange-400';
+                            } else if (order.status === 'Delivered') {
+                              if (outstandingAmount === 0) {
+                                return 'text-green-600 dark:text-green-400';
+                              } else {
+                                return 'text-red-600 dark:text-red-400';
+                              }
+                            }
+                            return 'text-red-600 dark:text-red-400';
+                          })()
+                        }`}>
+                          {'LKR' + ((typeof order.chequeBalance === 'number' && !isNaN(order.chequeBalance) ? order.chequeBalance : 0) + (typeof order.creditBalance === 'number' && !isNaN(order.creditBalance) ? order.creditBalance : 0)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                         </div>
-                      </td>
-                    )}
-                    <td className="px-6 py-4 z-10 sticky right-0 bg-white dark:bg-slate-800 border-l border-slate-200 dark:border-slate-600">
-                      <div className="flex items-center space-x-3">
-                        <button onClick={() => openViewModal(order)} className="font-medium text-slate-600 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-300">View</button>
-                        {canEdit && (
-                          <>
-                            <button onClick={() => openEditModal(order)} className="font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">Edit</button>
-                            {canDelete && <button onClick={() => openDeleteModal(order)} className="font-medium text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300">Delete</button>}
-                          </>
-                        )}
+                        <div>
+                          <Badge variant={getStatusBadgeVariant(order.status)} className={`whitespace-nowrap text-xs font-bold ${
+                            (() => {
+                              const outstandingAmount = ((typeof order.chequeBalance === 'number' && !isNaN(order.chequeBalance) ? order.chequeBalance : 0) + (typeof order.creditBalance === 'number' && !isNaN(order.creditBalance) ? order.creditBalance : 0));
+                              
+                              if (order.status === 'Pending') {
+                                return 'bg-orange-100 text-orange-800 border border-orange-300 dark:bg-orange-900/20 dark:text-orange-400 dark:border-orange-600';
+                              } else if (order.status === 'Delivered') {
+                                if (outstandingAmount === 0) {
+                                  return 'bg-green-100 text-green-800 border border-green-300 dark:bg-green-900/20 dark:text-green-400 dark:border-green-600';
+                                } else {
+                                  return 'bg-red-100 text-red-800 border border-red-300 dark:bg-red-900/20 dark:text-red-400 dark:border-red-600';
+                                }
+                              }
+                              return '';
+                            })()
+                          }`}>{order.status}</Badge>
+                        </div>
+                        <div className="flex flex-col space-y-1">
+                          <button onClick={() => openViewModal(order)} className="text-xs font-medium text-slate-600 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-300 text-left">View</button>
+                          {canEdit && (
+                            <>
+                              <button onClick={() => openEditModal(order)} className="text-xs font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 text-left">Edit</button>
+                              {canDelete && <button onClick={() => openDeleteModal(order)} className="text-xs font-medium text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 text-left">Delete</button>}
+                            </>
+                          )}
+                        </div>
                       </div>
                     </td>
                   </tr>
@@ -1501,13 +1569,16 @@ export const Orders: React.FC = () => {
           </CardContent>
         </Card>
 
-        <Modal isOpen={modalState === 'create' || modalState === 'edit'} onClose={closeModal} title={modalState === 'create' ? 'Create New Order' : `Edit Order ${currentOrder?.id}`}>
-          <div className="flex flex-col h-[700px] max-h-[90vh]">
-            {/* Fixed Top Section - Customer and Search */}
-            <div className="p-3 border-b border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 flex-shrink-0">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+        <Modal isOpen={modalState === 'create' || modalState === 'edit'} onClose={closeModal} title={modalState === 'create' ? '🛒 Create New Order' : `📝 Edit Order ${currentOrder?.id}`}>
+          <div className="flex flex-col h-[85vh] sm:h-[650px] lg:h-[700px] max-h-[90vh] bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-slate-900 dark:to-slate-800">
+            {/* Ultra Compact Header Section */}
+            <div className="p-1.5 sm:p-4 border-b border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-800 flex-shrink-0">
+              <div className="space-y-1.5 sm:space-y-4">
+                {/* Ultra Compact Customer Selection */}
                 <div className="relative" ref={customerDropdownRef}>
-                  <label htmlFor="customer" className="block mb-1 text-sm font-medium text-slate-900 dark:text-white">Customer</label>
+                  <label htmlFor="customer" className="block mb-0.5 text-xs font-medium text-slate-700 dark:text-slate-300">
+                    👤 Customer
+                  </label>
                   <div className="relative">
                     <input
                       type="text"
@@ -1518,17 +1589,17 @@ export const Orders: React.FC = () => {
                         setIsCustomerDropdownOpen(true);
                       }}
                       onFocus={() => setIsCustomerDropdownOpen(true)}
-                      placeholder="Search and select customer..."
-                      className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 pr-10 dark:bg-slate-700 dark:border-slate-600 dark:placeholder-slate-400 dark:text-white"
+                      placeholder="Search customer..."
+                      className="bg-white border border-slate-300 text-slate-900 text-xs rounded focus:ring-1 focus:ring-blue-400 focus:border-blue-400 block w-full p-1.5 pr-6 dark:bg-slate-700 dark:border-slate-500 dark:placeholder-slate-400 dark:text-white"
                     />
-                    <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                      <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <div className="absolute inset-y-0 right-0 flex items-center pr-2 sm:pr-4 pointer-events-none">
+                      <svg className="w-4 h-4 sm:w-5 sm:h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                       </svg>
                     </div>
                     
                     {isCustomerDropdownOpen && (
-                      <div className="absolute z-50 w-full mt-1 bg-white border border-slate-300 rounded-lg shadow-lg max-h-60 overflow-y-auto dark:bg-slate-700 dark:border-slate-600">
+                      <div className="absolute z-50 w-full mt-2 bg-white/95 backdrop-blur-md border-2 border-blue-200 rounded-xl shadow-xl max-h-60 overflow-y-auto dark:bg-slate-700/95 dark:border-slate-500">
                         {customers
                           .filter(customer => 
                             customer.name.toLowerCase().includes(customerSearch.toLowerCase()) ||
@@ -1543,11 +1614,14 @@ export const Orders: React.FC = () => {
                                 setCustomerSearch(customer.name);
                                 setIsCustomerDropdownOpen(false);
                               }}
-                              className={`p-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-600 border-b border-slate-200 dark:border-slate-600 last:border-b-0 ${
-                                selectedCustomer === customer.id ? 'bg-blue-50 dark:bg-blue-900/30' : ''
+                              className={`p-4 cursor-pointer hover:bg-blue-50 dark:hover:bg-slate-600 border-b border-blue-100 dark:border-slate-600 last:border-b-0 transition-all duration-150 ${
+                                selectedCustomer === customer.id ? 'bg-gradient-to-r from-blue-100 to-blue-50 dark:from-blue-900/40 dark:to-blue-800/30 border-l-4 border-l-blue-500' : ''
                               }`}
                             >
-                              <div className="font-medium text-slate-900 dark:text-white">{customer.name}</div>
+                              <div className="font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                                <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+                                {customer.name}
+                              </div>
                               {customer.email && (
                                 <div className="text-sm text-slate-500 dark:text-slate-400">{customer.email}</div>
                               )}
@@ -1570,108 +1644,172 @@ export const Orders: React.FC = () => {
                     )}
                   </div>
                 </div>
+                
+                {/* Ultra Compact Delivery Date Section */}
                 <div>
-                    <label htmlFor="deliveryDate" className="block mb-1 text-sm font-medium text-slate-900 dark:text-white">Expected Delivery Date</label>
-                    <input
-                        type="date"
-                        id="deliveryDate"
-                        value={expectedDeliveryDate}
-                        onChange={(e) => setExpectedDeliveryDate(e.target.value)}
-                        className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2 dark:bg-slate-700 dark:border-slate-600 dark:placeholder-slate-400 dark:text-white"
-                    />
+                  <label htmlFor="deliveryDate" className="block mb-0.5 text-xs font-medium text-slate-700 dark:text-slate-300">
+                    📅 Delivery Date
+                  </label>
+                  <input
+                    type="date"
+                    id="deliveryDate"
+                    value={expectedDeliveryDate}
+                    onChange={(e) => setExpectedDeliveryDate(e.target.value)}
+                    className="bg-white border border-slate-300 text-slate-900 text-xs rounded focus:ring-1 focus:ring-blue-400 focus:border-blue-400 block w-full p-1.5 dark:bg-slate-700 dark:border-slate-500 dark:text-white"
+                  />
                 </div>
               </div>
               
+              {/* Ultra Compact Products Search Section */}
               <div>
-                <label className="block mb-1 text-sm font-medium text-slate-900 dark:text-white">Products</label>
+                <label className="block mb-0.5 text-xs font-medium text-slate-700 dark:text-slate-300">
+                  🛍️ Products
+                </label>
                 <div className="relative">
                   <input
                     type="text"
-                    placeholder="Search products by name, category, or SKU..."
+                    placeholder="Search products..."
                     value={productSearchTerm}
                     onChange={(e) => setProductSearchTerm(e.target.value)}
-                    className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2 pr-8 dark:bg-slate-700 dark:border-slate-600 dark:placeholder-slate-400 dark:text-white"
+                    className="bg-white border border-slate-300 text-slate-900 text-xs rounded focus:ring-1 focus:ring-blue-400 focus:border-blue-400 block w-full p-1.5 pr-6 dark:bg-slate-700 dark:border-slate-500 dark:placeholder-slate-400 dark:text-white"
                   />
                   {productSearchTerm && (
                     <button
                       onClick={() => setProductSearchTerm('')}
-                      className="absolute right-2 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                      className="absolute right-4 top-1/2 transform -translate-y-1/2 text-red-400 hover:text-red-600 bg-red-50 hover:bg-red-100 rounded-full p-1 transition-all duration-200 dark:hover:text-red-300"
                       title="Clear search"
                     >
-                      ✕
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
                     </button>
                   )}
                 </div>
               </div>
             </div>
 
-            {/* Scrollable Products Section */}
+            {/* Ultra Compact Products Section */}
             <div className="flex-1 overflow-y-auto min-h-0">
-              <div className="p-3">
-                <div className="space-y-2 border border-slate-200 dark:border-slate-600 rounded-lg p-2 bg-slate-50 dark:bg-slate-800">
+              {/* Sticky Column Headers */}
+              <div className="sticky top-0 z-10 bg-slate-100 dark:bg-slate-800 border-b border-slate-300 dark:border-slate-600 px-1 py-1">
+                <div className="flex items-center gap-1 text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  <div className="w-4"></div> {/* Space for image */}
+                  <div className="flex-1 min-w-0 mr-0.5">Product</div>
+                  <div className="flex items-center gap-0.5">
+                    <div className="w-16 text-center">LKR</div>
+                    <div className="w-8 text-center">Qty</div>
+                    <div className="w-8 text-center">Free</div>
+                  </div>
+                  <div className="px-2 text-center">Hold</div>
+                </div>
+              </div>
+              <div className="p-1">
+                <div className="space-y-0">
                   {availableProductsForOrder.length === 0 ? (
                     <div className="text-center py-4 text-slate-500 dark:text-slate-400">
-                      {productSearchTerm.trim() ? 'No products found matching your search.' : 'No products available.'}
+                      <div className="text-2xl mb-1">📦</div>
+                      <p className="text-sm font-medium">{productSearchTerm.trim() ? 'No products found' : 'No products available'}</p>
                     </div>
                   ) : (
-                    availableProductsForOrder.map(product => {
+                    availableProductsForOrder
+                      .sort((a, b) => {
+                        // First priority: Show products with quantity > 0 first (at top)
+                        const aHasQuantity = (orderItems[a.id] || 0) > 0;
+                        const bHasQuantity = (orderItems[b.id] || 0) > 0;
+                        
+                        if (aHasQuantity && !bHasQuantity) return -1;
+                        if (!aHasQuantity && bHasQuantity) return 1;
+                        
+                        // Second priority: Show in-stock products before out-of-stock products
+                        const aIsOutOfStock = getEffectiveStock(a) === 0;
+                        const bIsOutOfStock = getEffectiveStock(b) === 0;
+                        
+                        if (!aIsOutOfStock && bIsOutOfStock) return -1;
+                        if (aIsOutOfStock && !bIsOutOfStock) return 1;
+                        
+                        // Within each group, sort by name
+                        return a.name.localeCompare(b.name);
+                      })
+                      .map(product => {
                     const isOutOfStock = getEffectiveStock(product) === 0;
                     const isHeld = heldItems.has(product.id);
                     const isUnavailable = isHeld || isOutOfStock;
+                    const hasQuantity = (orderItems[product.id] || 0) > 0;
                     
                     return (
-                      <div key={product.id} className={`grid grid-cols-10 gap-2 items-center p-2 rounded-lg transition-colors ${isHeld ? 'bg-yellow-50 dark:bg-yellow-900/40' : 'bg-slate-50 dark:bg-slate-700'} ${isOutOfStock && !isHeld ? 'opacity-70' : ''}`}>
-                        <div className="flex items-center space-x-3 col-span-10 sm:col-span-5">
-                          <img src={product.imageUrl} alt={product.name} className="w-10 h-10 rounded-md" />
-                          <div>
-                            <p className="font-medium text-slate-900 dark:text-white">{product.name}</p>
-                             <p className="text-xs text-slate-500 dark:text-slate-400">
-                              {isOutOfStock ? <span className="text-red-500 font-semibold ml-1">Out of Stock</span> : (
-                                currentUser?.role === UserRole.Driver 
-                                  ? ` Allocated: ${getEffectiveStock(product)}`
-                                  : ` Stock: ${getEffectiveStock(product)}`
+                      <div key={product.id} className={`p-0.5 rounded border ${
+                        hasQuantity
+                          ? 'bg-green-100 dark:bg-green-900/30 border-green-400 shadow-sm'
+                          : isHeld 
+                            ? 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-300' 
+                            : isOutOfStock 
+                              ? 'bg-red-50 dark:bg-red-900/20 border-red-300 opacity-70' 
+                              : 'bg-white dark:bg-slate-700 border-slate-200 dark:border-slate-500'
+                      }`}>
+                        {/* Super Compact Layout - Single Row */}
+                        <div className="flex items-center gap-1">
+                          <img src={product.imageUrl} alt={product.name} className="w-4 h-4 rounded object-cover flex-shrink-0" />
+                          <div className="flex-1 min-w-0 mr-0.5">
+                            <h4 className="font-medium text-xs text-slate-800 dark:text-white truncate leading-none">{product.name}</h4>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 leading-none">
+                              {isOutOfStock ? (
+                                <span className="text-red-600 text-xs">OOS</span>
+                              ) : (
+                                <span className="text-green-600 text-xs">{getEffectiveStock(product)}</span>
                               )}
                             </p>
                           </div>
-                        </div>
-                        <div className="col-span-5 sm:col-span-2">
-                          <label htmlFor={`price-${product.id}`} className="sr-only">Unit Price for {product.name}</label>
-                          <div className="relative">
-                              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm">{currency}</span>
+                          
+                          {/* Super Compact Controls - Inline */}
+                          <div className="flex items-center gap-0.5">
+                            <div className="relative w-16">
+                              <span className="absolute left-0.5 top-1/2 -translate-y-1/2 text-blue-500 text-xs">{currency}</span>
                               <input
-                                  type="number"
-                                  id={`price-${product.id}`}
-                                  min="0"
-                                  step="1"
-                                  value={orderItemPrices[product.id] ?? product.price}
-                                  onChange={(e) => handlePriceChange(product.id, parseFloat(e.target.value) || product.price)}
-                                  className="w-full p-1.5 border border-slate-300 rounded-md dark:bg-slate-600 dark:border-slate-500 dark:text-white text-center pl-10 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                  disabled={isUnavailable}
-                                  title="Enter price manually"
+                                type="number"
+                                min="0"
+                                step="1"
+                                value={orderItemPrices[product.id] ?? product.price}
+                                onChange={(e) => handlePriceChange(product.id, parseFloat(e.target.value) || product.price)}
+                                className="w-full py-0.5 pl-4 pr-0.5 border border-slate-300 rounded text-xs text-center focus:ring-1 focus:ring-blue-400 dark:bg-slate-600 dark:border-slate-500 dark:text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                disabled={isUnavailable}
                               />
-                          </div>
-                        </div>
+                            </div>
 
-                         <div className="col-span-3 sm:col-span-2">
-                          <label htmlFor={`quantity-${product.id}`} className="sr-only">Quantity for {product.name}</label>
-                          <input
-                              type="number"
-                              id={`quantity-${product.id}`}
-                              min="0"
-                              max={isUnavailable ? undefined : getEffectiveStock(product)}
-                              value={orderItems[product.id] || ''}
-                              placeholder="0"
-                              onChange={(e) => handleQuantityChange(product.id, parseInt(e.target.value, 10) || 0)}
-                              className="w-full p-1.5 border border-slate-300 rounded-md dark:bg-slate-600 dark:border-slate-500 dark:text-white text-center"
-                          />
-                        </div>
-                         <div className="col-span-2 sm:col-span-1">
-                            <button
-                              onClick={() => toggleHoldItem(product.id)}
-                              className={`w-full py-1.5 text-xs font-medium rounded-md transition-colors ${isHeld ? 'bg-yellow-400 text-yellow-900 hover:bg-yellow-500' : 'bg-slate-200 dark:bg-slate-600 hover:bg-slate-300 dark:hover:bg-slate-500'}`}
-                              >
-                              {isHeld ? 'Unhold' : 'Hold'}
-                            </button>
+                            <div className="w-8">
+                              <input
+                                type="number"
+                                min="0"
+                                max={isUnavailable ? undefined : getEffectiveStock(product)}
+                                value={orderItems[product.id] || ''}
+                                placeholder="0"
+                                onChange={(e) => handleQuantityChange(product.id, parseInt(e.target.value, 10) || 0)}
+                                className="w-full py-0.5 px-0.5 border border-slate-300 rounded text-xs text-center focus:ring-1 focus:ring-blue-400 dark:bg-slate-600 dark:border-slate-500 dark:text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                              />
+                            </div>
+
+                            <div className="w-8">
+                              <input
+                                type="number"
+                                min="0"
+                                value={freeItems[product.id] || ''}
+                                placeholder="0"
+                                onChange={(e) => handleFreeQuantityChange(product.id, parseInt(e.target.value, 10) || 0)}
+                                className="w-full py-0.5 px-0.5 border border-green-300 rounded text-xs text-center focus:ring-1 focus:ring-green-400 bg-green-50 dark:bg-green-900/20 dark:border-green-500 dark:text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                title="Free quantity"
+                              />
+                            </div>
+                          </div>
+                          
+                          <button
+                            onClick={() => toggleHoldItem(product.id)}
+                            className={`px-2 py-1 text-xs font-medium rounded ${
+                              isHeld 
+                                ? 'bg-yellow-400 text-yellow-900' 
+                                : 'bg-blue-500 text-white'
+                            }`}
+                          >
+                            {isHeld ? 'H' : 'Hold'}
+                          </button>
                         </div>
                       </div>
                     )
@@ -1680,53 +1818,59 @@ export const Orders: React.FC = () => {
               </div>
             </div>
 
-            {/* Fixed Bottom Section - Summary, Notes, Buttons */}
-            <div className="border-t border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-800 flex-shrink-0">
-              <div className="p-3 space-y-3">
-                {/* Order Summary */}
-                <div className="p-3 bg-white dark:bg-slate-700 rounded-lg">
-                  <h4 className="text-sm font-medium text-slate-900 dark:text-white mb-2">Order Summary</h4>
-                  <div className="text-sm space-y-1">
-                    <div className="flex justify-between">
-                      <span className="text-slate-600 dark:text-slate-300">Items (In Stock):</span>
-                      <span className="font-bold text-slate-900 dark:text-white">{inStockItems}</span>
+            {/* Ultra Compact Bottom Section */}
+            <div className="border-t border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 flex-shrink-0">
+              <div className="p-1.5 space-y-1.5">
+                {/* Ultra Compact Order Summary */}
+                <div className="p-1.5 bg-slate-50 dark:bg-slate-700 rounded border border-slate-300 dark:border-slate-500">
+                  <div className="flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2">
+                      <span className="text-green-700 dark:text-green-300">✅ {inStockItems}</span>
+                      {heldItemsCount > 0 && (
+                        <span className="text-yellow-700 dark:text-yellow-300">⏳ {heldItemsCount}</span>
+                      )}
                     </div>
-                    {heldItemsCount > 0 && (
-                      <div className="flex justify-between">
-                        <span className="text-yellow-600 dark:text-yellow-400">Items (Held/OOS):</span>
-                        <span className="font-bold text-yellow-600 dark:text-yellow-400">{heldItemsCount}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between text-base border-t pt-1 mt-1">
-                      <span className="text-slate-700 dark:text-slate-300">Total Price:</span>
-                      <span className="font-bold text-slate-900 dark:text-white">{formatCurrency(total, currency)}</span>
+                    <div className="font-semibold text-blue-600 dark:text-blue-300">
+                      {formatCurrency(total, currency)}
                     </div>
                   </div>
                 </div>
                 
-                {/* Order Notes and Payment Method */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div>
-                    <label htmlFor="orderNotes" className="block mb-1 text-sm font-medium text-slate-900 dark:text-white">Order Notes</label>
-                    <input type="text" id="orderNotes" value={orderNotes} onChange={e => setOrderNotes(e.target.value)} className="bg-white border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2 dark:bg-slate-600 dark:border-slate-500 dark:text-white" />
-                  </div>
-                  <div>
-                    <label htmlFor="orderMethod" className="block mb-1 text-sm font-medium text-slate-900 dark:text-white">Payment Method</label>
-                    <input type="text" id="orderMethod" value={orderMethod} onChange={e => setOrderMethod(e.target.value)} className="bg-white border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2 dark:bg-slate-600 dark:border-slate-500 dark:text-white" />
-                  </div>
+                {/* Ultra Compact Order Notes */}
+                <div>
+                  <label htmlFor="orderNotes" className="block mb-0.5 text-xs font-medium text-slate-700 dark:text-slate-300">
+                    📝 Notes
+                  </label>
+                  <input 
+                    type="text"
+                    id="orderNotes" 
+                    value={orderNotes} 
+                    onChange={e => setOrderNotes(e.target.value)} 
+                    placeholder="Order notes..."
+                    className="bg-white border border-slate-300 text-slate-900 text-xs rounded focus:ring-1 focus:ring-blue-400 focus:border-blue-400 block w-full p-1.5 dark:bg-slate-700 dark:border-slate-500 dark:text-white" 
+                  />
                 </div>
                 
-                {/* Footer Buttons */}
-                <div className="flex items-center justify-between pt-2 border-t border-slate-200 dark:border-slate-600">
-                  <div className="text-sm text-slate-600 dark:text-slate-400">
-                    Total Items: <span className="font-medium">{inStockItems + heldItemsCount}</span>
+                {/* Ultra Compact Action Buttons */}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-xs text-slate-600 dark:text-slate-400">
+                    Items: {inStockItems + heldItemsCount}
                   </div>
-                  <div className="flex space-x-3">
-                    <button onClick={closeModal} type="button" className="text-slate-500 bg-white hover:bg-slate-100 focus:ring-4 focus:outline-none focus:ring-blue-300 rounded-lg border border-slate-200 text-sm font-medium px-5 py-2.5 hover:text-slate-900 focus:z-10 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-500 dark:hover:text-white dark:hover:bg-slate-600">
+                  <div className="flex gap-1.5">
+                    <button 
+                      onClick={closeModal} 
+                      type="button" 
+                      className="px-2 py-1.5 text-slate-600 bg-white hover:bg-slate-50 border border-slate-200 text-xs font-medium rounded transition-all duration-200 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-500"
+                    >
                       Cancel
                     </button>
-                    <button onClick={handleSaveOrder} type="button" className="text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-blue-600 dark:hover:bg-blue-700 disabled:bg-blue-400 dark:disabled:bg-blue-800 disabled:cursor-not-allowed" disabled={(inStockItems + heldItemsCount) === 0 || !selectedCustomer}>
-                      {modalState === 'create' ? 'Create Order' : 'Save Changes'}
+                    <button 
+                      onClick={handleSaveOrder} 
+                      type="button" 
+                      className="px-2 py-1.5 text-white bg-blue-600 hover:bg-blue-700 border border-blue-600 text-xs font-semibold rounded transition-all duration-200 disabled:bg-slate-400 disabled:cursor-not-allowed" 
+                      disabled={(inStockItems + heldItemsCount) === 0 || !selectedCustomer}
+                    >
+                      {modalState === 'create' ? 'Create' : 'Save'}
                     </button>
                   </div>
                 </div>
@@ -1754,37 +1898,37 @@ export const Orders: React.FC = () => {
               const customer = customers.find(c => c.id === viewingOrder.customerId);
               return (
                   <Modal isOpen={!!viewingOrder} onClose={closeViewModal} title={`Order Details: ${viewingOrder.id}`}>
-                      <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
-                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                      <div className="p-3 space-y-2 max-h-[80vh] overflow-y-auto">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 text-xs">
                               <div>
-                                  <p className="font-semibold text-slate-700 dark:text-slate-300">Customer:</p>
-                                  <p className="text-slate-900 dark:text-white">{viewingOrder.customerName}</p>
+                                  <p className="font-medium text-xs text-slate-700 dark:text-slate-300">Customer:</p>
+                                  <p className="text-xs text-slate-900 dark:text-white">{viewingOrder.customerName}</p>
                               </div>
                               <div>
-                                  <p className="font-semibold text-slate-700 dark:text-slate-300">Location:</p>
-                                  <p className="text-slate-900 dark:text-white">{customer?.location || 'N/A'}</p>
+                                  <p className="font-medium text-xs text-slate-700 dark:text-slate-300">Location:</p>
+                                  <p className="text-xs text-slate-900 dark:text-white">{customer?.location || 'N/A'}</p>
                               </div>
                 <div>
-                  <p className="font-semibold text-slate-700 dark:text-slate-300">Order Date:</p>
-                  <p className="text-slate-900 dark:text-white">{viewingOrder.orderdate}</p>
+                  <p className="font-medium text-xs text-slate-700 dark:text-slate-300">Order Date:</p>
+                  <p className="text-xs text-slate-900 dark:text-white">{viewingOrder.orderdate}</p>
                 </div>
                               <div>
-                                  <p className="font-semibold text-slate-700 dark:text-slate-300">Status:</p>
+                                  <p className="font-medium text-xs text-slate-700 dark:text-slate-300">Status:</p>
                                   <p><Badge variant={getStatusBadgeVariant(viewingOrder.status)}>{viewingOrder.status}</Badge></p>
                 <div>
-                  <p className="font-semibold text-slate-700 dark:text-slate-300">Assigned To:</p>
-                  <p className="text-slate-900 dark:text-white">{viewingOrder.assigneduserid}</p>
+                  <p className="font-medium text-xs text-slate-700 dark:text-slate-300">Assigned To:</p>
+                  <p className="text-xs text-slate-900 dark:text-white">{viewingOrder.assigneduserid}</p>
                 </div>
                               </div>
                           </div>
                           
-                          <div className="pt-4 border-t dark:border-slate-700">
-                              <h4 className="text-md font-semibold text-slate-800 dark:text-slate-200 mb-2">Financial Summary</h4>
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                          <div className="pt-2 border-t dark:border-slate-700">
+                              <h4 className="text-sm font-medium text-slate-800 dark:text-slate-200 mb-1">Financial Summary</h4>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                   <div>
-                    <label htmlFor="chequeBalance" className="block mb-1 text-sm font-medium text-slate-700 dark:text-slate-300">Pending Cheque</label>
+                    <label htmlFor="chequeBalance" className="block mb-0.5 text-xs font-medium text-slate-700 dark:text-slate-300">Pending Cheque</label>
                     <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">{currency}</span>
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">{currency}</span>
                       <input 
                         type="number"
                         id="chequeBalance"
@@ -1804,15 +1948,15 @@ export const Orders: React.FC = () => {
                           const newCredit = viewingOrder.total - (editableAmountPaid === '' ? 0 : editableAmountPaid) - cheque - (editableReturnAmount === '' ? 0 : editableReturnAmount);
                           setEditableCreditBalance(newCredit > 0 ? newCredit : 0);
                         }}
-                        className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 pl-10 dark:bg-slate-700 dark:border-slate-600 dark:text-white"
+                        className="bg-slate-50 border border-slate-300 text-slate-900 text-xs rounded focus:ring-blue-500 focus:border-blue-500 block w-full p-1.5 pl-7 dark:bg-slate-700 dark:border-slate-600 dark:text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                         disabled={!canEdit}
                       />
                     </div>
                   </div>
                   <div>
-                    <label htmlFor="amountPaid" className="block mb-1 text-sm font-medium text-slate-700 dark:text-slate-300">Amount Paid</label>
+                    <label htmlFor="amountPaid" className="block mb-0.5 text-xs font-medium text-slate-700 dark:text-slate-300">Amount Paid</label>
                     <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">{currency}</span>
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">{currency}</span>
                       <input 
                         type="number"
                         id="amountPaid"
@@ -1832,7 +1976,7 @@ export const Orders: React.FC = () => {
                           const newCredit = viewingOrder.total - paid - (editableChequeBalance === '' ? 0 : editableChequeBalance) - (editableReturnAmount === '' ? 0 : editableReturnAmount);
                           setEditableCreditBalance(newCredit > 0 ? newCredit : 0);
                         }}
-                        className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 pl-10 dark:bg-slate-700 dark:border-slate-600 dark:text-white"
+                        className="bg-slate-50 border border-slate-300 text-slate-900 text-xs rounded focus:ring-blue-500 focus:border-blue-500 block w-full p-1.5 pl-7 dark:bg-slate-700 dark:border-slate-600 dark:text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                         disabled={!canEdit}
                       />
                     </div>
@@ -1860,7 +2004,7 @@ export const Orders: React.FC = () => {
                           const newCredit = viewingOrder.total - (editableAmountPaid === '' ? 0 : editableAmountPaid) - (editableChequeBalance === '' ? 0 : editableChequeBalance) - ret;
                           setEditableCreditBalance(newCredit > 0 ? newCredit : 0);
                         }}
-                        className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 pl-10 dark:bg-slate-700 dark:border-slate-600 dark:text-white"
+                        className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 pl-10 dark:bg-slate-700 dark:border-slate-600 dark:text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                         disabled={!canEdit}
                       />
                     </div>
@@ -1874,7 +2018,7 @@ export const Orders: React.FC = () => {
                                               step="1"
                                               min="0"
                                               value={editableCreditBalance === '' ? '' : editableCreditBalance}
-                                              className="bg-gray-100 border border-slate-300 text-slate-900 text-sm rounded-lg block w-full p-2.5 pl-10 dark:bg-slate-800 dark:border-slate-600 dark:text-white cursor-not-allowed"
+                                              className="bg-gray-100 border border-slate-300 text-slate-900 text-sm rounded-lg block w-full p-2.5 pl-10 dark:bg-slate-800 dark:border-slate-600 dark:text-white cursor-not-allowed [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                               disabled
                                               readOnly
                                           />
@@ -1902,47 +2046,43 @@ export const Orders: React.FC = () => {
                           </div>
 
                           <div className="pt-2">
-                              <h4 className="text-md font-semibold text-slate-800 dark:text-slate-200 mb-2">Items Ordered</h4>
+                              <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-1">Items Ordered</h4>
                               <div className="overflow-x-auto border rounded-lg dark:border-slate-700">
-                                  <table className="min-w-full text-sm">
+                                  <table className="min-w-full text-xs">
                                       <thead className="text-xs text-slate-700 uppercase bg-slate-50 dark:bg-slate-700 dark:text-slate-400">
                       <tr>
-                        <th className="py-2 px-4 text-left">Product</th>
-                        <th className="py-2 px-4 text-right">Quantity</th>
-                        <th className="py-2 px-4 text-right">Unit Price</th>
-                        {isManagerView && <th className="py-2 px-4 text-right">Cost Price</th>}
-                        <th className="py-2 px-4 text-right">Discount</th>
-                        <th className="py-2 px-4 text-right">Subtotal</th>
-                        <th className="py-2 px-4 text-center">Actions</th>
+                        <th className="py-1 px-2 text-left">Product</th>
+                        <th className="py-1 px-2 text-right">Quantity</th>
+                        <th className="py-1 px-2 text-right">Free</th>
+                        <th className="py-1 px-2 text-right">Unit Price</th>
+                        <th className="py-1 px-2 text-right">Subtotal</th>
+                        <th className="py-1 px-2 text-center">Actions</th>
                       </tr>
                                       </thead>
                                       <tbody className="text-slate-600 dark:text-slate-400 bg-white dark:bg-slate-800 divide-y divide-slate-200 dark:divide-slate-700">
                       {(viewingOrder.orderItems ?? []).map(item => {
                         const product = products.find(p => p.id === item.productId);
                         if (!product) return null;
-                        const subtotal = (item.quantity * item.price) * (1 - (item.discount || 0) / 100);
+                        const subtotal = (item.quantity * item.price);
                         const totalCostPrice = (product.costPrice || 0) * (item.quantity || 0);
                         return (
                           <tr key={item.productId}>
-                            <td className="py-3 px-4">
-                              <div className="flex items-center space-x-3">
-                                <img src={product.imageUrl} alt={product.name} className="w-10 h-10 rounded-md object-cover" />
-                                <span className="font-medium text-slate-800 dark:text-slate-200">{product.name}</span>
+                            <td className="py-1 px-2">
+                              <div className="flex items-center space-x-2">
+                                <img src={product.imageUrl} alt={product.name} className="w-6 h-6 rounded object-cover" />
+                                <span className="font-medium text-xs text-slate-800 dark:text-slate-200">{product.name}</span>
                               </div>
                             </td>
-                            <td className="py-3 px-4 text-right">{item.quantity}</td>
-                            <td className="py-3 px-4 text-right">{formatCurrency(item.price, currency)}</td>
-                            {isManagerView && (
-                            <td className="py-3 px-4 text-right">{formatCurrency(totalCostPrice, currency)}</td>
-                            )}
-                            <td className="py-3 px-4 text-right text-green-600 dark:text-green-400">{item.discount ? `${item.discount}%` : '-'}</td>
-                            <td className="py-3 px-4 text-right font-semibold text-slate-900 dark:text-white">
+                            <td className="py-1 px-2 text-right text-xs">{item.quantity}</td>
+                            <td className="py-1 px-2 text-right text-xs font-bold text-green-600">{item.free || 0}</td>
+                            <td className="py-1 px-2 text-right text-xs">{formatCurrency(item.price, currency)}</td>
+                            <td className="py-1 px-2 text-right font-semibold text-xs text-slate-900 dark:text-white">
                               {formatCurrency(subtotal, currency)}
                             </td>
-                            <td className="py-3 px-4 text-center">
+                            <td className="py-1 px-2 text-center">
                               <button 
                                 onClick={() => handleToggleHoldInView(item.productId, 'hold')}
-                                className="px-3 py-1 text-xs font-medium rounded-md transition-colors bg-yellow-400 text-yellow-900 hover:bg-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800"
+                                className="px-2 py-0.5 text-xs font-medium rounded transition-colors bg-yellow-400 text-yellow-900 hover:bg-yellow-500 focus:outline-none focus:ring-1 focus:ring-yellow-500"
                               >
                                 Hold
                               </button>
@@ -1999,13 +2139,13 @@ export const Orders: React.FC = () => {
                               </div>
                           )}
                       </div>
-                      <div className="flex items-center justify-between p-6 border-t border-slate-200 dark:border-slate-600">
+                      <div className="flex items-center justify-between p-2 border-t border-slate-200 dark:border-slate-600">
             <div className="flex-1">
-              <p className="text-sm text-slate-600 dark:text-slate-300">Grand Total: <span className="font-bold text-slate-900 dark:text-white">{formatCurrency(viewingOrder.total, currency)}</span></p>
+              <p className="text-xs text-slate-600 dark:text-slate-300">Grand Total: <span className="font-bold text-slate-900 dark:text-white">{formatCurrency(viewingOrder.total, currency)}</span></p>
             </div>
-                        <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-1">
                            {canEdit && (
-                                <button onClick={handleSaveBalances} type="button" className="text-white bg-green-600 hover:bg-green-700 focus:ring-4 focus:outline-none focus:ring-green-300 font-medium rounded-lg text-sm px-4 py-2 text-center">
+                                <button onClick={handleSaveBalances} type="button" className="text-white bg-green-600 hover:bg-green-700 font-medium rounded text-xs px-2 py-1 text-center">
                                     Save Balances
                                 </button>
                            )}
@@ -2013,13 +2153,13 @@ export const Orders: React.FC = () => {
                               <button 
                                   onClick={handleDownloadBill} 
                                   type="button" 
-                                  className="text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-4 py-2 text-center disabled:bg-blue-400 disabled:cursor-not-allowed"
+                                  className="text-white bg-blue-600 hover:bg-blue-700 font-medium rounded text-xs px-2 py-1 text-center disabled:bg-blue-400 disabled:cursor-not-allowed"
                                   disabled={billLoading}
                               >
-                                  {billLoading ? 'Processing...' : (viewingOrder.status === OrderStatus.Delivered ? '📄 Download Bill' : '📄 Download Bill & Confirm Sale')}
+                                  {billLoading ? 'Processing...' : (viewingOrder.status === OrderStatus.Delivered ? 'Download Bill' : 'Download Bill & Confirm')}
                               </button>
                             )}
-                            <button onClick={closeViewModal} type="button" className="text-white bg-slate-600 hover:bg-slate-700 focus:ring-4 focus:outline-none focus:ring-slate-300 font-medium rounded-lg text-sm px-4 py-2 text-center">
+                            <button onClick={closeViewModal} type="button" className="text-white bg-slate-600 hover:bg-slate-700 font-medium rounded text-xs px-2 py-1 text-center">
                                 Close
                             </button>
                         </div>
@@ -2038,7 +2178,13 @@ export const Orders: React.FC = () => {
                     <button onClick={() => setOrderToFinalize(null)} type="button" className="text-slate-500 bg-white hover:bg-slate-100 focus:ring-4 focus:outline-none focus:ring-blue-300 rounded-lg border border-slate-200 text-sm font-medium px-5 py-2.5 hover:text-slate-900 focus:z-10 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-500 dark:hover:text-white dark:hover:bg-slate-600">
                         Cancel
                     </button>
-                    <button onClick={handleConfirmFinalize} type="button" className="text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-blue-600 dark:hover:bg-blue-700">
+                    <button onClick={async () => {
+                      const success = await handleConfirmFinalize();
+                      if (success) {
+                        setOrderToFinalize(null);
+                      }
+                      // If not successful, modal stays open and order status remains pending
+                    }} type="button" className="text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-blue-600 dark:hover:bg-blue-700">
                         Proceed & Print
                     </button>
                 </div>

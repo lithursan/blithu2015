@@ -13,6 +13,7 @@ export interface DatabaseOrder {
   assigneduserid?: string;
   orderitems: string | object; // JSON string or already parsed object
   backordereditems?: string | object;
+  freeitems?: string | object; // JSON string or already parsed object for free items
   expecteddeliverydate?: string;
   chequebalance?: number;
   creditbalance?: number;

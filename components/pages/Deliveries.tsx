@@ -375,8 +375,7 @@ export const Deliveries: React.FC = () => {
               <option value="">Select driver</option>
               {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
-            <div className="flex justify-end space-x-2">
-              <button onClick={() => setDateAllocateModal(null)} className="px-3 py-2 bg-slate-200 rounded">Cancel</button>
+            <div className="flex justify-end">
               <button onClick={async () => {
                 if (!dateAllocateDriver) { alert('Select a driver'); return; }
                 // set selectedDate and call handleAllocate
