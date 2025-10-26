@@ -589,10 +589,15 @@ export const Orders: React.FC = () => {
     setOrderDiscounts(prev => ({ ...prev, [productId]: newDiscount}));
   };
   
-  const handlePriceChange = (productId: string, price: number) => {
-    const newPrice = Math.max(0, price);
-    setOrderItemPrices(prev => ({ ...prev, [productId]: newPrice }));
-};
+  const handlePriceChange = (productId: string, price: number | string) => {
+    if (price === '') {
+      setOrderItemPrices(prev => ({ ...prev, [productId]: '' }));
+    } else {
+      const numPrice = typeof price === 'string' ? parseFloat(price) : price;
+      const newPrice = Math.max(0, numPrice);
+      setOrderItemPrices(prev => ({ ...prev, [productId]: newPrice }));
+    }
+  };
 
   const handleFreeQuantityChange = (productId: string, quantity: number) => {
     const product = products.find(p => p.id === productId);
@@ -625,7 +630,8 @@ export const Orders: React.FC = () => {
           if (isHeld || isOutOfStock) {
             acc.heldItemsCount += quantity;
           } else {
-            const price = orderItemPrices[productId] ?? product.price;
+            const customPrice = orderItemPrices[productId];
+            const price = (customPrice === '' || customPrice === undefined) ? product.price : (typeof customPrice === 'number' ? customPrice : (parseFloat(customPrice) || product.price));
             const discount = orderDiscounts[productId] || 0;
             const discountedPrice = price * (1 - discount / 100);
             acc.total += discountedPrice * quantity;
@@ -657,7 +663,8 @@ export const Orders: React.FC = () => {
       if (!product) return;
       const isHeld = heldItems.has(productId);
       const isOutOfStock = getEffectiveStock(product) === 0;
-      const price = orderItemPrices[productId] ?? product?.price ?? 0;
+      const customPrice = orderItemPrices[productId];
+      const price = (customPrice === '' || customPrice === undefined) ? (product?.price ?? 0) : (typeof customPrice === 'number' ? customPrice : (parseFloat(customPrice) || (product?.price ?? 0)));
       const freeQuantity = freeItems[productId] || 0;
 
       if (isHeld || isOutOfStock) {
@@ -709,7 +716,6 @@ export const Orders: React.FC = () => {
         assigneduserid: currentUser?.id ?? '',
         orderitems: JSON.stringify(newOrderItems),
         backordereditems: JSON.stringify(newBackorderedItems),
-        freeitems: JSON.stringify([]), // Keep empty for backward compatibility
         method: '',
         expecteddeliverydate: expectedDeliveryDate || null,
         orderdate: expectedDeliveryDate || new Date().toISOString().slice(0, 10),
@@ -785,7 +791,6 @@ export const Orders: React.FC = () => {
         assigneduserid: currentOrder.assigneduserid ?? '',
         orderitems: JSON.stringify(newOrderItems),
         backordereditems: JSON.stringify(newBackorderedItems),
-        freeitems: JSON.stringify([]), // Keep empty for backward compatibility
         method: '',
         expecteddeliverydate: expectedDeliveryDate || null,
         orderdate: expectedDeliveryDate || currentOrder.orderdate || new Date().toISOString().slice(0, 10),
@@ -1781,9 +1786,14 @@ export const Orders: React.FC = () => {
                               <input
                                 type="number"
                                 min="0"
-                                step="1"
-                                value={orderItemPrices[product.id] ?? product.price}
-                                onChange={(e) => handlePriceChange(product.id, parseFloat(e.target.value) || product.price)}
+                                step="0.01"
+                                value={orderItemPrices[product.id] !== undefined ? orderItemPrices[product.id] : product.price}
+                                onChange={(e) => {
+                                  const value = e.target.value;
+                                  handlePriceChange(product.id, value);
+                                }}
+                                onFocus={(e) => e.target.select()}
+                                placeholder={product.price.toString()}
                                 className="w-full py-0.5 pl-4 pr-0.5 border border-slate-300 rounded text-xs text-center focus:ring-1 focus:ring-blue-400 dark:bg-slate-600 dark:border-slate-500 dark:text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                 disabled={isUnavailable}
                               />
