@@ -104,6 +104,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                         customerId: row.customerid,
                         customerName: row.customername,
                         date: row.orderdate,
+                        created_at: row.created_at,
                         total: row.totalamount,
                         status: row.status,
                         paymentMethod: row.paymentmethod,
@@ -140,7 +141,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     
                     // Try with explicit column list for customers
                     if (name === 'customers') {
-                        const customerColumns = 'id,name,email,phone,location,joindate,totalspent,outstandingbalance,avatarurl,discounts';
+                        const customerColumns = 'id,name,email,phone,location,joindate,totalspent,outstandingbalance,avatarurl,discounts,route';
                         const { data: retryData, error: retryError } = await supabase
                             .from('customers')
                             .select(customerColumns);
@@ -177,6 +178,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                             const email = row.email;
                             const phone = row.phone;
                             const location = row.location;
+                            const route = row.route || 'Unassigned';
                             // Handle potential column name variations
                             const joinDate = row.joindate || row.joinDate || row.join_date;
                             const totalSpent = row.totalspent || row.totalSpent || row.total_spent || 0;
@@ -190,6 +192,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                                 email,
                                 phone,
                                 location,
+                                route,
                                 joinDate,
                                 totalSpent: typeof totalSpent === 'number' ? totalSpent : parseFloat(totalSpent) || 0,
                                 outstandingBalance: typeof outstandingBalance === 'number' ? outstandingBalance : parseFloat(outstandingBalance) || 0,
@@ -385,6 +388,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     email: row.email,
                     phone: row.phone,
                     location: row.location,
+                    route: row.route || 'Unassigned',
                     joinDate: row.joindate,
                     totalSpent: row.totalspent,
                     outstandingBalance: row.outstandingbalance,

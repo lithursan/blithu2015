@@ -38,6 +38,13 @@ export interface User {
   password?: string;
   settings: UserSettings;
   assignedSupplierNames?: string[];
+  currentLocation?: {
+    latitude: number;
+    longitude: number;
+    timestamp: string;
+    accuracy?: number;
+  };
+  locationSharing?: boolean;
 }
 
 export interface Product {
@@ -65,7 +72,9 @@ export interface Order {
   customerId: string;
   customerName: string;
   date: string;
+  created_at?: string; // Timestamp when the order was created
   expectedDeliveryDate?: string;
+  deliveryAddress?: string; // Specific delivery address for this order
   total: number;
   status: OrderStatus;
   orderItems: OrderItem[];
@@ -84,6 +93,8 @@ export interface Customer {
   email: string;
   phone: string;
   location: string;
+  gpsCoordinates?: string; // GPS coordinates in "lat, lng" format
+  route?: string; // Route assignment for delivery planning
   joinDate: string;
   totalSpent: number;
   avatarUrl: string;

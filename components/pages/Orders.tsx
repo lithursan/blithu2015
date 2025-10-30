@@ -10,9 +10,18 @@ import { supabase, fetchOrders } from '../../supabaseClient';
 import { useAuth } from '../../contexts/AuthContext';
 import { exportOrders } from '../../utils/exportUtils';
 import { emailService } from '../../utils/emailService';
+import { confirmSecureDelete } from '../../utils/passwordConfirmation';
 import html2pdf from "html2pdf.js";
 
 const formatCurrency = (amount: number, currency: string) => {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency, minimumFractionDigits: 2 }).format(amount).replace('$', `${currency} `);
+};
+
+// Special formatting function for cheque and credit balances
+const formatBalanceAmount = (amount: number, currency: string) => {
+    if (amount === 0) {
+        return `${currency} 0`;
+    }
     return new Intl.NumberFormat('en-US', { style: 'currency', currency, minimumFractionDigits: 2 }).format(amount).replace('$', `${currency} `);
 };
 
@@ -23,6 +32,92 @@ const format = (amount: number) => {
   }).format(amount);
 };
 
+// Helper function to render customer location in orders table
+const renderCustomerLocationInOrder = (order: Order, customers: Customer[]) => {
+  const customer = customers.find(c => c.id === order.customerId);
+  if (!customer || !customer.location) {
+    return null;
+  }
+
+  const gpsMatch = customer.location.match(/GPS:\s*(-?\d+\.?\d*),\s*(-?\d+\.?\d*)/);
+  
+  if (gpsMatch) {
+    const [, lat, lng] = gpsMatch;
+    const latitude = parseFloat(lat);
+    const longitude = parseFloat(lng);
+    const mapsUrl = `https://www.google.com/maps?q=${latitude},${longitude}`;
+    
+    return (
+      <a 
+        href={mapsUrl} 
+        target="_blank" 
+        rel="noopener noreferrer"
+        className="text-blue-500 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-200 text-xs inline-flex items-center gap-1"
+        title={`Open ${customer.name}'s location in Google Maps`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        📍 Location
+      </a>
+    );
+  }
+  
+  return (
+    <span className="text-slate-400 dark:text-slate-500 text-xs">📍 Address</span>
+  );
+};
+
+// Helper function to open customer location for an order
+const openOrderLocation = (order: Order, customers: Customer[]) => {
+  const customer = customers.find(c => c.id === order.customerId);
+  if (!customer || !customer.location) {
+    alert('No location available for this customer');
+    return;
+  }
+
+  const gpsMatch = customer.location.match(/GPS:\s*(-?\d+\.?\d*),\s*(-?\d+\.?\d*)/);
+  
+  if (gpsMatch) {
+    const [, lat, lng] = gpsMatch;
+    const latitude = parseFloat(lat);
+    const longitude = parseFloat(lng);
+    const mapsUrl = `https://www.google.com/maps?q=${latitude},${longitude}`;
+    window.open(mapsUrl, '_blank');
+  } else {
+    // If no GPS coordinates, try to open with the raw address
+    const encodedAddress = encodeURIComponent(customer.location);
+    const mapsUrl = `https://www.google.com/maps/search/${encodedAddress}`;
+    window.open(mapsUrl, '_blank');
+  }
+};
+
+// Helper function to format phone numbers nicely
+const formatPhoneNumber = (phone: string) => {
+  if (!phone) return '';
+  
+  // Remove all non-digits
+  const digits = phone.replace(/\D/g, '');
+  
+  // Handle Sri Lankan numbers (+94)
+  if (digits.startsWith('94') && digits.length === 11) {
+    // Format: +94 XX XXX XXXX
+    return `+94 ${digits.slice(2, 4)} ${digits.slice(4, 7)} ${digits.slice(7)}`;
+  }
+  
+  // Handle local numbers (0XXXXXXXXX)
+  if (digits.startsWith('0') && digits.length === 10) {
+    // Format: 0XX XXX XXXX
+    return `${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6)}`;
+  }
+  
+  // Handle 9-digit numbers (XXXXXXXXX) 
+  if (digits.length === 9) {
+    // Format: XX XXX XXXX
+    return `${digits.slice(0, 2)} ${digits.slice(2, 5)} ${digits.slice(5)}`;
+  }
+  
+  // Default: return as-is if doesn't match expected patterns
+  return phone;
+};
 
 // --- Printable Bill Component ---
 interface OrderBillProps {
@@ -140,11 +235,11 @@ const OrderBill: React.FC<OrderBillProps> = ({ order, customer, products, curren
         </div>
         <div className="flex justify-between">
           <span className="text-gray-600">Pending Cheque:</span>
-          <span className="font-medium text-yellow-600">{formatCurrency(billChequeBalance, currency)}</span>
+          <span className="font-medium text-yellow-600">{formatBalanceAmount(billChequeBalance, currency)}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-gray-600">Credit Balance:</span>
-          <span className="font-medium text-red-600">{formatCurrency(billCreditBalance, currency)}</span>
+          <span className="font-medium text-red-600">{formatBalanceAmount(billCreditBalance, currency)}</span>
         </div>
         <div className="flex justify-between text-lg font-bold pt-2 mt-2 border-t">
           <span className="text-gray-800">Balance Due:</span>
@@ -199,7 +294,13 @@ export const Orders: React.FC = () => {
   const [viewingOrder, setViewingOrder] = useState<Order | null>(null);
   const [isPrintPreviewOpen, setIsPrintPreviewOpen] = useState(false);
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState<string>('');
+  const [deliveryAddress, setDeliveryAddress] = useState<string>('');
   const [orderToFinalize, setOrderToFinalize] = useState<Order | null>(null);
+  
+  // GPS Location for orders
+  const [orderLocation, setOrderLocation] = useState<{latitude: number, longitude: number, accuracy?: number} | null>(null);
+  const [isCapturingLocation, setIsCapturingLocation] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
 
   const [editableChequeBalance, setEditableChequeBalance] = useState<number | ''>('');
   const [editableCreditBalance, setEditableCreditBalance] = useState<number | ''>('');
@@ -217,14 +318,47 @@ export const Orders: React.FC = () => {
   }, [viewingOrder]);
 
   const canEdit = useMemo(() => 
-    currentUser?.role === UserRole.Admin || 
-    currentUser?.role === UserRole.Manager ||
-    currentUser?.role === UserRole.Sales ||
-    currentUser?.role === UserRole.Driver,
+    currentUser?.role === UserRole.Admin,
     [currentUser]
   );
   
-  const canDelete = useMemo(() => currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Manager, [currentUser]);
+  const canDelete = useMemo(() => currentUser?.role === UserRole.Admin, [currentUser]);
+
+  // GPS Location Capture Function
+  const captureCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      setLocationError('Geolocation is not supported by this browser');
+      return;
+    }
+
+    setIsCapturingLocation(true);
+    setLocationError(null);
+
+    const options = {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 60000 // 1 minute
+    };
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const location = {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracy: position.coords.accuracy
+        };
+        setOrderLocation(location);
+        setIsCapturingLocation(false);
+        console.log('Order location captured:', location);
+      },
+      (error) => {
+        console.error('Location capture error:', error);
+        setLocationError(error.message);
+        setIsCapturingLocation(false);
+      },
+      options
+    );
+  };
 
   // Sales rep cannot print bills or mark orders as delivered
   const canPrintBill = useMemo(() => 
@@ -415,38 +549,26 @@ export const Orders: React.FC = () => {
         });
     }
 
-    // For drivers: sort by status and outstanding amount
-    if (currentUser?.role === UserRole.Driver) {
-      return displayOrders.sort((a, b) => {
-        // Calculate outstanding amounts
-        const outstandingA = ((typeof a.chequeBalance === 'number' && !isNaN(a.chequeBalance) ? a.chequeBalance : 0) + (typeof a.creditBalance === 'number' && !isNaN(a.creditBalance) ? a.creditBalance : 0));
-        const outstandingB = ((typeof b.chequeBalance === 'number' && !isNaN(b.chequeBalance) ? b.chequeBalance : 0) + (typeof b.creditBalance === 'number' && !isNaN(b.creditBalance) ? b.creditBalance : 0));
-        
-        // Priority order: Orange (Pending) = 1, Red (Delivered with outstanding) = 2, Green (Delivered no outstanding) = 3
-        const getOrderPriority = (order: any) => {
-          const outstanding = ((typeof order.chequeBalance === 'number' && !isNaN(order.chequeBalance) ? order.chequeBalance : 0) + (typeof order.creditBalance === 'number' && !isNaN(order.creditBalance) ? order.creditBalance : 0));
-          
-          if (order.status === 'Pending') return 1; // Orange - Top priority
-          if (order.status === 'Delivered' && outstanding > 0) return 2; // Red - Second priority
-          if (order.status === 'Delivered' && outstanding === 0) return 3; // Green - Last priority
-          return 4; // Other statuses
-        };
-        
-        const priorityA = getOrderPriority(a);
-        const priorityB = getOrderPriority(b);
-        
-        // If same priority, sort by date (newest first)
-        if (priorityA === priorityB) {
-          return new Date(b.date).getTime() - new Date(a.date).getTime();
-        }
-        
-        // Otherwise sort by priority
-        return priorityA - priorityB;
-      });
-    }
-    
-    // For non-drivers: keep original date sorting
-    return displayOrders.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    // Sort orders: Pending first, then Delivered (for all users)
+    return displayOrders.sort((a, b) => {
+      // Priority order: Pending = 1, Delivered = 2, Other statuses = 3
+      const getStatusPriority = (order: any) => {
+        if (order.status === 'Pending') return 1; // Pending - Top priority
+        if (order.status === 'Delivered') return 2; // Delivered - Second priority
+        return 3; // Other statuses (Shipped, Cancelled)
+      };
+      
+      const priorityA = getStatusPriority(a);
+      const priorityB = getStatusPriority(b);
+      
+      // If same status priority, sort by date (newest first)
+      if (priorityA === priorityB) {
+        return new Date(b.date).getTime() - new Date(a.date).getTime();
+      }
+      
+      // Otherwise sort by status priority
+      return priorityA - priorityB;
+    });
   }, [orders, products, statusFilter, searchTerm, currentUser, deliveryDateFilter, dateRangeFilter]);
     
   const ordersBySupplier = useMemo(() => {
@@ -476,8 +598,8 @@ export const Orders: React.FC = () => {
 
   const openCreateModal = () => {
     setCurrentOrder(null);
-    setSelectedCustomer(customers[0]?.id || '');
-    setCustomerSearch(customers[0]?.name || '');
+    setSelectedCustomer('');
+    setCustomerSearch('');
     setOrderItems({});
     setOrderDiscounts({});
     setFreeItems({});
@@ -488,6 +610,7 @@ export const Orders: React.FC = () => {
     setOrderItemPrices(initialPrices);
     setHeldItems(new Set());
     setExpectedDeliveryDate('');
+    setDeliveryAddress('');
     setModalState('create');
   };
 
@@ -526,6 +649,7 @@ export const Orders: React.FC = () => {
     setOrderItemPrices(prices);
     setHeldItems(backorderedIds);
     setExpectedDeliveryDate(order.expectedDeliveryDate || '');
+    setDeliveryAddress(order.deliveryAddress || '');
     setModalState('edit');
   };
   
@@ -697,10 +821,32 @@ export const Orders: React.FC = () => {
         return;
       }
 
-      const maxIdNum = orders.reduce((max, order) => {
-        const num = parseInt(order.id.replace('ORD', ''), 10);
-        return num > max ? num : max;
-      }, 0);
+      // Generate unique order ID using database function (safer than client-side calculation)
+      let newOrderId: string;
+      try {
+        const { data: idResult, error: idError } = await supabase.rpc('generate_next_order_id');
+        if (idError || !idResult) {
+          console.warn('Database ID generation failed, using fallback method:', idError);
+          // Fallback to client-side generation with timestamp for uniqueness
+          const maxIdNum = orders.reduce((max, order) => {
+            const num = parseInt(order.id.replace('ORD', ''), 10);
+            return num > max ? num : max;
+          }, 0);
+          const timestamp = Date.now().toString().slice(-3); // Last 3 digits of timestamp
+          newOrderId = `ORD${(maxIdNum + 1).toString().padStart(3, '0')}_${timestamp}`;
+        } else {
+          newOrderId = idResult;
+        }
+      } catch (error) {
+        console.warn('Error generating order ID:', error);
+        // Ultimate fallback with UUID-like suffix
+        const maxIdNum = orders.reduce((max, order) => {
+          const num = parseInt(order.id.replace('ORD', ''), 10);
+          return num > max ? num : max;
+        }, 0);
+        const randomSuffix = Math.random().toString(36).substr(2, 4).toUpperCase();
+        newOrderId = `ORD${(maxIdNum + 1).toString().padStart(3, '0')}_${randomSuffix}`;
+      }
 
       // compute cost amount from products' costPrice * qty (for inventory cost tracking)
       const costAmount = newOrderItems.reduce((sum, item) => {
@@ -710,7 +856,7 @@ export const Orders: React.FC = () => {
       }, 0);
 
       const newOrder = {
-        id: `ORD${(maxIdNum + 1).toString().padStart(3, '0')}`,
+        id: newOrderId,
         customerid: customer.id,
         customername: customer.name,
         assigneduserid: currentUser?.id ?? '',
@@ -718,7 +864,9 @@ export const Orders: React.FC = () => {
         backordereditems: JSON.stringify(newBackorderedItems),
         method: '',
         expecteddeliverydate: expectedDeliveryDate || null,
+        deliveryaddress: deliveryAddress || null,
         orderdate: expectedDeliveryDate || new Date().toISOString().slice(0, 10),
+        created_at: new Date().toISOString(), // Add creation timestamp with proper timezone
         totalamount: total,
         costamount: costAmount,
         status: OrderStatus.Pending,
@@ -727,7 +875,7 @@ export const Orders: React.FC = () => {
         creditbalance: 0,
       };
       
-      // Try inserting with costamount; if the DB doesn't have the column yet, retry without it
+      // Try inserting with costamount and created_at; if the DB doesn't have the columns yet, retry without them
       let insertPayload: any = { ...newOrder };
       try {
         // Log the payload so we can inspect what is being POSTed to Supabase
@@ -747,15 +895,71 @@ export const Orders: React.FC = () => {
           });
 
           const msg = (error.message || '').toLowerCase();
-          if (msg.includes("could not find the 'costamount' column") || msg.includes('costamount')) {
+          if (msg.includes("could not find the 'created_at' column") || msg.includes('created_at')) {
+            // Retry without created_at
+            const payloadNoCreatedAt = ((({ created_at, ...rest }) => rest)(insertPayload));
+            console.log('Retrying insert without created_at:', payloadNoCreatedAt);
+            const { data: retryData, error: retryError } = await supabase.from('orders').insert([payloadNoCreatedAt]).select('*');
+            console.log('Supabase retry response:', { retryData, retryError });
+            if (retryError) {
+              const retryMsg = (retryError.message || '').toLowerCase();
+              if (retryMsg.includes('costamount')) {
+                // Both created_at and costamount missing
+                const payloadMinimal = ((({ created_at, costamount, ...rest }) => rest)(insertPayload));
+                console.log('Retrying insert without created_at and costamount:', payloadMinimal);
+                const { data: finalData, error: finalError } = await supabase.from('orders').insert([payloadMinimal]).select('*');
+                if (finalError) {
+                  alert('Error adding order - Database migration required: ' + finalError.message + '\n\nPlease run the database migration SQL.');
+                  return;
+                }
+              } else {
+                alert('Error adding order after created_at retry: ' + retryError.message + '\n\nSee console for details.');
+                return;
+              }
+            }
+          } else if (msg.includes("could not find the 'costamount' column") || msg.includes('costamount')) {
             // Retry without costamount
             const payloadNoCost = ((({ costamount, ...rest }) => rest)(insertPayload));
             console.log('Retrying insert without costamount:', payloadNoCost);
             const { data: retryData, error: retryError } = await supabase.from('orders').insert([payloadNoCost]).select('*');
             console.log('Supabase retry response:', { retryData, retryError });
             if (retryError) {
-              alert('Error adding order after retry: ' + retryError.message + '\n\nSee console for details.');
-              return;
+              const retryMsg = (retryError.message || '').toLowerCase();
+              if (retryMsg.includes('created_at')) {
+                // Both costamount and created_at missing
+                const payloadMinimal = ((({ costamount, created_at, ...rest }) => rest)(insertPayload));
+                console.log('Retrying insert without costamount and created_at:', payloadMinimal);
+                const { data: finalData, error: finalError } = await supabase.from('orders').insert([payloadMinimal]).select('*');
+                if (finalError) {
+                  alert('Error adding order - Database migration required: ' + finalError.message + '\n\nPlease run the database migration SQL.');
+                  return;
+                }
+              } else {
+                alert('Error adding order after costamount retry: ' + retryError.message + '\n\nSee console for details.');
+                return;
+              }
+            }
+          } else if (msg.includes("could not find the 'deliveryaddress' column") || msg.includes('deliveryaddress')) {
+            // Retry without deliveryaddress
+            const payloadNoDelivery = ((({ deliveryaddress, ...rest }) => rest)(insertPayload));
+            console.log('Retrying insert without deliveryaddress:', payloadNoDelivery);
+            const { data: retryData, error: retryError } = await supabase.from('orders').insert([payloadNoDelivery]).select('*');
+            console.log('Supabase retry response:', { retryData, retryError });
+            if (retryError) {
+              // Check if other columns are missing
+              const retryMsg = (retryError.message || '').toLowerCase();
+              if (retryMsg.includes('costamount') || retryMsg.includes('created_at')) {
+                const payloadMinimal = ((({ costamount, deliveryaddress, created_at, ...rest }) => rest)(insertPayload));
+                console.log('Retrying insert without costamount, deliveryaddress, and created_at:', payloadMinimal);
+                const { data: finalData, error: finalError } = await supabase.from('orders').insert([payloadMinimal]).select('*');
+                if (finalError) {
+                  alert('Error adding order - Database migration required: ' + finalError.message + '\n\nPlease run the database migration SQL.');
+                  return;
+                }
+              } else {
+                alert('Error adding order after delivery retry: ' + retryError.message + '\n\nSee console for details.');
+                return;
+              }
             }
           } else {
             alert('Error adding order: ' + error.message + '\n\nSee console for details.');
@@ -793,6 +997,7 @@ export const Orders: React.FC = () => {
         backordereditems: JSON.stringify(newBackorderedItems),
         method: '',
         expecteddeliverydate: expectedDeliveryDate || null,
+        deliveryaddress: deliveryAddress || null,
         orderdate: expectedDeliveryDate || currentOrder.orderdate || new Date().toISOString().slice(0, 10),
         totalamount: total,
           // update costamount when editing
@@ -818,6 +1023,23 @@ export const Orders: React.FC = () => {
               alert('Error updating order after retry: ' + retryError.message);
               return;
             }
+          } else if (msg.includes("could not find the 'deliveryaddress' column") || msg.includes('deliveryaddress')) {
+            // Retry without deliveryaddress
+            const { error: retryError } = await supabase.from('orders').update(((({ deliveryaddress, ...rest }) => rest)(updatedOrder))).eq('id', currentOrder.id);
+            if (retryError) {
+              const retryMsg = (retryError.message || '').toLowerCase();
+              if (retryMsg.includes('costamount')) {
+                // Both columns missing - retry without both
+                const { error: finalError } = await supabase.from('orders').update(((({ costamount, deliveryaddress, ...rest }) => rest)(updatedOrder))).eq('id', currentOrder.id);
+                if (finalError) {
+                  alert('Error updating order - Database migration required: ' + finalError.message);
+                  return;
+                }
+              } else {
+                alert('Error updating order after delivery retry: ' + retryError.message);
+                return;
+              }
+            }
           } else {
             alert('Error updating order: ' + error.message);
             return;
@@ -842,7 +1064,19 @@ export const Orders: React.FC = () => {
 };
   
   const handleDeleteOrder = async () => {
-    if (!orderToDelete) return;
+    if (!orderToDelete || !currentUser?.email) return;
+    
+    // Require password confirmation for delete
+    const confirmed = await confirmSecureDelete(
+      orderToDelete.id, 
+      'Order', 
+      currentUser.email
+    );
+    
+    if (!confirmed) {
+      closeDeleteModal();
+      return;
+    }
     
     try {
       const { error } = await supabase.from('orders').delete().eq('id', orderToDelete.id);
@@ -1290,10 +1524,10 @@ export const Orders: React.FC = () => {
           <div><span>Total Items:</span><span>${viewingOrder.orderItems?.reduce((sum, item) => sum + item.quantity, 0) ?? 0}</span></div>
           <div><span>Return Amount:</span><span>${formatCurrency(viewingOrder.returnAmount || 0, currency)}</span></div>
           <div><span>Paid:</span><span>${formatCurrency(editableAmountPaid, currency)}</span></div>
-          <div><span>Cheque:</span><span>${formatCurrency(editableChequeBalance, currency)}</span></div>
-          <div><span>Credit:</span><span>${formatCurrency(editableCreditBalance, currency)}</span></div>
+          <div><span>Cheque:</span><span>${formatBalanceAmount(editableChequeBalance, currency)}</span></div>
+          <div><span>Credit:</span><span>${formatBalanceAmount(editableCreditBalance, currency)}</span></div>
           <br/>
-          <div class="grand-total"><span>Balance Due:</span><span>${formatCurrency(editableChequeBalance + editableCreditBalance, currency)}</span></div>
+          <div class="grand-total"><span>Balance Due:</span><span>${formatBalanceAmount(editableChequeBalance + editableCreditBalance, currency)}</span></div>
         </div>
 
         <div class="thank-you">
@@ -1345,31 +1579,34 @@ export const Orders: React.FC = () => {
         }
       `}</style>
 
-      <div className="p-4 sm:p-6 lg:p-8 space-y-8 no-print">
-        <div className="flex justify-between items-center">
-          <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-100">Orders</h1>
-          <div className="flex gap-2">
+      <div className="p-3 sm:p-4 lg:p-6 space-y-6 sm:space-y-8 no-print">
+        <div className="flex flex-col sm:flex-row gap-4 sm:gap-0 sm:justify-between sm:items-center">
+          <h1 className="text-2xl sm:text-3xl font-bold text-slate-800 dark:text-slate-100">Orders</h1>
+          <div className="flex flex-wrap gap-2 sm:gap-3">
             {/* Export Buttons */}
             <button
               onClick={() => exportOrders(filteredOrders, 'csv')}
-              className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
+              className="px-3 sm:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm font-medium"
               title="Export as CSV"
             >
-              📊 CSV
+              <span className="hidden sm:inline">📊 CSV</span>
+              <span className="sm:hidden">CSV</span>
             </button>
             <button
               onClick={() => exportOrders(filteredOrders, 'xlsx')}
-              className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
+              className="px-3 sm:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm font-medium"
               title="Export as Excel"
             >
-              📋 Excel
+              <span className="hidden sm:inline">📋 Excel</span>
+              <span className="sm:hidden">Excel</span>
             </button>
             {canEdit && (
               <button
                 onClick={openCreateModal}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                className="px-4 sm:px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm sm:text-base font-medium"
               >
-                New Order
+                <span className="hidden sm:inline">+ New Order</span>
+                <span className="sm:hidden">+ Order</span>
               </button>
             )}
           </div>
@@ -1381,46 +1618,54 @@ export const Orders: React.FC = () => {
             <CardDescription>
                 {isManagerView ? 'View and manage all customer orders.' : 'View and manage orders assigned to you.'}
             </CardDescription>
-            <div className="pt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="md:col-span-2">
+            <div className="pt-4 space-y-4">
+              {/* Search - Full width on mobile */}
+              <div>
                 <input
                   type="text"
                   placeholder="Search by Order ID or Customer..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 sm:px-4 py-2.5 sm:py-2 text-sm sm:text-base border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
-              <div>
-                <select
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value as OrderStatus | 'all')}
-                    className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                    <option value="all">All Statuses</option>
-                    <option value={OrderStatus.Pending}>Pending</option>
-                    <option value={OrderStatus.Delivered}>Delivered</option>
-                </select>
-              </div>
-              <div>
-                <select
-                    value={dateRangeFilter}
-                    onChange={(e) => {
-                        setDateRangeFilter(e.target.value as 'today' | 'this_week' | 'this_month' | 'all');
-                        setDeliveryDateFilter(''); // Clear specific date when range is selected
-                    }}
-                    className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                    <option value="all">All Delivery Dates</option>
-                    <option value="today">Today's Deliveries</option>
-                    <option value="this_week">This Week</option>
-                    <option value="this_month">This Month</option>
-                </select>
+              
+              {/* Filter dropdowns - responsive grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-3 sm:gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">Status</label>
+                  <select
+                      value={statusFilter}
+                      onChange={(e) => setStatusFilter(e.target.value as OrderStatus | 'all')}
+                      className="w-full px-3 sm:px-4 py-2.5 sm:py-2 text-sm sm:text-base border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                      <option value="all">All Statuses</option>
+                      <option value={OrderStatus.Pending}>Pending</option>
+                      <option value={OrderStatus.Delivered}>Delivered</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">Time Range</label>
+                  <select
+                      value={dateRangeFilter}
+                      onChange={(e) => {
+                          setDateRangeFilter(e.target.value as 'today' | 'this_week' | 'this_month' | 'all');
+                          setDeliveryDateFilter(''); // Clear specific date when range is selected
+                      }}
+                      className="w-full px-3 sm:px-4 py-2.5 sm:py-2 text-sm sm:text-base border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                      <option value="all">All Delivery Dates</option>
+                      <option value="today">Today's Deliveries</option>
+                      <option value="this_week">This Week</option>
+                      <option value="this_month">This Month</option>
+                  </select>
+                </div>
               </div>
             </div>
             
-            <div className="pt-2 grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-              <div>
+            <div className="pt-3 flex flex-col sm:flex-row gap-3 sm:gap-4 sm:items-end">
+              <div className="flex-1 max-w-xs">
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">Specific Date</label>
                 <input
                     type="date"
                     value={deliveryDateFilter}
@@ -1428,22 +1673,23 @@ export const Orders: React.FC = () => {
                         setDeliveryDateFilter(e.target.value);
                         setDateRangeFilter('all'); // Clear range when specific date is selected
                     }}
-                    className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 sm:px-4 py-2.5 sm:py-2 text-sm sm:text-base border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     title="Filter by specific delivery date"
                 />
               </div>
-              <div></div> {/* Empty space */}
-              <div className="flex justify-end">
+              
+              <div className="flex gap-2 sm:gap-3">
                 {(deliveryDateFilter || dateRangeFilter !== 'all') && (
                     <button
                         onClick={() => {
                             setDeliveryDateFilter('');
                             setDateRangeFilter('all');
                         }}
-                        className="px-4 py-2 bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50 rounded-lg transition-colors font-medium"
+                        className="px-3 sm:px-4 py-2.5 sm:py-2 text-sm font-medium bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50 rounded-lg transition-colors"
                         title="Clear date filters"
                     >
-                        Clear Filters
+                        <span className="hidden sm:inline">Clear Filters</span>
+                        <span className="sm:hidden">Clear</span>
                     </button>
                 )}
               </div>
@@ -1455,126 +1701,236 @@ export const Orders: React.FC = () => {
                 const ordersList = (supplierOrders ?? []) as Order[];
                 return (
                   <div key={supplierName}>
-                    <div className="flex items-center space-x-3 mb-4">
+                    <div className="flex items-center space-x-3 mb-6">
                       <h2 className="text-xl font-semibold text-slate-700 dark:text-slate-300">{supplierName}</h2>
                       <Badge variant="default">{ordersList.length} {ordersList.length === 1 ? 'Order' : 'Orders'}</Badge>
                     </div>
-                    <div className="overflow-x-auto border dark:border-slate-700 rounded-lg">
-                      <table className="w-full text-sm text-left text-slate-500 dark:text-slate-400">
-                        <thead className="text-xs text-slate-700 uppercase bg-slate-50 dark:bg-slate-700 dark:text-slate-400">
-                          <tr>
-                            <th scope="col" className="px-4 py-3 z-10 sticky left-0 bg-slate-50 dark:bg-slate-700 min-w-[250px]">Order Details</th>
-                            <th scope="col" className="px-6 py-3 z-10 sticky right-0 bg-slate-50 dark:bg-slate-700 min-w-[200px]">Status, Outstanding & Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {ordersList.map((order) => {
-                // Use DB columns: assigneduserid, totalamount, orderdate
-                              const assignedUser = users.find(u => u.id === order.assignedUserId);
-                let allocatedProductIds: string[] = [];
-                if (currentUser?.role === UserRole.Driver && driverAllocations.length > 0) {
-                  const todayStr = new Date().toISOString().slice(0, 10);
-                  console.log('DriverAllocations:', driverAllocations);
-                  console.log('CurrentUser:', currentUser);
-                  const allocation = driverAllocations.find((a: any) => {
-                    console.log('Checking allocation:', a);
-                    return a.driverId === currentUser.id && a.date === todayStr;
-                  });
-                  console.log('Matched allocation:', allocation);
-                  if (allocation) {
-                    allocatedProductIds = allocation.allocatedItems.map((i: any) => i.productId);
-                  }
-                }
-                return (
-                  <tr key={order.id} className="border-b dark:bg-slate-800 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600">
-                    <td className={`px-4 py-4 font-medium z-5 sticky left-0 bg-white dark:bg-slate-800 min-w-[250px] ${
-                      (() => {
+                    
+                    {/* Compact card-based layout */}
+                    <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+                      {ordersList.map((order) => {
+                        const assignedUser = users.find(u => u.id === order.assignedUserId);
                         const outstandingAmount = ((typeof order.chequeBalance === 'number' && !isNaN(order.chequeBalance) ? order.chequeBalance : 0) + (typeof order.creditBalance === 'number' && !isNaN(order.creditBalance) ? order.creditBalance : 0));
                         
-                        if (order.status === 'Pending') {
-                          // Pending - Orange text
-                          return 'text-orange-700 dark:text-orange-400';
-                        } else if (order.status === 'Delivered') {
-                          if (outstandingAmount === 0) {
-                            // Delivered + Outstanding = 0 - Green text
-                            return 'text-green-700 dark:text-green-400';
-                          } else {
-                            // Delivered + Outstanding ≠ 0 - Red text
-                            return 'text-red-700 dark:text-red-400';
-                          }
-                        }
-                        return 'text-slate-900 dark:text-white';
-                      })()
-                    }`}>
-                      <div>
-                        <div className="font-bold text-sm">{order.id}</div>
-                        <div className="text-xs text-slate-600 dark:text-slate-400">{order.customerName}</div>
-                        <div className="text-xs text-blue-600 dark:text-blue-400 mt-1">{
-                          order.date
-                            ? (() => {
-                                const d = new Date(order.date);
-                                return isNaN(d.getTime())
-                                  ? order.date
-                                  : d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
-                              })()
-                            : 'N/A'
-                        }</div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 z-5 sticky right-0 bg-white dark:bg-slate-800 border-l border-slate-200 dark:border-slate-600">
-                      <div className="flex flex-col space-y-2">
-                        <div className={`text-xs font-bold ${
-                          (() => {
-                            const outstandingAmount = ((typeof order.chequeBalance === 'number' && !isNaN(order.chequeBalance) ? order.chequeBalance : 0) + (typeof order.creditBalance === 'number' && !isNaN(order.creditBalance) ? order.creditBalance : 0));
-                            
-                            if (order.status === 'Pending') {
-                              return 'text-orange-600 dark:text-orange-400';
-                            } else if (order.status === 'Delivered') {
-                              if (outstandingAmount === 0) {
-                                return 'text-green-600 dark:text-green-400';
-                              } else {
-                                return 'text-red-600 dark:text-red-400';
-                              }
+                        // Determine card border and text colors based on status and outstanding amount
+                        const getCardStyle = () => {
+                          if (order.status === 'Pending') {
+                            return {
+                              border: 'border-l-4 border-orange-500 bg-orange-50 dark:bg-orange-900/10',
+                              text: 'text-orange-700 dark:text-orange-400',
+                              badge: 'bg-orange-100 text-orange-800 border border-orange-300 dark:bg-orange-900/20 dark:text-orange-400 dark:border-orange-600'
+                            };
+                          } else if (order.status === 'Delivered') {
+                            if (outstandingAmount === 0) {
+                              return {
+                                border: 'border-l-4 border-green-500 bg-green-50 dark:bg-green-900/10',
+                                text: 'text-green-700 dark:text-green-400',
+                                badge: 'bg-green-100 text-green-800 border border-green-300 dark:bg-green-900/20 dark:text-green-400 dark:border-green-600'
+                              };
+                            } else {
+                              return {
+                                border: 'border-l-4 border-red-500 bg-red-50 dark:bg-red-900/10',
+                                text: 'text-red-700 dark:text-red-400',
+                                badge: 'bg-red-100 text-red-800 border border-red-300 dark:bg-red-900/20 dark:text-red-400 dark:border-red-600'
+                              };
                             }
-                            return 'text-red-600 dark:text-red-400';
-                          })()
-                        }`}>
-                          {'LKR' + ((typeof order.chequeBalance === 'number' && !isNaN(order.chequeBalance) ? order.chequeBalance : 0) + (typeof order.creditBalance === 'number' && !isNaN(order.creditBalance) ? order.creditBalance : 0)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
-                        </div>
-                        <div>
-                          <Badge variant={getStatusBadgeVariant(order.status)} className={`whitespace-nowrap text-xs font-bold ${
-                            (() => {
-                              const outstandingAmount = ((typeof order.chequeBalance === 'number' && !isNaN(order.chequeBalance) ? order.chequeBalance : 0) + (typeof order.creditBalance === 'number' && !isNaN(order.creditBalance) ? order.creditBalance : 0));
+                          }
+                          return {
+                            border: 'border-l-4 border-slate-300 bg-white dark:bg-slate-800',
+                            text: 'text-slate-900 dark:text-white',
+                            badge: ''
+                          };
+                        };
+                        
+                        const cardStyle = getCardStyle();
+                        
+                        return (
+                          <Card key={order.id} className={`${cardStyle.border} hover:shadow-md transition-all duration-200 cursor-pointer`}>
+                            <CardContent className="p-3">
+                              {/* Order Header */}
+                              <div className="flex justify-between items-start mb-2">
+                                <div>
+                                  <h3 className={`font-bold text-sm ${cardStyle.text}`}>{order.id}</h3>
+                                  <p className="text-xs text-slate-600 dark:text-slate-400 flex items-center gap-1 mt-0.5">
+                                    <span className="font-medium truncate">{order.customerName}</span>
+                                  </p>
+                                  {(() => {
+                                    const customer = customers.find(c => c.id === order.customerId);
+                                    if (customer?.phone) {
+                                      return (
+                                        <a 
+                                          href={`tel:${customer.phone}`}
+                                          className="inline-flex items-center gap-1 px-2 py-1 mt-0.5 text-xs font-medium text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/30 rounded transition-colors cursor-pointer"
+                                          title={`Call ${customer.name}`}
+                                          onClick={(e) => e.stopPropagation()}
+                                        >
+                                          📞 {formatPhoneNumber(customer.phone)}
+                                        </a>
+                                      );
+                                    }
+                                    return null;
+                                  })()}
+                                  {(() => {
+                                    const customer = customers.find(c => c.id === order.customerId);
+                                    if (customer?.route) {
+                                      return (
+                                        <div className="text-xs text-orange-600 dark:text-orange-400 flex items-center gap-1 mt-0.5">
+                                          <span>🚛</span>
+                                          <span className="font-medium">Route: {customer.route}</span>
+                                        </div>
+                                      );
+                                    }
+                                    return null;
+                                  })()}
+                                </div>
+                                <Badge variant={getStatusBadgeVariant(order.status)} className={`${cardStyle.badge} text-xs font-bold whitespace-nowrap`}>
+                                  {order.status}
+                                </Badge>
+                              </div>
                               
-                              if (order.status === 'Pending') {
-                                return 'bg-orange-100 text-orange-800 border border-orange-300 dark:bg-orange-900/20 dark:text-orange-400 dark:border-orange-600';
-                              } else if (order.status === 'Delivered') {
-                                if (outstandingAmount === 0) {
-                                  return 'bg-green-100 text-green-800 border border-green-300 dark:bg-green-900/20 dark:text-green-400 dark:border-green-600';
-                                } else {
-                                  return 'bg-red-100 text-red-800 border border-red-300 dark:bg-red-900/20 dark:text-red-400 dark:border-red-600';
-                                }
-                              }
-                              return '';
-                            })()
-                          }`}>{order.status}</Badge>
-                        </div>
-                        <div className="flex flex-col space-y-1">
-                          <button onClick={() => openViewModal(order)} className="text-xs font-medium text-slate-600 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-300 text-left">View</button>
-                          {canEdit && (
-                            <>
-                              <button onClick={() => openEditModal(order)} className="text-xs font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 text-left">Edit</button>
-                              {canDelete && <button onClick={() => openDeleteModal(order)} className="text-xs font-medium text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 text-left">Delete</button>}
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </td>
-                  </tr>
-                              );
-                          })}
-                        </tbody>
-                      </table>
+                              {/* Order Details */}
+                              <div className="space-y-1.5">
+                                {/* Date */}
+                                <div className="text-xs text-slate-600 dark:text-slate-400">
+                                  {order.date
+                                    ? (() => {
+                                        const d = new Date(order.date);
+                                        return isNaN(d.getTime())
+                                          ? order.date
+                                          : d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                                      })()
+                                    : 'N/A'
+                                  }
+                                </div>
+
+                                {/* Total Amount */}
+                                <div className="text-lg font-bold text-slate-900 dark:text-white">
+                                  {formatCurrency(order.total, currency)}
+                                </div>
+                                
+                                {/* Outstanding Amount - Always show */}
+                                <div className={`text-sm font-semibold ${cardStyle.text}`}>
+                                  Outstanding: {formatCurrency(outstandingAmount, currency)}
+                                </div>
+                                
+                                {/* Items Count */}
+                                <div className="text-xs text-slate-500 dark:text-slate-400">
+                                  {(order.orderItems || []).length} items
+                                </div>
+                                
+                                {/* Expected Delivery Date - Only if different from order date */}
+                                {order.expectedDeliveryDate && order.expectedDeliveryDate !== order.date && (
+                                  <div className="text-xs text-blue-600 dark:text-blue-400">
+                                    Expected: {new Date(order.expectedDeliveryDate).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' })}
+                                  </div>
+                                )}
+                                
+                                {/* Assigned User - Only show if exists and not empty */}
+                                {assignedUser && assignedUser.name && (
+                                  <div className="text-xs text-slate-500 dark:text-slate-400">
+                                    {assignedUser.name}
+                                  </div>
+                                )}
+
+                                {/* Payment details - show all balances including 0 */}
+                                <div className="text-xs text-orange-600 dark:text-orange-400">
+                                  Cheque: {formatBalanceAmount(order.chequeBalance || 0, currency)}
+                                </div>
+                                <div className="text-xs text-red-600 dark:text-red-400">
+                                  Credit: {formatBalanceAmount(order.creditBalance || 0, currency)}
+                                </div>
+
+
+
+
+
+                              </div>
+                              
+                              {/* Order Creation Date and Time */}
+                              <div className="mt-2 pt-2 border-t border-slate-200 dark:border-slate-600">
+                                <div className="flex justify-between items-center text-xs text-slate-500 dark:text-slate-400">
+                                  <span className="flex items-center gap-1">
+                                    📅 Created: {(() => {
+                                      // Use created_at if available, fallback to order date
+                                      const createdDate = order.created_at || order.date;
+                                      const d = new Date(createdDate);
+                                      return isNaN(d.getTime())
+                                        ? createdDate
+                                        : d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                                    })()}
+                                  </span>
+                                  <span className="flex items-center gap-1">
+                                    🕒 {(() => {
+                                      // Use created_at if available, fallback to order date
+                                      const createdDate = order.created_at || order.date;
+                                      const d = new Date(createdDate);
+                                      if (isNaN(d.getTime())) {
+                                        return 'N/A';
+                                      }
+                                      
+                                      // Format time in local timezone with AM/PM
+                                      const hours = d.getHours();
+                                      const minutes = d.getMinutes();
+                                      const ampm = hours >= 12 ? 'PM' : 'AM';
+                                      const displayHours = hours % 12 || 12;
+                                      const displayMinutes = minutes.toString().padStart(2, '0');
+                                      
+                                      return `${displayHours}:${displayMinutes} ${ampm}`;
+                                    })()}
+                                  </span>
+                                </div>
+                              </div>
+                              
+                              {/* Action Buttons */}
+                              <div className="flex gap-1.5 sm:gap-1 mt-2 pt-2 border-t border-slate-200 dark:border-slate-600">
+                                {/* Location Button */}
+                                {(() => {
+                                  const customer = customers.find(c => c.id === order.customerId);
+                                  if (customer?.location) {
+                                    return (
+                                      <button 
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          openOrderLocation(order, customers);
+                                        }} 
+                                        className="px-2 py-2 sm:py-1 text-xs font-medium text-green-600 hover:text-green-800 dark:text-green-400 dark:hover:text-green-300 bg-green-50 hover:bg-green-100 dark:bg-green-900/20 dark:hover:bg-green-900/30 rounded transition-colors min-h-[32px] sm:min-h-auto"
+                                        title={`Open ${customer.name}'s location`}
+                                      >
+                                        <span className="hidden sm:inline">📍 Location</span>
+                                        <span className="sm:hidden">📍</span>
+                                      </button>
+                                    );
+                                  }
+                                  return null;
+                                })()}
+                                <button 
+                                  onClick={() => openViewModal(order)} 
+                                  className="flex-1 px-2 py-2 sm:py-1 text-xs font-medium text-slate-600 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-300 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 rounded transition-colors min-h-[32px] sm:min-h-auto"
+                                >
+                                  View
+                                </button>
+                                {canEdit && (
+                                  <button 
+                                    onClick={() => openEditModal(order)} 
+                                    className="flex-1 px-2 py-2 sm:py-1 text-xs font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/20 dark:hover:bg-blue-900/30 rounded transition-colors min-h-[32px] sm:min-h-auto"
+                                  >
+                                    Edit
+                                  </button>
+                                )}
+                                {canDelete && (
+                                  <button 
+                                    onClick={() => openDeleteModal(order)} 
+                                    className="px-2 py-2 sm:py-1 text-xs font-medium text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/30 rounded transition-colors min-h-[32px] sm:min-h-auto"
+                                  >
+                                    <span className="hidden sm:inline">Delete</span>
+                                    <span className="sm:hidden">Del</span>
+                                  </button>
+                                )}
+                              </div>
+                            </CardContent>
+                          </Card>
+                        );
+                      })}
                     </div>
                   </div>
                 );
@@ -1592,6 +1948,30 @@ export const Orders: React.FC = () => {
           <div className="flex flex-col h-[85vh] sm:h-[90vh] lg:h-[800px] max-h-[90vh] bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-slate-900 dark:to-slate-800">
             {/* Compact Header Section */}
             <div className="p-1 sm:p-2 border-b border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-800 flex-shrink-0">
+              {/* Date and Time Display */}
+              <div className="mb-2 p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg border border-blue-200 dark:border-blue-700">
+                <div className="flex justify-between items-center text-sm">
+                  <div className="flex items-center gap-2">
+                    <span className="text-blue-600 dark:text-blue-400">📅</span>
+                    <span className="font-medium text-slate-700 dark:text-slate-300">
+                      Order Date: {new Date().toLocaleDateString('en-GB', { 
+                        day: '2-digit', 
+                        month: '2-digit', 
+                        year: 'numeric' 
+                      })}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-blue-600 dark:text-blue-400">🕒</span>
+                    <span className="font-medium text-slate-700 dark:text-slate-300">
+                      Time: {new Date().toLocaleTimeString('en-GB', { 
+                        hour: '2-digit', 
+                        minute: '2-digit'
+                      })}
+                    </span>
+                  </div>
+                </div>
+              </div>
               <div className="space-y-1">
                 {/* Ultra Compact Customer Selection */}
                 <div className="relative" ref={customerDropdownRef}>
@@ -1605,9 +1985,9 @@ export const Orders: React.FC = () => {
                       value={customerSearch}
                       onChange={(e) => {
                         setCustomerSearch(e.target.value);
-                        setIsCustomerDropdownOpen(true);
+                        setIsCustomerDropdownOpen(e.target.value.length > 0);
                       }}
-                      onFocus={() => setIsCustomerDropdownOpen(true)}
+                      onFocus={() => setIsCustomerDropdownOpen(customerSearch.length > 0)}
                       placeholder="Search customer..."
                       className="bg-white border border-slate-300 text-slate-900 text-xs rounded focus:ring-1 focus:ring-blue-400 focus:border-blue-400 block w-full p-1.5 pr-6 dark:bg-slate-700 dark:border-slate-500 dark:placeholder-slate-400 dark:text-white"
                     />
@@ -1617,7 +1997,7 @@ export const Orders: React.FC = () => {
                       </svg>
                     </div>
                     
-                    {isCustomerDropdownOpen && (
+                    {isCustomerDropdownOpen && customerSearch.length > 0 && (
                       <div className="absolute z-50 w-full mt-2 bg-white/95 backdrop-blur-md border-2 border-blue-200 rounded-xl shadow-xl max-h-60 overflow-y-auto dark:bg-slate-700/95 dark:border-slate-500">
                         {customers
                           .filter(customer => 
@@ -1633,19 +2013,19 @@ export const Orders: React.FC = () => {
                                 setCustomerSearch(customer.name);
                                 setIsCustomerDropdownOpen(false);
                               }}
-                              className={`p-4 cursor-pointer hover:bg-blue-50 dark:hover:bg-slate-600 border-b border-blue-100 dark:border-slate-600 last:border-b-0 transition-all duration-150 ${
+                              className={`p-2 cursor-pointer hover:bg-blue-50 dark:hover:bg-slate-600 border-b border-blue-100 dark:border-slate-600 last:border-b-0 transition-all duration-150 ${
                                 selectedCustomer === customer.id ? 'bg-gradient-to-r from-blue-100 to-blue-50 dark:from-blue-900/40 dark:to-blue-800/30 border-l-4 border-l-blue-500' : ''
                               }`}
                             >
-                              <div className="font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                              <div className="font-medium text-sm text-slate-900 dark:text-white flex items-center gap-2">
                                 <span className="w-2 h-2 bg-green-500 rounded-full"></span>
                                 {customer.name}
                               </div>
                               {customer.email && (
-                                <div className="text-sm text-slate-500 dark:text-slate-400">{customer.email}</div>
+                                <div className="text-xs text-slate-500 dark:text-slate-400">{customer.email}</div>
                               )}
                               {customer.phone && (
-                                <div className="text-sm text-slate-500 dark:text-slate-400">{customer.phone}</div>
+                                <div className="text-xs text-slate-500 dark:text-slate-400">{customer.phone}</div>
                               )}
                             </div>
                           ))
@@ -1676,6 +2056,39 @@ export const Orders: React.FC = () => {
                     onChange={(e) => setExpectedDeliveryDate(e.target.value)}
                     className="bg-white border border-slate-300 text-slate-900 text-xs rounded focus:ring-1 focus:ring-blue-400 focus:border-blue-400 block w-full p-1.5 dark:bg-slate-700 dark:border-slate-500 dark:text-white"
                   />
+                </div>
+
+                {/* Delivery Address Section */}
+                <div>
+                  <label htmlFor="deliveryAddress" className="block mb-0.5 text-xs font-medium text-slate-700 dark:text-slate-300">
+                    📍 Delivery Address
+                  </label>
+                  <div className="flex gap-1">
+                    <input
+                      type="text"
+                      id="deliveryAddress"
+                      value={deliveryAddress}
+                      onChange={(e) => setDeliveryAddress(e.target.value)}
+                      placeholder="Enter specific delivery address"
+                      className="bg-white border border-slate-300 text-slate-900 text-xs rounded focus:ring-1 focus:ring-blue-400 focus:border-blue-400 block w-full p-1.5 dark:bg-slate-700 dark:border-slate-500 dark:placeholder-slate-400 dark:text-white"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const customer = customers.find(c => c.id === selectedCustomer);
+                        if (customer) {
+                          setDeliveryAddress(customer.location);
+                        }
+                      }}
+                      className="px-2 py-1.5 text-xs bg-blue-100 hover:bg-blue-200 text-blue-600 rounded transition-colors dark:bg-blue-900 dark:text-blue-300 dark:hover:bg-blue-800 whitespace-nowrap"
+                      title="Use customer's address"
+                    >
+                      Use Default
+                    </button>
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Leave empty to use customer's default address
+                  </p>
                 </div>
               </div>
               
@@ -1929,11 +2342,44 @@ export const Orders: React.FC = () => {
                           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 text-xs">
                               <div>
                                   <p className="font-medium text-xs text-slate-700 dark:text-slate-300">Customer:</p>
-                                  <p className="text-xs text-slate-900 dark:text-white">{viewingOrder.customerName}</p>
+                                  <div className="flex items-center gap-2">
+                                    <p className="text-xs text-slate-900 dark:text-white">{viewingOrder.customerName}</p>
+                                    {renderCustomerLocationInOrder(viewingOrder, customers)}
+                                  </div>
                               </div>
                               <div>
                                   <p className="font-medium text-xs text-slate-700 dark:text-slate-300">Location:</p>
-                                  <p className="text-xs text-slate-900 dark:text-white">{customer?.location || 'N/A'}</p>
+                                  {customer?.location ? (
+                                    (() => {
+                                      const gpsMatch = customer.location.match(/GPS:\s*(-?\d+\.?\d*),\s*(-?\d+\.?\d*)/);
+                                      if (gpsMatch) {
+                                        const [fullMatch, lat, lng] = gpsMatch;
+                                        const latitude = parseFloat(lat);
+                                        const longitude = parseFloat(lng);
+                                        const addressPart = customer.location.replace(fullMatch, '').replace(/\s*\(\s*\)\s*$/, '').trim();
+                                        const mapsUrl = `https://www.google.com/maps?q=${latitude},${longitude}`;
+                                        return (
+                                          <div className="text-xs">
+                                            {addressPart && (
+                                              <p className="text-slate-900 dark:text-white truncate">{addressPart}</p>
+                                            )}
+                                            <a 
+                                              href={mapsUrl} 
+                                              target="_blank" 
+                                              rel="noopener noreferrer"
+                                              className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 underline inline-flex items-center gap-1"
+                                              title={`Open location in Google Maps (${latitude}, ${longitude})`}
+                                            >
+                                              📍 GPS: {latitude.toFixed(4)}, {longitude.toFixed(4)}
+                                            </a>
+                                          </div>
+                                        );
+                                      }
+                                      return <p className="text-xs text-slate-900 dark:text-white">{customer.location}</p>;
+                                    })()
+                                  ) : (
+                                    <p className="text-xs text-slate-500 dark:text-slate-400">N/A</p>
+                                  )}
                               </div>
                 <div>
                   <p className="font-medium text-xs text-slate-700 dark:text-slate-300">Order Date:</p>
@@ -2058,7 +2504,7 @@ export const Orders: React.FC = () => {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-600 dark:text-slate-400">Pending Cheque:</span> 
-                      <span className="font-medium text-orange-600">{formatCurrency(editableChequeBalance, currency)}</span>
+                      <span className="font-medium text-orange-600">{formatBalanceAmount(editableChequeBalance, currency)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-600 dark:text-slate-400">Return Amount:</span>
@@ -2066,7 +2512,7 @@ export const Orders: React.FC = () => {
                     </div>
                     <div className="flex justify-between font-bold text-base mt-1">
                       <span className="text-slate-800 dark:text-slate-200">Balance Due:</span> 
-                      <span className="text-red-600">{formatCurrency(editableChequeBalance + editableCreditBalance, currency)}</span>
+                      <span className="text-red-600">{formatBalanceAmount(editableChequeBalance + editableCreditBalance, currency)}</span>
                     </div>
                                   </div>
                               </div>

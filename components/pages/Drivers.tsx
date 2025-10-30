@@ -313,7 +313,7 @@ export const Drivers: React.FC = () => {
 
 
     return fallbackUI ? fallbackUI : (
-        <div className="p-4 sm:p-6 lg:p-8 space-y-8">
+        <div className="p-3 sm:p-4 lg:p-6 space-y-6 sm:space-y-8">
              <style>{`
                 @media print {
                   .no-print { display: none !important; }
@@ -322,32 +322,36 @@ export const Drivers: React.FC = () => {
                   #printable-invoice-content { position: absolute; left: 0; top: 0; width: 100%; }
                 }
             `}</style>
-            <div className="flex justify-between items-center">
-                <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-100">Driver Management</h1>
-                <div className="flex gap-2 items-center">
+            <div className="flex flex-col sm:flex-row gap-4 sm:justify-between sm:items-center">
+                <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-slate-800 dark:text-slate-100">Driver Management</h1>
+                <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
                     {/* Export Buttons */}
-                    <button
-                        onClick={() => exportDriverAllocations(driverAllocations, 'csv')}
-                        className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
-                        title="Export Allocations as CSV"
-                    >
-                        📊 Allocations CSV
-                    </button>
-                    <button
-                        onClick={() => exportDriverAllocations(driverAllocations, 'xlsx')}
-                        className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
-                        title="Export Allocations as Excel"
-                    >
-                        📋 Allocations Excel
-                    </button>
-                    <div className="flex items-center gap-3">
-                        <label htmlFor="selectedDate" className="text-sm text-slate-500 dark:text-slate-400">Date:</label>
-                        <input id="selectedDate" name="selectedDate" type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="p-2 border rounded bg-white dark:bg-slate-700" />
+                    <div className="flex gap-2 order-2 sm:order-1">
+                        <button
+                            onClick={() => exportDriverAllocations(driverAllocations, 'csv')}
+                            className="px-2 sm:px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm flex-1 sm:flex-none"
+                            title="Export Allocations as CSV"
+                        >
+                            <span className="hidden sm:inline">📊 Allocations CSV</span>
+                            <span className="sm:hidden">CSV</span>
+                        </button>
+                        <button
+                            onClick={() => exportDriverAllocations(driverAllocations, 'xlsx')}
+                            className="px-2 sm:px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm flex-1 sm:flex-none"
+                            title="Export Allocations as Excel"
+                        >
+                            <span className="hidden sm:inline">📋 Allocations Excel</span>
+                            <span className="sm:hidden">XLS</span>
+                        </button>
+                    </div>
+                    <div className="flex items-center gap-2 sm:gap-3 order-1 sm:order-2">
+                        <label htmlFor="selectedDate" className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 whitespace-nowrap">Date:</label>
+                        <input id="selectedDate" name="selectedDate" type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="p-2 border rounded bg-white dark:bg-slate-700 text-sm flex-1 sm:flex-none min-h-[40px]" />
                     </div>
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
                 {drivers.map(driver => {
                     const { status, badge } = getDriverStatus(driver.id);
                     const allocation = todayAllocations.find(a => a.driverId === driver.id);
@@ -391,14 +395,14 @@ export const Drivers: React.FC = () => {
 
             {/* Allocate Stock Modal */}
             <Modal isOpen={modal === 'allocate'} onClose={handleCloseModal} title={isEditMode ? `Edit Allocation for ${selectedDriver?.name}` : `Allocate Stock to ${selectedDriver?.name}`}>
-                <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+                <div className="p-4 sm:p-6 space-y-4 max-h-[70vh] overflow-y-auto">
                     <div>
                         <label htmlFor="supplier-filter" className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">Filter by Supplier</label>
                         <select 
                             id="supplier-filter"
                             value={allocationSupplier}
                             onChange={e => setAllocationSupplier(e.target.value)}
-                            className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white"
+                            className="bg-slate-50 border border-slate-300 text-slate-900 text-sm sm:text-base rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-3 sm:p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white min-h-[44px]"
                         >
                             <option value="">{isEditMode ? "All Assigned Suppliers" : "Select a Supplier"}</option>
                             {availableSuppliers.map(supplier => (
@@ -407,7 +411,7 @@ export const Drivers: React.FC = () => {
                         </select>
                     </div>
 
-                    <p className="text-sm text-slate-600 dark:text-slate-400">Select products from the main warehouse to allocate for today's sales route.</p>
+                    <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400">Select products from the main warehouse to allocate for today's sales route.</p>
                     <div className="space-y-3">
                          {productsToShowInModal.map(product => {
                             const originalAllocation = isEditMode ? todayAllocations.find(a => a.driverId === selectedDriver?.id) : null;
@@ -417,16 +421,16 @@ export const Drivers: React.FC = () => {
                             if (maxAllocatable === 0 && !originalQuantity) return null;
 
                             return (
-                                <div key={product.id} className="grid grid-cols-12 gap-4 items-center p-2 rounded-lg bg-slate-50 dark:bg-slate-700/50">
-                                    <div className="col-span-6 flex items-center space-x-3">
-                                        <img src={product.imageUrl} alt={product.name} className="w-10 h-10 rounded-md"/>
-                                        <div>
-                                            <p className="font-medium text-slate-900 dark:text-white">{product.name}</p>
+                                <div key={product.id} className="flex flex-col sm:grid sm:grid-cols-12 gap-3 sm:gap-4 sm:items-center p-3 sm:p-2 rounded-lg bg-slate-50 dark:bg-slate-700/50">
+                                    <div className="sm:col-span-7 flex items-center space-x-3">
+                                        <img src={product.imageUrl} alt={product.name} className="w-12 h-12 sm:w-10 sm:h-10 rounded-md flex-shrink-0"/>
+                                        <div className="min-w-0 flex-1">
+                                            <p className="font-medium text-slate-900 dark:text-white text-sm sm:text-base truncate">{product.name}</p>
                                             <p className="text-xs text-slate-500 dark:text-slate-400">Warehouse Stock: {product.stock}</p>
                                         </div>
                                     </div>
-                                    <div className="col-span-6">
-                                        <label htmlFor={`alloc-${product.id}`} className="sr-only">Allocation quantity for {product.name}</label>
+                                    <div className="sm:col-span-5">
+                                        <label htmlFor={`alloc-${product.id}`} className="block text-xs text-slate-500 dark:text-slate-400 mb-1 sm:hidden">Allocate Quantity:</label>
                                         <input
                                             type="number"
                                             id={`alloc-${product.id}`}
@@ -436,7 +440,7 @@ export const Drivers: React.FC = () => {
                                             min="0"
                                             max={maxAllocatable}
                                             placeholder="0"
-                                            className="w-full p-2 border border-slate-300 rounded-md dark:bg-slate-600 dark:border-slate-500 dark:text-white text-center"
+                                            className="w-full p-3 sm:p-2 border border-slate-300 rounded-md dark:bg-slate-600 dark:border-slate-500 dark:text-white text-center min-h-[44px] sm:min-h-0"
                                         />
                                     </div>
                                 </div>
@@ -444,11 +448,11 @@ export const Drivers: React.FC = () => {
                          })}
                     </div>
                 </div>
-                <div className="flex items-center justify-end p-6 space-x-2 border-t border-slate-200 rounded-b dark:border-slate-600">
-                    <button onClick={handleCloseModal} type="button" className="text-slate-500 bg-white hover:bg-slate-100 focus:ring-4 focus:outline-none focus:ring-blue-300 rounded-lg border border-slate-200 text-sm font-medium px-5 py-2.5 hover:text-slate-900 focus:z-10 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-500 dark:hover:text-white dark:hover:bg-slate-600">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end p-4 sm:p-6 space-y-2 sm:space-y-0 sm:space-x-2 border-t border-slate-200 rounded-b dark:border-slate-600">
+                    <button onClick={handleCloseModal} type="button" className="text-slate-500 bg-white hover:bg-slate-100 focus:ring-4 focus:outline-none focus:ring-blue-300 rounded-lg border border-slate-200 text-sm font-medium px-5 py-3 sm:py-2.5 hover:text-slate-900 focus:z-10 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-500 dark:hover:text-white dark:hover:bg-slate-600 min-h-[44px] order-2 sm:order-1">
                         Cancel
                     </button>
-                    <button onClick={handleSaveAllocation} type="button" className="text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-blue-600 dark:hover:bg-blue-700">
+                    <button onClick={handleSaveAllocation} type="button" className="text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-3 sm:py-2.5 text-center dark:bg-blue-600 dark:hover:bg-blue-700 min-h-[44px] order-1 sm:order-2">
                         {isEditMode ? 'Save Changes' : 'Confirm Allocation'}
                     </button>
                 </div>
@@ -974,26 +978,26 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
     return (
       <Modal isOpen={true} onClose={onClose} title={`Daily Log: ${driver.name} (${todayStr})`}>
           <div className="border-b border-slate-200 dark:border-slate-700 no-print">
-                <nav className="flex space-x-2 px-6" aria-label="Tabs">
-                    <button onClick={() => setActiveTab('log')} className={`px-3 py-3 text-sm font-medium border-b-2 ${activeTab === 'log' ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}>Sales Log</button>
-                    <button onClick={() => setActiveTab('reconcile')} disabled={allocation.status === 'Reconciled'} className={`px-3 py-3 text-sm font-medium border-b-2 ${activeTab === 'reconcile' ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'} disabled:text-slate-400 dark:disabled:text-slate-600 disabled:cursor-not-allowed`}>Reconciliation</button>
+                <nav className="flex space-x-1 sm:space-x-2 px-4 sm:px-6" aria-label="Tabs">
+                    <button onClick={() => setActiveTab('log')} className={`px-2 sm:px-3 py-3 text-xs sm:text-sm font-medium border-b-2 ${activeTab === 'log' ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}>Sales Log</button>
+                    <button onClick={() => setActiveTab('reconcile')} disabled={allocation.status === 'Reconciled'} className={`px-2 sm:px-3 py-3 text-xs sm:text-sm font-medium border-b-2 ${activeTab === 'reconcile' ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'} disabled:text-slate-400 dark:disabled:text-slate-600 disabled:cursor-not-allowed`}>Reconciliation</button>
                 </nav>
           </div>
           
-          <div className="p-6 max-h-[60vh] overflow-y-auto">
+          <div className="p-4 sm:p-6 max-h-[60vh] overflow-y-auto">
             {activeTab === 'log' && (
                 <div className="space-y-4">
-                    <div className="flex justify-between items-center">
-                        <h4 className="text-lg font-semibold text-slate-800 dark:text-slate-200">Sales Summary</h4>
-                         <button onClick={handleOpenSaleModal} disabled={allocation.status === 'Reconciled'} className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:bg-slate-400 dark:disabled:bg-slate-600">
+                    <div className="flex flex-col sm:flex-row gap-3 sm:justify-between sm:items-center">
+                        <h4 className="text-base sm:text-lg font-semibold text-slate-800 dark:text-slate-200">Sales Summary</h4>
+                         <button onClick={handleOpenSaleModal} disabled={allocation.status === 'Reconciled'} className="px-4 py-2.5 text-xs sm:text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:bg-slate-400 dark:disabled:bg-slate-600 min-h-[40px] self-start sm:self-auto">
                             Add Sale
                          </button>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-center">
-                        <div className="p-4 rounded-lg bg-blue-50 dark:bg-blue-900/40"><p className="text-xs text-blue-600 dark:text-blue-300">Total Sales</p><p className="text-xl font-bold text-blue-800 dark:text-blue-200">{formatCurrency(collections.total, currency)}</p></div>
-                        <div className="p-4 rounded-lg bg-green-50 dark:bg-green-900/40"><p className="text-xs text-green-600 dark:text-green-300">Total Collected</p><p className="text-xl font-bold text-green-800 dark:text-green-200">{formatCurrency(collections.paid, currency)}</p></div>
-                        <div className="p-4 rounded-lg bg-yellow-50 dark:bg-yellow-900/40"><p className="text-xs text-yellow-600 dark:text-yellow-300">Collected (Cheque)</p><p className="text-xl font-bold text-yellow-800 dark:text-yellow-200">{formatCurrency(collections.cheque, currency)}</p></div>
-                        <div className="p-4 rounded-lg bg-red-50 dark:bg-red-900/40"><p className="text-xs text-red-600 dark:text-red-300">Outstanding Credit</p><p className="text-xl font-bold text-red-800 dark:text-red-200">{formatCurrency(collections.credit, currency)}</p></div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 text-center">
+                        <div className="p-3 sm:p-4 rounded-lg bg-blue-50 dark:bg-blue-900/40"><p className="text-xs text-blue-600 dark:text-blue-300">Total Sales</p><p className="text-lg sm:text-xl font-bold text-blue-800 dark:text-blue-200 break-words">{formatCurrency(collections.total, currency)}</p></div>
+                        <div className="p-3 sm:p-4 rounded-lg bg-green-50 dark:bg-green-900/40"><p className="text-xs text-green-600 dark:text-green-300">Total Collected</p><p className="text-lg sm:text-xl font-bold text-green-800 dark:text-green-200 break-words">{formatCurrency(collections.paid, currency)}</p></div>
+                        <div className="p-3 sm:p-4 rounded-lg bg-yellow-50 dark:bg-yellow-900/40"><p className="text-xs text-yellow-600 dark:text-yellow-300">Collected (Cheque)</p><p className="text-lg sm:text-xl font-bold text-yellow-800 dark:text-yellow-200 break-words">{formatCurrency(collections.cheque, currency)}</p></div>
+                        <div className="p-3 sm:p-4 rounded-lg bg-red-50 dark:bg-red-900/40"><p className="text-xs text-red-600 dark:text-red-300">Outstanding Credit</p><p className="text-lg sm:text-xl font-bold text-red-800 dark:text-red-200 break-words">{formatCurrency(collections.credit, currency)}</p></div>
                     </div>
                      <div className="space-y-3">
                         {salesForAllocation.map(sale => (

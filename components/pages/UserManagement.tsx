@@ -7,6 +7,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
 import { supabase } from '../../supabaseClient';
 import { exportUsers } from '../../utils/exportUtils';
+import { confirmSecureDelete } from '../../utils/passwordConfirmation';
 
 const getStatusBadgeVariant = (status: UserStatus): 'success' | 'danger' => {
     return status === UserStatus.Active ? 'success' : 'danger';
@@ -198,6 +199,20 @@ export const UserManagement: React.FC = () => {
     };
 
     const handleDelete = async () => {
+        if (!userToDelete || !currentUser?.email) return;
+        
+        // Require password confirmation for delete
+        const confirmed = await confirmSecureDelete(
+          userToDelete.name, 
+          'User', 
+          currentUser.email
+        );
+        
+        if (!confirmed) {
+          closeDeleteConfirm();
+          return;
+        }
+        
         if (userToDelete) {
             await deleteUserFromDB(userToDelete.id);
             // Fetch fresh users and map
