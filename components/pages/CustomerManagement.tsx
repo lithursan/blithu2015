@@ -111,7 +111,10 @@ const RouteCustomerList: React.FC<RouteCustomerListProps> = ({ selectedRoute, on
   const [isGettingLocation, setIsGettingLocation] = useState(false);
   const [gpsCoordinates, setGpsCoordinates] = useState<{lat: number, lng: number} | null>(null);
 
-  const canEdit = currentUser?.role === UserRole.Admin;
+  const canEdit = currentUser?.role === UserRole.Admin || 
+                   currentUser?.role === UserRole.Manager ||
+                   currentUser?.role === UserRole.Driver ||
+                   currentUser?.role === UserRole.Sales;
 
   const canDelete = currentUser?.role === UserRole.Admin;
 
@@ -592,8 +595,23 @@ const RouteCustomerList: React.FC<RouteCustomerListProps> = ({ selectedRoute, on
             <>
               {/* Unified Card View */}
               <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-                {filteredCustomers.map((customer) => (
-                  <Card key={customer.id} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:shadow-md transition-all duration-200">
+                {filteredCustomers.map((customer, index) => {
+                  // Create vibrant gradient patterns for each customer card
+                  const gradientPatterns = [
+                    'bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 dark:from-blue-900/30 dark:via-indigo-900/30 dark:to-purple-900/30 border-l-4 border-blue-500 shadow-blue-100',
+                    'bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 dark:from-emerald-900/30 dark:via-teal-900/30 dark:to-cyan-900/30 border-l-4 border-emerald-500 shadow-emerald-100',
+                    'bg-gradient-to-br from-orange-50 via-amber-50 to-yellow-50 dark:from-orange-900/30 dark:via-amber-900/30 dark:to-yellow-900/30 border-l-4 border-orange-500 shadow-orange-100',
+                    'bg-gradient-to-br from-rose-50 via-pink-50 to-fuchsia-50 dark:from-rose-900/30 dark:via-pink-900/30 dark:to-fuchsia-900/30 border-l-4 border-rose-500 shadow-rose-100',
+                    'bg-gradient-to-br from-violet-50 via-purple-50 to-indigo-50 dark:from-violet-900/30 dark:via-purple-900/30 dark:to-indigo-900/30 border-l-4 border-violet-500 shadow-violet-100',
+                    'bg-gradient-to-br from-cyan-50 via-sky-50 to-blue-50 dark:from-cyan-900/30 dark:via-sky-900/30 dark:to-blue-900/30 border-l-4 border-cyan-500 shadow-cyan-100',
+                    'bg-gradient-to-br from-lime-50 via-green-50 to-emerald-50 dark:from-lime-900/30 dark:via-green-900/30 dark:to-emerald-900/30 border-l-4 border-lime-500 shadow-lime-100',
+                    'bg-gradient-to-br from-red-50 via-orange-50 to-amber-50 dark:from-red-900/30 dark:via-orange-900/30 dark:to-amber-900/30 border-l-4 border-red-500 shadow-red-100'
+                  ];
+                  
+                  const cardGradient = gradientPatterns[index % gradientPatterns.length];
+                  
+                  return (
+                    <Card key={customer.id} className={`${cardGradient} border-0 hover:shadow-xl hover:scale-[1.02] transition-all duration-300 cursor-pointer`}>
                     <CardContent className="p-4">
                       {/* Customer Header */}
                       <div className="flex items-start justify-between mb-3">
@@ -662,7 +680,8 @@ const RouteCustomerList: React.FC<RouteCustomerListProps> = ({ selectedRoute, on
                       </div>
                     </CardContent>
                   </Card>
-                ))}
+                  );
+                })}
               </div>
             </>
           ) : (

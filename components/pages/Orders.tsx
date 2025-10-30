@@ -318,7 +318,10 @@ export const Orders: React.FC = () => {
   }, [viewingOrder]);
 
   const canEdit = useMemo(() => 
-    currentUser?.role === UserRole.Admin,
+    currentUser?.role === UserRole.Admin || 
+    currentUser?.role === UserRole.Manager ||
+    currentUser?.role === UserRole.Driver ||
+    currentUser?.role === UserRole.Sales,
     [currentUser]
   );
   
@@ -1708,51 +1711,52 @@ export const Orders: React.FC = () => {
                     
                     {/* Compact card-based layout */}
                     <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-                      {ordersList.map((order) => {
+                      {ordersList.map((order, orderIndex) => {
                         const assignedUser = users.find(u => u.id === order.assignedUserId);
                         const outstandingAmount = ((typeof order.chequeBalance === 'number' && !isNaN(order.chequeBalance) ? order.chequeBalance : 0) + (typeof order.creditBalance === 'number' && !isNaN(order.creditBalance) ? order.creditBalance : 0));
                         
-                        // Determine card border and text colors based on status and outstanding amount
+                        // Enhanced colorful card styling based on status and outstanding amount
                         const getCardStyle = () => {
                           if (order.status === 'Pending') {
                             return {
-                              border: 'border-l-4 border-orange-500 bg-orange-50 dark:bg-orange-900/10',
-                              text: 'text-orange-700 dark:text-orange-400',
-                              badge: 'bg-orange-100 text-orange-800 border border-orange-300 dark:bg-orange-900/20 dark:text-orange-400 dark:border-orange-600'
+                              border: 'bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-50 dark:from-amber-900/30 dark:via-orange-900/30 dark:to-yellow-900/30 border-l-4 border-amber-500 shadow-lg shadow-amber-100/50 dark:shadow-amber-900/20',
+                              text: 'text-amber-800 dark:text-amber-300',
+                              badge: 'bg-gradient-to-r from-amber-100 to-orange-100 text-amber-800 border border-amber-300 dark:from-amber-900/40 dark:to-orange-900/40 dark:text-amber-300 dark:border-amber-600 shadow-sm'
                             };
                           } else if (order.status === 'Delivered') {
                             if (outstandingAmount === 0) {
                               return {
-                                border: 'border-l-4 border-green-500 bg-green-50 dark:bg-green-900/10',
-                                text: 'text-green-700 dark:text-green-400',
-                                badge: 'bg-green-100 text-green-800 border border-green-300 dark:bg-green-900/20 dark:text-green-400 dark:border-green-600'
+                                border: 'bg-gradient-to-br from-emerald-50 via-green-50 to-teal-50 dark:from-emerald-900/30 dark:via-green-900/30 dark:to-teal-900/30 border-l-4 border-emerald-500 shadow-lg shadow-emerald-100/50 dark:shadow-emerald-900/20',
+                                text: 'text-emerald-800 dark:text-emerald-300',
+                                badge: 'bg-gradient-to-r from-emerald-100 to-green-100 text-emerald-800 border border-emerald-300 dark:from-emerald-900/40 dark:to-green-900/40 dark:text-emerald-300 dark:border-emerald-600 shadow-sm'
                               };
                             } else {
                               return {
-                                border: 'border-l-4 border-red-500 bg-red-50 dark:bg-red-900/10',
-                                text: 'text-red-700 dark:text-red-400',
-                                badge: 'bg-red-100 text-red-800 border border-red-300 dark:bg-red-900/20 dark:text-red-400 dark:border-red-600'
+                                border: 'bg-gradient-to-br from-rose-50 via-red-50 to-pink-50 dark:from-rose-900/30 dark:via-red-900/30 dark:to-pink-900/30 border-l-4 border-rose-500 shadow-lg shadow-rose-100/50 dark:shadow-rose-900/20',
+                                text: 'text-rose-800 dark:text-rose-300',
+                                badge: 'bg-gradient-to-r from-rose-100 to-red-100 text-rose-800 border border-rose-300 dark:from-rose-900/40 dark:to-red-900/40 dark:text-rose-300 dark:border-rose-600 shadow-sm'
                               };
                             }
                           }
                           return {
-                            border: 'border-l-4 border-slate-300 bg-white dark:bg-slate-800',
-                            text: 'text-slate-900 dark:text-white',
-                            badge: ''
+                            border: 'bg-gradient-to-br from-slate-50 via-gray-50 to-zinc-50 dark:from-slate-900/30 dark:via-gray-900/30 dark:to-zinc-900/30 border-l-4 border-slate-400 shadow-lg shadow-slate-100/50 dark:shadow-slate-900/20',
+                            text: 'text-slate-800 dark:text-slate-200',
+                            badge: 'bg-gradient-to-r from-slate-100 to-gray-100 text-slate-800 border border-slate-300 dark:from-slate-900/40 dark:to-gray-900/40 dark:text-slate-300 dark:border-slate-600 shadow-sm'
                           };
                         };
                         
                         const cardStyle = getCardStyle();
                         
                         return (
-                          <Card key={order.id} className={`${cardStyle.border} hover:shadow-md transition-all duration-200 cursor-pointer`}>
-                            <CardContent className="p-3">
+                          <Card key={order.id} className={`${cardStyle.border} hover:shadow-xl hover:-translate-y-1 hover:scale-[1.02] transition-all duration-300 cursor-pointer border-0 overflow-hidden relative`}>
+                            <div className="absolute inset-0 bg-gradient-to-br from-white/60 via-transparent to-transparent dark:from-black/20 dark:via-transparent dark:to-transparent pointer-events-none"></div>
+                            <CardContent className="p-3 relative z-10">
                               {/* Order Header */}
                               <div className="flex justify-between items-start mb-2">
                                 <div>
-                                  <h3 className={`font-bold text-sm ${cardStyle.text}`}>{order.id}</h3>
-                                  <p className="text-xs text-slate-600 dark:text-slate-400 flex items-center gap-1 mt-0.5">
-                                    <span className="font-medium truncate">{order.customerName}</span>
+                                  <h3 className={`font-bold text-sm ${cardStyle.text} drop-shadow-sm`}>{order.id}</h3>
+                                  <p className={`text-xs flex items-center gap-1 mt-0.5 font-semibold ${cardStyle.text.replace('800', '700').replace('300', '400')}`}>
+                                    <span className="font-bold truncate">{order.customerName}</span>
                                   </p>
                                   {(() => {
                                     const customer = customers.find(c => c.id === order.customerId);
@@ -1783,7 +1787,7 @@ export const Orders: React.FC = () => {
                                     return null;
                                   })()}
                                 </div>
-                                <Badge variant={getStatusBadgeVariant(order.status)} className={`${cardStyle.badge} text-xs font-bold whitespace-nowrap`}>
+                                <Badge variant={getStatusBadgeVariant(order.status)} className={`${cardStyle.badge} text-xs font-bold whitespace-nowrap drop-shadow-sm`}>
                                   {order.status}
                                 </Badge>
                               </div>
@@ -1804,12 +1808,12 @@ export const Orders: React.FC = () => {
                                 </div>
 
                                 {/* Total Amount */}
-                                <div className="text-lg font-bold text-slate-900 dark:text-white">
+                                <div className={`text-lg font-bold drop-shadow-sm ${cardStyle.text}`}>
                                   {formatCurrency(order.total, currency)}
                                 </div>
                                 
                                 {/* Outstanding Amount - Always show */}
-                                <div className={`text-sm font-semibold ${cardStyle.text}`}>
+                                <div className={`text-sm font-bold ${cardStyle.text} drop-shadow-sm`}>
                                   Outstanding: {formatCurrency(outstandingAmount, currency)}
                                 </div>
                                 
