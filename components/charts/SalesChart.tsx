@@ -38,17 +38,9 @@ export const SalesChart: React.FC<SalesChartProps> = ({ data }) => {
                 backgroundColor: theme === 'dark' ? '#1e293b' : '#ffffff',
                 borderColor: theme === 'dark' ? '#334155' : '#e2e8f0'
             }}
-            formatter={(value: number, name: string) => [
-                `LKR ${value.toLocaleString()}`, 
-                name
-            ]}
-            labelFormatter={(label) => `Month: ${label}`}
         />
         <Legend />
-        <Line type="monotone" dataKey="sales" stroke="#3b82f6" strokeWidth={2} activeDot={{ r: 6 }} name="Total Sales" />
-        <Line type="monotone" dataKey="deliveryCost" stroke="#ef4444" strokeWidth={2} activeDot={{ r: 6 }} name="Delivery Cost" />
-        <Line type="monotone" dataKey="grossProfit" stroke="#10b981" strokeWidth={2} activeDot={{ r: 6 }} name="Gross Profit" />
-        <Line type="monotone" dataKey="netProfit" stroke="#8b5cf6" strokeWidth={2} activeDot={{ r: 6 }} name="Net Profit" />
+        <Line type="monotone" dataKey="sales" stroke="#3b82f6" strokeWidth={2} activeDot={{ r: 8 }} />
       </LineChart>
     </ResponsiveContainer>
   );

@@ -6,7 +6,6 @@ export interface DatabaseOrder {
   customerid: string;
   customername: string;
   orderdate: string;
-  created_at?: string; // Timestamp when order was created
   totalamount: number;
   status: string;
   paymentmethod?: string;
@@ -14,11 +13,9 @@ export interface DatabaseOrder {
   assigneduserid?: string;
   orderitems: string | object; // JSON string or already parsed object
   backordereditems?: string | object;
-  freeitems?: string | object; // JSON string or already parsed object for free items
   expecteddeliverydate?: string;
   chequebalance?: number;
   creditbalance?: number;
-  deliveryaddress?: string;
 }
 
 export interface DatabaseProduct {
@@ -38,8 +35,6 @@ export interface DatabaseCustomer {
   email: string;
   phone?: string;
   location: string;
-  gpscoordinates?: string;
-  route?: string;
   joindate: string;
   totalspent: number;
   outstandingbalance: number;
@@ -69,13 +64,6 @@ export interface DatabaseUser {
   password?: string;
   assignedsuppliernames?: string[];
   settings?: object;
-  currentlocation?: {
-    latitude: number;
-    longitude: number;
-    timestamp: string;
-    accuracy?: number;
-  };
-  locationsharing?: boolean;
 }
 
 export interface DatabaseDriverAllocation {

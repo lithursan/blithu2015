@@ -7,59 +7,13 @@ import { Badge } from '../ui/Badge';
 import { useData } from '../../contexts/DataContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { exportCustomers } from '../../utils/exportUtils';
-import { confirmSecureDelete } from '../../utils/passwordConfirmation';
 
 const formatCurrency = (amount: number, currency: string) => {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency, minimumFractionDigits: 0 }).format(amount).replace('$', `${currency} `);
 };
 
-// Helper function to extract GPS coordinates from location string and create clickable link
-const renderLocationWithGPS = (location: string) => {
-  // Check if location contains GPS coordinates pattern (GPS: lat, lng)
-  const gpsMatch = location.match(/GPS:\s*(-?\d+\.?\d*),\s*(-?\d+\.?\d*)/);
-  
-  if (gpsMatch) {
-    const [fullMatch, lat, lng] = gpsMatch;
-    const latitude = parseFloat(lat);
-    const longitude = parseFloat(lng);
-    
-    // Split location into address part and GPS part
-    const addressPart = location.replace(fullMatch, '').replace(/\s*\(\s*\)\s*$/, '').trim();
-    
-    // Create Google Maps URL
-    const mapsUrl = `https://www.google.com/maps?q=${latitude},${longitude}`;
-    
-    return (
-      <div className="text-xs text-slate-500 dark:text-slate-400">
-        {addressPart && (
-          <div className="truncate">{addressPart}</div>
-        )}
-        <a 
-          href={mapsUrl} 
-          target="_blank" 
-          rel="noopener noreferrer"
-          className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 underline truncate block"
-          title={`Open location in Google Maps (${latitude}, ${longitude})`}
-        >
-          📍 GPS: {latitude.toFixed(4)}, {longitude.toFixed(4)}
-        </a>
-      </div>
-    );
-  }
-  
-  // If no GPS coordinates, just show the location normally
-  return (
-    <div className="text-xs text-slate-500 dark:text-slate-400 truncate">{location}</div>
-  );
-};
 
-
-interface CustomersProps {
-  selectedRoute?: string;
-  onBackToRoutes?: () => void;
-}
-
-export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelectedRoute, onBackToRoutes }) => {
+export const Customers: React.FC = () => {
   const { customers, setCustomers, orders, products, suppliers, refetchData } = useData();
   const { currentUser } = useAuth();
   const currency = currentUser?.settings.currency || 'LKR';
@@ -69,21 +23,6 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
   const [modalMode, setModalMode] = useState<'add' | 'edit'>('add');
   const [currentCustomer, setCurrentCustomer] = useState<Partial<Customer>>({});
   const [customerToDelete, setCustomerToDelete] = useState<Customer | null>(null);
-  const [isGettingLocation, setIsGettingLocation] = useState(false);
-  const [gpsCoordinates, setGpsCoordinates] = useState<{lat: number, lng: number} | null>(null);
-  
-  // Route management states
-  const [routes, setRoutes] = useState<string[]>(['Route 1', 'Route 2', 'Route 3', 'Unassigned']);
-  const [selectedRoute, setSelectedRoute] = useState<string>(propSelectedRoute || 'All Routes');
-  const [isAddingRoute, setIsAddingRoute] = useState(false);
-  const [newRouteName, setNewRouteName] = useState('');
-  
-  // Store location (your distribution center)
-  const STORE_LOCATION = { lat: 9.384489, lng: 80.408737, name: 'Distribution Center' };
-  
-  // Route optimization states
-  const [isOptimizing, setIsOptimizing] = useState(false);
-  const [optimizedOrder, setOptimizedOrder] = useState<Customer[]>([]);
 
   // Filter states
   const [selectedSupplier, setSelectedSupplier] = useState<string>('all');
@@ -93,12 +32,10 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
   const [endDate, setEndDate] = useState<string>('');
 
   const canEdit = useMemo(() => 
-    currentUser?.role === UserRole.Admin,
-    [currentUser]
-  );
-
-  const canDelete = useMemo(() => 
-    currentUser?.role === UserRole.Admin,
+    currentUser?.role === UserRole.Admin || 
+    currentUser?.role === UserRole.Manager ||
+    currentUser?.role === UserRole.Sales ||
+    currentUser?.role === UserRole.Driver,
     [currentUser]
   );
 
@@ -110,25 +47,9 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
     if (mode === 'edit' && customer) {
       // For edit mode, preserve all existing customer data including outstandingBalance
       setCurrentCustomer({ ...customer });
-      // Set GPS coordinates if they exist
-      if (customer.gpsCoordinates) {
-        const [lat, lng] = customer.gpsCoordinates.split(', ').map(Number);
-        setGpsCoordinates({ lat, lng });
-      } else {
-        setGpsCoordinates(null);
-      }
     } else {
-      // For add mode, set default values and assign to selected route
-      setCurrentCustomer({ 
-        name: '', 
-        email: '', 
-        phone: '', 
-        location: '', 
-        route: selectedRoute === 'All Routes' ? 'Unassigned' : selectedRoute, 
-        outstandingBalance: 0, 
-        avatarUrl: `/lord-shiva-avatar.jpg` 
-      });
-      setGpsCoordinates(null);
+      // For add mode, set default values
+      setCurrentCustomer({ name: '', email: '', phone: '', location: '', outstandingBalance: 0, avatarUrl: `https://i.pravatar.cc/100?u=new` });
     }
     setIsModalOpen(true);
   };
@@ -136,8 +57,6 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
   const closeModal = () => {
     setIsModalOpen(false);
     setCurrentCustomer({});
-    setGpsCoordinates(null);
-    setIsGettingLocation(false);
   };
 
   const openDeleteConfirm = (customer: Customer) => {
@@ -193,11 +112,10 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
             email: currentCustomer.email || '',
             phone: currentCustomer.phone || '',
             location: currentCustomer.location || '',
-            route: currentCustomer.route || 'Unassigned',
             joindate: new Date().toISOString().split('T')[0],
             totalspent: 0,
             outstandingbalance: 0,
-            avatarurl: currentCustomer.avatarUrl || `/lord-shiva-avatar.jpg`,
+            avatarurl: currentCustomer.avatarUrl || `https://i.pravatar.cc/40?u=${currentCustomer.email || 'new'}`,
           };
           
           const { error } = await supabase.from('customers').insert([newCustomer]);
@@ -205,6 +123,7 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
             alert(`Error adding customer: ${error.message}`);
             return;
           }
+          alert('Customer added successfully!');
           // Refresh customers data
           await refetchData();
         } else {
@@ -213,7 +132,6 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
             email: currentCustomer.email,
             phone: currentCustomer.phone,
             location: currentCustomer.location,
-            route: currentCustomer.route,
             outstandingbalance: currentCustomer.outstandingBalance,
             avatarurl: currentCustomer.avatarUrl,
           }).eq('id', currentCustomer.id);
@@ -236,20 +154,6 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
   };
   
   const handleDelete = async () => {
-    if (!customerToDelete || !currentUser?.email) return;
-    
-    // Require password confirmation for delete
-    const confirmed = await confirmSecureDelete(
-      customerToDelete.name, 
-      'Customer', 
-      currentUser.email
-    );
-    
-    if (!confirmed) {
-      closeDeleteConfirm();
-      return;
-    }
-    
     if (customerToDelete) {
       try {
         const { error } = await supabase.from('customers').delete().eq('id', customerToDelete.id);
@@ -281,281 +185,6 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
     }
   };
 
-  // Utility function to calculate distance between two GPS coordinates
-  const calculateDistance = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
-    const R = 6371; // Radius of the Earth in kilometers
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLng = (lng2 - lng1) * Math.PI / 180;
-    const a = 
-      Math.sin(dLat/2) * Math.sin(dLat/2) +
-      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
-      Math.sin(dLng/2) * Math.sin(dLng/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    return R * c; // Distance in kilometers
-  };
-
-  // Extract GPS coordinates from location string
-  const extractGPSCoordinates = (location: string): { lat: number, lng: number } | null => {
-    const gpsMatch = location.match(/GPS:\s*(-?\d+\.?\d*),\s*(-?\d+\.?\d*)/);
-    if (gpsMatch) {
-      return { lat: parseFloat(gpsMatch[1]), lng: parseFloat(gpsMatch[2]) };
-    }
-    return null;
-  };
-
-  // Suggest route for unassigned customer based on proximity to existing route customers
-  const suggestRouteForCustomer = (customer: Customer): string | null => {
-    if (customer.route !== 'Unassigned') return null;
-    
-    const customerGPS = extractGPSCoordinates(customer.location);
-    if (!customerGPS) return null;
-
-    let closestRoute: string | null = null;
-    let shortestDistance = Infinity;
-
-    // Check distance to customers in each assigned route
-    routes.forEach(route => {
-      if (route === 'Unassigned') return;
-      
-      const routeCustomers = customers.filter(c => c.route === route && c.id !== customer.id);
-      if (routeCustomers.length === 0) return;
-
-      // Find average center of route customers
-      let totalLat = 0, totalLng = 0, validCount = 0;
-      
-      routeCustomers.forEach(rc => {
-        const rcGPS = extractGPSCoordinates(rc.location);
-        if (rcGPS) {
-          totalLat += rcGPS.lat;
-          totalLng += rcGPS.lng;
-          validCount++;
-        }
-      });
-
-      if (validCount > 0) {
-        const avgLat = totalLat / validCount;
-        const avgLng = totalLng / validCount;
-        const distance = calculateDistance(customerGPS.lat, customerGPS.lng, avgLat, avgLng);
-        
-        if (distance < shortestDistance) {
-          shortestDistance = distance;
-          closestRoute = route;
-        }
-      }
-    });
-
-    return closestRoute;
-  };
-
-  // Optimize route using nearest neighbor algorithm
-  const optimizeRoute = (customers: Customer[]): Customer[] => {
-    const customersWithGPS = customers.filter(customer => extractGPSCoordinates(customer.location));
-    if (customersWithGPS.length === 0) return customers;
-
-    const optimized: Customer[] = [];
-    const remaining = [...customersWithGPS];
-    let currentLocation = STORE_LOCATION;
-
-    while (remaining.length > 0) {
-      let nearestIndex = 0;
-      let shortestDistance = Infinity;
-
-      remaining.forEach((customer, index) => {
-        const customerGPS = extractGPSCoordinates(customer.location);
-        if (customerGPS) {
-          const distance = calculateDistance(
-            currentLocation.lat, currentLocation.lng,
-            customerGPS.lat, customerGPS.lng
-          );
-          if (distance < shortestDistance) {
-            shortestDistance = distance;
-            nearestIndex = index;
-          }
-        }
-      });
-
-      const nearestCustomer = remaining.splice(nearestIndex, 1)[0];
-      optimized.push(nearestCustomer);
-      
-      const nearestGPS = extractGPSCoordinates(nearestCustomer.location);
-      if (nearestGPS) {
-        currentLocation = nearestGPS;
-      }
-    }
-
-    // Add customers without GPS at the end
-    const customersWithoutGPS = customers.filter(customer => !extractGPSCoordinates(customer.location));
-    return [...optimized, ...customersWithoutGPS];
-  };
-
-  // Handle route optimization
-  const handleOptimizeRoute = () => {
-    if (selectedRoute === 'Unassigned' || selectedRoute === 'All Routes') {
-      alert('Please select a specific route to optimize');
-      return;
-    }
-
-    setIsOptimizing(true);
-    
-    // Get customers for selected route
-    const routeCustomers = customersByRoute[selectedRoute] || [];
-    
-    if (routeCustomers.length === 0) {
-      alert('No customers found in selected route');
-      setIsOptimizing(false);
-      return;
-    }
-
-    // Simulate API call delay for optimization
-    setTimeout(() => {
-      const optimized = optimizeRoute(routeCustomers);
-      setOptimizedOrder(optimized);
-      setIsOptimizing(false);
-      alert(`Route optimized! Visit order calculated for ${optimized.length} customers.`);
-    }, 1000);
-  };
-
-  // Calculate total route distance
-  const calculateTotalDistance = (customers: Customer[]): number => {
-    if (customers.length === 0) return 0;
-
-    let totalDistance = 0;
-    let currentLocation = STORE_LOCATION;
-
-    customers.forEach(customer => {
-      const customerGPS = extractGPSCoordinates(customer.location);
-      if (customerGPS) {
-        totalDistance += calculateDistance(
-          currentLocation.lat, currentLocation.lng,
-          customerGPS.lat, customerGPS.lng
-        );
-        currentLocation = customerGPS;
-      }
-    });
-
-    // Add return distance to store
-    if (customers.length > 0) {
-      const lastCustomer = customers[customers.length - 1];
-      const lastGPS = extractGPSCoordinates(lastCustomer.location);
-      if (lastGPS) {
-        totalDistance += calculateDistance(
-          lastGPS.lat, lastGPS.lng,
-          STORE_LOCATION.lat, STORE_LOCATION.lng
-        );
-      }
-    }
-
-    return totalDistance;
-  };
-
-  // Route management functions
-  const handleAddRoute = () => {
-    if (newRouteName.trim() && !routes.includes(newRouteName.trim())) {
-      setRoutes(prev => [...prev, newRouteName.trim()]);
-      setNewRouteName('');
-      setIsAddingRoute(false);
-      alert('Route added successfully!');
-    } else {
-      alert('Route name already exists or is empty!');
-    }
-  };
-
-  const handleDeleteRoute = (routeName: string) => {
-    if (routeName === 'Unassigned') {
-      alert('Cannot delete the Unassigned route');
-      return;
-    }
-    
-    // Move all customers from this route to Unassigned
-    const updatedCustomers = customers.map(customer => 
-      customer.route === routeName ? { ...customer, route: 'Unassigned' } : customer
-    );
-    
-    if (confirm(`Are you sure you want to delete "${routeName}"? All customers will be moved to Unassigned.`)) {
-      setRoutes(prev => prev.filter(route => route !== routeName));
-      if (selectedRoute === routeName) {
-        setSelectedRoute('All Routes');
-      }
-      alert('Route deleted successfully!');
-    }
-  };
-
-  const handleGetLocation = () => {
-    if (!navigator.geolocation) {
-      alert('Geolocation is not supported by this browser');
-      return;
-    }
-
-    setIsGettingLocation(true);
-    
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const { latitude, longitude } = position.coords;
-        setGpsCoordinates({ lat: latitude, lng: longitude });
-        
-        // Update the location field with coordinates and try to get address
-        const coordString = `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
-        
-        // Try to get human-readable address using reverse geocoding
-        if (window.google && window.google.maps) {
-          const geocoder = new window.google.maps.Geocoder();
-          const latlng = { lat: latitude, lng: longitude };
-          
-          geocoder.geocode({ location: latlng }, (results, status) => {
-            if (status === 'OK' && results && results[0]) {
-              const address = results[0].formatted_address;
-              setCurrentCustomer(prev => ({ 
-                ...prev, 
-                location: `${address} (GPS: ${coordString})`,
-                gpsCoordinates: coordString 
-              }));
-            } else {
-              setCurrentCustomer(prev => ({ 
-                ...prev, 
-                location: `GPS: ${coordString}`,
-                gpsCoordinates: coordString 
-              }));
-            }
-          });
-        } else {
-          // Fallback to coordinates only if Google Maps is not available
-          setCurrentCustomer(prev => ({ 
-            ...prev, 
-            location: `GPS: ${coordString}`,
-            gpsCoordinates: coordString 
-          }));
-        }
-        
-        setIsGettingLocation(false);
-        alert('Location captured successfully!');
-      },
-      (error) => {
-        setIsGettingLocation(false);
-        console.error('Error getting location:', error);
-        
-        switch (error.code) {
-          case error.PERMISSION_DENIED:
-            alert('Location access denied. Please enable location permission and try again.');
-            break;
-          case error.POSITION_UNAVAILABLE:
-            alert('Location information is unavailable.');
-            break;
-          case error.TIMEOUT:
-            alert('Location request timed out.');
-            break;
-          default:
-            alert('An unknown error occurred while getting location.');
-            break;
-        }
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 300000 // 5 minutes
-      }
-    );
-  };
-
 
 
   // Calculate outstanding for each customer from orders table
@@ -570,15 +199,6 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
 
   const filteredCustomers = useMemo(() => {
     let filtered = customers;
-
-    // Sales Rep filter - show only customers with orders assigned to them
-    if (currentUser?.role === UserRole.Sales) {
-      filtered = filtered.filter(customer => {
-        // Check if this customer has any orders assigned to the current sales rep
-        const customerOrders = orders.filter(o => o.customerId === customer.id && o.assignedUserId === currentUser.id);
-        return customerOrders.length > 0;
-      });
-    }
 
     // Search filter
     if (searchTerm) {
@@ -666,47 +286,41 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
     setSearchTerm('');
   };
   
-  const customersByRoute = useMemo(() => {
+  const customersBySupplier = useMemo(() => {
+    const getPrimarySupplier = (customerId: string): string => {
+        const customerOrders = orders.filter(o => o.customerId === customerId);
+        if (customerOrders.length === 0) return 'Unassigned';
+
+        const spendingBySupplier: Record<string, number> = {};
+
+        customerOrders.forEach(order => {
+            order.orderItems.forEach(item => {
+                const product = products.find(p => p.id === item.productId);
+                if (product) {
+                    const supplier = product.supplier || 'Unassigned';
+                    const itemTotal = item.price * item.quantity * (1 - (item.discount || 0) / 100);
+                    spendingBySupplier[supplier] = (spendingBySupplier[supplier] || 0) + itemTotal;
+                }
+            });
+        });
+        
+        const topSupplier = Object.entries(spendingBySupplier).sort((a, b) => b[1] - a[1])[0];
+        return topSupplier ? topSupplier[0] : 'Unassigned';
+    };
+
     const grouped = filteredCustomers.reduce((acc, customer) => {
-        const route = customer.route || 'Unassigned';
-        if (!acc[route]) {
-            acc[route] = [];
+        const primarySupplier = getPrimarySupplier(customer.id);
+        if (!acc[primarySupplier]) {
+            acc[primarySupplier] = [];
         }
-        acc[route].push(customer);
+        acc[primarySupplier].push(customer);
         return acc;
     }, {} as Record<string, Customer[]>);
 
-    // Sort customers within each route by outstanding amount (highest first)
-    Object.keys(grouped).forEach(routeName => {
-        grouped[routeName].sort((a, b) => {
-            const outstandingA = customerOutstandingMap[a.id] || 0;
-            const outstandingB = customerOutstandingMap[b.id] || 0;
-            return outstandingB - outstandingA; // Descending order (highest outstanding first)
-        });
-    });
+    return grouped;
+  }, [filteredCustomers, orders, products]);
 
-    // Filter to show only selected route if a specific route is selected
-    // If 'All Routes' is selected, show all routes, otherwise show only the selected route
-    let finalGrouped: Record<string, Customer[]> = {};
-    
-    if (selectedRoute === 'All Routes' || !selectedRoute) {
-        // Show all routes in defined order
-        routes.forEach(route => {
-            if (grouped[route]) {
-                finalGrouped[route] = grouped[route];
-            }
-        });
-    } else {
-        // Show only the selected route
-        if (grouped[selectedRoute]) {
-            finalGrouped[selectedRoute] = grouped[selectedRoute];
-        }
-    }
-
-    return finalGrouped;
-  }, [filteredCustomers, routes, customerOutstandingMap, selectedRoute]);
-
-  const allCustomers = Object.values(customersByRoute).flat() as Customer[];
+  const allCustomers = Object.values(customersBySupplier).flat() as Customer[];
   // Total outstanding from orders table
   const totalOutstanding = useMemo(() => 
     allCustomers.reduce((sum, customer) => sum + (customerOutstandingMap[customer.id] || 0), 0), 
@@ -731,33 +345,7 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-8">
       <div className="flex justify-between items-center">
-        <div className="flex items-center gap-4">
-          {onBackToRoutes && (
-            <button
-              onClick={onBackToRoutes}
-              className="flex items-center gap-2 px-4 py-2 text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
-            >
-              ← Back to Routes
-            </button>
-          )}
-          <div>
-            <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-100">
-              {propSelectedRoute && propSelectedRoute !== 'All Routes' ? (
-                <>
-                  <span className="text-2xl mr-2">{propSelectedRoute === 'Unassigned' ? '📋' : '🚛'}</span>
-                  {propSelectedRoute} Customers
-                </>
-              ) : (
-                'All Customers'
-              )}
-            </h1>
-            {propSelectedRoute && propSelectedRoute !== 'All Routes' && (
-              <p className="text-slate-600 dark:text-slate-400 mt-1">
-                Managing customers in {propSelectedRoute} delivery route
-              </p>
-            )}
-          </div>
-        </div>
+        <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-100">Customers</h1>
         <div className="flex gap-2">
           {/* Export Buttons */}
           <button
@@ -779,228 +367,11 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
                   onClick={() => openModal('add')}
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
               >
-              Add Customer to {selectedRoute === 'All Routes' ? 'Unassigned' : selectedRoute}
+              Add Customer
               </button>
           )}
         </div>
       </div>
-
-      {/* Route Management Section - Only show when not in specific route view */}
-      {!propSelectedRoute && (
-        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 p-6">
-          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-            <div className="flex-1">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Route Selection</h2>
-                <div className="text-sm text-slate-600 dark:text-slate-400">
-                  {selectedRoute === 'All Routes' ? (
-                    <span className="bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 px-3 py-1 rounded-full">
-                      📊 Showing all {Object.keys(customersByRoute).length} routes
-                    </span>
-                  ) : (
-                    <span className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 px-3 py-1 rounded-full">
-                      🚛 Filtered to: {selectedRoute} ({customersByRoute[selectedRoute]?.length || 0} customers)
-                    </span>
-                  )}
-                </div>
-              </div>
-            <div className="flex flex-wrap gap-2">
-              {/* All Routes Button */}
-              <button
-                onClick={() => setSelectedRoute('All Routes')}
-                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 ${
-                  selectedRoute === 'All Routes'
-                    ? 'bg-purple-600 text-white'
-                    : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
-                }`}
-              >
-                📊 All Routes
-              </button>
-              
-              {routes.map(route => (
-                <button
-                  key={route}
-                  onClick={() => setSelectedRoute(route)}
-                  className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 ${
-                    selectedRoute === route
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
-                  }`}
-                >
-                  🚛 {route}
-                  {route !== 'Unassigned' && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteRoute(route);
-                      }}
-                      className="ml-1 text-red-500 hover:text-red-700 text-xs"
-                      title="Delete route"
-                    >
-                      ✕
-                    </button>
-                  )}
-                </button>
-              ))}
-              
-              {/* Add New Route */}
-              {isAddingRoute ? (
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    placeholder="Route name"
-                    value={newRouteName}
-                    onChange={(e) => setNewRouteName(e.target.value)}
-                    className="px-3 py-2 text-sm border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100"
-                    onKeyPress={(e) => e.key === 'Enter' && handleAddRoute()}
-                  />
-                  <button
-                    onClick={handleAddRoute}
-                    className="px-3 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700"
-                  >
-                    ✓
-                  </button>
-                  <button
-                    onClick={() => {
-                      setIsAddingRoute(false);
-                      setNewRouteName('');
-                    }}
-                    className="px-3 py-2 bg-slate-400 text-white text-sm rounded hover:bg-slate-500"
-                  >
-                    ✕
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => setIsAddingRoute(true)}
-                  className="px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors"
-                >
-                  ➕ Add Route
-                </button>
-              )}
-            </div>
-          </div>
-          
-          {/* Route Optimization Section */}
-          {selectedRoute !== 'Unassigned' && selectedRoute !== 'All Routes' && customersByRoute[selectedRoute]?.length > 0 && (
-            <div className="mt-4 p-4 bg-slate-50 dark:bg-slate-700 rounded-lg">
-              <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-                <div>
-                  <h3 className="text-md font-medium text-slate-800 dark:text-slate-100">
-                    🗺️ Route Optimization for {selectedRoute}
-                  </h3>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">
-                    Optimize delivery order from Distribution Center (9.3845°N, 80.4087°E)
-                  </p>
-                  {optimizedOrder.length > 0 && selectedRoute !== 'Unassigned' && 
-                   optimizedOrder === customersByRoute[selectedRoute] && (
-                    <p className="text-sm text-green-600 dark:text-green-400 mt-1">
-                      📏 Total Distance: {calculateTotalDistance(optimizedOrder).toFixed(2)} km
-                    </p>
-                  )}
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleOptimizeRoute}
-                    disabled={isOptimizing}
-                    className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 ${
-                      isOptimizing
-                        ? 'bg-slate-400 cursor-not-allowed text-white'
-                        : 'bg-blue-600 hover:bg-blue-700 text-white'
-                    }`}
-                  >
-                    {isOptimizing ? (
-                      <>
-                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                        Optimizing...
-                      </>
-                    ) : (
-                      <>
-                        🎯 Optimize Route
-                      </>
-                    )}
-                  </button>
-                  {optimizedOrder.length > 0 && (
-                    <button
-                      onClick={() => window.open(`https://www.google.com/maps/dir/${STORE_LOCATION.lat},${STORE_LOCATION.lng}/${optimizedOrder.map(c => {
-                        const gps = extractGPSCoordinates(c.location);
-                        return gps ? `${gps.lat},${gps.lng}` : '';
-                      }).filter(Boolean).join('/')}`, '_blank')}
-                      className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors"
-                      title="Open optimized route in Google Maps"
-                    >
-                      🗺️ View in Maps
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Route-specific info when viewing a specific route */}
-      {propSelectedRoute && propSelectedRoute !== 'All Routes' && (
-        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 p-6">
-          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                {propSelectedRoute === 'Unassigned' ? '📋' : '🚛'} {propSelectedRoute} Route Details
-              </h2>
-              <div className="flex items-center gap-4 mt-2">
-                <span className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 px-3 py-1 rounded-full text-sm">
-                  {customersByRoute[propSelectedRoute]?.length || 0} customers
-                </span>
-                <span className="text-sm text-slate-600 dark:text-slate-400">
-                  Outstanding: {formatCurrency(
-                    (customersByRoute[propSelectedRoute] || []).reduce((sum, customer) => 
-                      sum + (customerOutstandingMap[customer.id] || 0), 0
-                    ), currency
-                  )}
-                </span>
-              </div>
-            </div>
-            
-            {/* Route Optimization for specific route */}
-            {propSelectedRoute !== 'Unassigned' && customersByRoute[propSelectedRoute]?.length > 0 && (
-              <div className="flex gap-2">
-                <button
-                  onClick={handleOptimizeRoute}
-                  disabled={isOptimizing}
-                  className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 ${
-                    isOptimizing
-                      ? 'bg-slate-400 cursor-not-allowed text-white'
-                      : 'bg-blue-600 hover:bg-blue-700 text-white'
-                  }`}
-                >
-                  {isOptimizing ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                      Optimizing...
-                    </>
-                  ) : (
-                    <>
-                      🎯 Optimize Route
-                    </>
-                  )}
-                </button>
-                {optimizedOrder.length > 0 && (
-                  <button
-                    onClick={() => window.open(`https://www.google.com/maps/dir/${STORE_LOCATION.lat},${STORE_LOCATION.lng}/${optimizedOrder.map(c => {
-                      const gps = extractGPSCoordinates(c.location);
-                      return gps ? `${gps.lat},${gps.lng}` : '';
-                    }).filter(Boolean).join('/')}`, '_blank')}
-                    className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors"
-                    title="Open optimized route in Google Maps"
-                  >
-                    🗺️ View in Maps
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* Filter Section */}
       <div className="bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 p-6">
@@ -1129,7 +500,7 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
       <Card>
         <CardHeader>
           <CardTitle>Customer List</CardTitle>
-          <CardDescription>Manage your customer information, organized by delivery routes.</CardDescription>
+          <CardDescription>Manage your customer information, grouped by primary supplier.</CardDescription>
            <div className="pt-4">
              <input
                 type="text"
@@ -1142,183 +513,55 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
         </CardHeader>
         <CardContent>
            <div className="space-y-8">
-            {Object.entries(customersByRoute).map(([routeName, routeCustomers]) => {
-              // Use optimized order if available for selected route, otherwise use default order
-              const displayCustomers = (routeName === selectedRoute && optimizedOrder.length > 0) 
-                ? optimizedOrder 
-                : routeCustomers as Customer[];
-              
-              return (
-                <div key={routeName}>
-                  <div className="flex items-center space-x-3 mb-4">
-                    <h2 className="text-xl font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-2">
-                      {routeName === 'Unassigned' ? '�' : '�🚛'} {routeName}
-                    </h2>
-                    <Badge variant="default">{(routeCustomers as Customer[]).length} {(routeCustomers as Customer[]).length === 1 ? 'Customer' : 'Customers'}</Badge>
-                    {routeName === 'Unassigned' && (
-                      <Badge variant="secondary" className="bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200">
-                        {(routeCustomers as Customer[]).filter(c => suggestRouteForCustomer(c)).length} Suggestions Available
-                      </Badge>
-                    )}
-                    {routeName === selectedRoute && (
-                      <Badge variant="secondary" className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
-                        Selected Route
-                      </Badge>
-                    )}
-                    {routeName === selectedRoute && optimizedOrder.length > 0 && (
-                      <Badge variant="secondary" className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-                        🎯 Optimized Order
-                      </Badge>
-                    )}
-                  </div>
+            {Object.entries(customersBySupplier).map(([supplierName, supplierCustomers]) => (
+              <div key={supplierName}>
+                <div className="flex items-center space-x-3 mb-4">
+                  <h2 className="text-xl font-semibold text-slate-700 dark:text-slate-300">{supplierName}</h2>
+                  <Badge variant="default">{(supplierCustomers as Customer[]).length} {(supplierCustomers as Customer[]).length === 1 ? 'Customer' : 'Customers'}</Badge>
+                </div>
                  <div className="overflow-x-auto border dark:border-slate-700 rounded-lg">
                     <table className="w-full text-sm text-left text-slate-500 dark:text-slate-400">
                       <thead className="text-xs text-slate-700 uppercase bg-slate-50 dark:bg-slate-700 dark:text-slate-400">
                         <tr>
-                          <th scope="col" className="px-4 py-3 w-1/2">Customer</th>
-                          <th scope="col" className="px-4 py-3 w-1/4">Join Date</th>
-                          <th scope="col" className="px-4 py-3 w-1/4">Outstanding & Actions</th>
+                          <th scope="col" className="px-6 py-3 z-20 sticky left-0">Customer</th>
+                          <th scope="col" className="px-6 py-3 z-20 sticky left-[112px]">Contact</th>
+                          <th scope="col" className="px-6 py-3">Total Spent</th>
+                          <th scope="col" className="px-6 py-3">Outstanding</th>
+                          {canEdit && <th scope="col" className="px-6 py-3 z-20 sticky right-0">Actions</th>}
                         </tr>
                       </thead>
                       <tbody>
-                        {displayCustomers.map((customer, index) => {
-                          // Calculate primary supplier for this customer
-                          const customerOrders = orders.filter(o => o.customerId === customer.id);
-                          let primarySupplier = 'Unassigned';
-                          let primaryCategory = 'N/A';
-                          
-                          if (customerOrders.length > 0) {
-                            // Calculate primary supplier based on spending
-                            const spendingBySupplier: Record<string, number> = {};
-                            const categoryCount: Record<string, number> = {};
-                            
-                            customerOrders.forEach(order => {
-                              order.orderItems.forEach(item => {
-                                const product = products.find(p => p.id === item.productId);
-                                if (product) {
-                                  // Supplier calculation
-                                  const supplier = product.supplier || 'Unassigned';
-                                  const itemTotal = item.price * item.quantity * (1 - (item.discount || 0) / 100);
-                                  spendingBySupplier[supplier] = (spendingBySupplier[supplier] || 0) + itemTotal;
-                                  
-                                  // Category calculation
-                                  categoryCount[product.category] = (categoryCount[product.category] || 0) + item.quantity;
-                                }
-                              });
-                            });
-                            
-                            // Get primary supplier and category
-                            if (Object.keys(spendingBySupplier).length > 0) {
-                              primarySupplier = Object.keys(spendingBySupplier).reduce((a, b) => 
-                                spendingBySupplier[a] > spendingBySupplier[b] ? a : b
-                              );
-                            }
-                            
-                            if (Object.keys(categoryCount).length > 0) {
-                              primaryCategory = Object.keys(categoryCount).reduce((a, b) => 
-                                categoryCount[a] > categoryCount[b] ? a : b
-                              );
-                            }
-                          }
-                          
-                          return (
-                            <tr key={customer.id} className="border-b dark:bg-slate-800 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600">
-                              <td className="px-4 py-4 font-medium text-slate-900 dark:text-white w-1/2">
+                        {(supplierCustomers as Customer[]).map((customer) => (
+                          <tr key={customer.id} className="border-b dark:bg-slate-800 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600">
+                            <td className="px-6 py-4 font-medium text-slate-900 dark:text-white z-10 sticky left-0">
                                 <div className="flex items-center space-x-3">
-                                  {/* Visit order number for optimized routes */}
-                                  {routeName === selectedRoute && optimizedOrder.length > 0 && (
-                                    <div className="w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0">
-                                      {index + 1}
+                                    <img src={customer.avatarUrl} alt={customer.name} className="w-10 h-10 rounded-full" />
+                                    <div>
+                                        <span>{customer.name}</span>
+                                        <p className="text-xs text-slate-500">{customer.location}</p>
                                     </div>
-                                  )}
-                                  <img src={customer.avatarUrl} alt={customer.name} className="w-12 h-12 rounded-full flex-shrink-0" />
-                                  <div className="min-w-0 flex-1">
-                                    <div className="font-semibold text-sm truncate flex items-center gap-2">
-                                      {customer.name}
-                                      {routeName === selectedRoute && optimizedOrder.length > 0 && (
-                                        <span className="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded dark:bg-blue-900 dark:text-blue-300">
-                                          Visit #{index + 1}
-                                        </span>
-                                      )}
-                                      {routeName === 'Unassigned' && (() => {
-                                        const suggestedRoute = suggestRouteForCustomer(customer);
-                                        return suggestedRoute ? (
-                                          <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded dark:bg-orange-900 dark:text-orange-300">
-                                            Suggest: {suggestedRoute}
-                                          </span>
-                                        ) : (
-                                          <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded dark:bg-slate-700 dark:text-slate-400">
-                                            No GPS
-                                          </span>
-                                        );
-                                      })()}
-                                    </div>
-                                    {renderLocationWithGPS(customer.location)}
-                                    <div className="text-xs text-blue-600 dark:text-blue-400 truncate">{customer.phone}</div>
-                                  </div>
                                 </div>
-                              </td>
-                              <td className="px-4 py-4 text-sm w-1/4">
-                                <div className="font-medium">
-                                  {customer.joinDate ? new Date(customer.joinDate).toLocaleDateString('en-GB') : 'N/A'}
-                                </div>
-                              </td>
-                              <td className="px-4 py-4 w-1/4">
-                                <div className="flex flex-col space-y-2">
-                                  <div className={`font-bold text-lg ${(customerOutstandingMap[customer.id] || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                                    {formatCurrency(customerOutstandingMap[customer.id] || 0, currency)}
-                                  </div>
-                                  <div className="flex flex-wrap gap-1">
-                                    {canEdit && (
-                                      <button onClick={() => openModal('edit', customer)} className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 font-medium text-xs bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded">
-                                        Edit
-                                      </button>
-                                    )}
-                                    {routeName === 'Unassigned' && canEdit && (() => {
-                                      const suggestedRoute = suggestRouteForCustomer(customer);
-                                      return suggestedRoute ? (
-                                        <button 
-                                          onClick={async () => {
-                                            if (confirm(`Assign ${customer.name} to ${suggestedRoute}?`)) {
-                                              try {
-                                                const { error } = await supabase.from('customers').update({
-                                                  route: suggestedRoute
-                                                }).eq('id', customer.id);
-                                                if (error) {
-                                                  alert(`Error: ${error.message}`);
-                                                } else {
-                                                  alert(`${customer.name} assigned to ${suggestedRoute}!`);
-                                                  await refetchData();
-                                                }
-                                              } catch (err) {
-                                                alert('Failed to update route assignment');
-                                              }
-                                            }
-                                          }}
-                                          className="text-green-600 hover:text-green-800 dark:text-green-400 dark:hover:text-green-300 font-medium text-xs bg-green-50 dark:bg-green-900/20 px-2 py-1 rounded"
-                                        >
-                                          Assign to {suggestedRoute}
-                                        </button>
-                                      ) : null;
-                                    })()}
-                                    {canDelete && (
-                                      <button onClick={() => openDeleteConfirm(customer)} className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 font-medium text-xs bg-red-50 dark:bg-red-900/20 px-2 py-1 rounded">
-                                        Delete
-                                      </button>
-                                    )}
-                                  </div>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
+                            </td>
+                            <td className="px-6 py-4 z-10 sticky left-[112px]">
+                                <div>{customer.email}</div>
+                                <div className="text-xs text-slate-500">{customer.phone}</div>
+                            </td>
+                            <td className="px-6 py-4">{formatCurrency(customerTotalSpentMap[customer.id] || 0, currency)}</td>
+                            <td className={`px-6 py-4 font-bold ${(customerOutstandingMap[customer.id] || 0) > 0 ? 'text-red-500' : 'text-green-500'}`}>{formatCurrency(customerOutstandingMap[customer.id] || 0, currency)}</td>
+              {canEdit && (
+                <td className="px-6 py-4 flex items-center space-x-2 z-10 sticky right-0">
+                                <button onClick={() => openModal('edit', customer)} className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">Edit</button>
+                                <button onClick={() => openDeleteConfirm(customer)} className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300">Delete</button>
+                                </td>
+                            )}
+                          </tr>
+                        ))}
                       </tbody>
                     </table>
                   </div>
-                </div>
-              );
-            })}
-            {Object.keys(customersByRoute).length === 0 && (
+              </div>
+            ))}
+            {Object.keys(customersBySupplier).length === 0 && (
               <div className="text-center py-10">
                 <p className="text-slate-500 dark:text-slate-400">No customers found matching your criteria.</p>
               </div>
@@ -1332,7 +575,7 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
             <div className="p-6 space-y-4">
                 <div className="flex flex-col items-center space-y-2">
                     <img 
-                        src={currentCustomer.avatarUrl || '/lord-shiva-avatar.jpg'} 
+                        src={currentCustomer.avatarUrl || 'https://i.pravatar.cc/100?u=default'} 
                         alt="Avatar preview" 
                         className="w-24 h-24 rounded-full object-cover border-4 border-slate-200 dark:border-slate-600"
                     />
@@ -1384,64 +627,15 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
                 </div>
                 <div>
                     <label htmlFor="location" className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">Location</label>
-                    <div className="space-y-2">
-                        <div className="flex gap-2">
-                            <input
-                                type="text"
-                                id="location"
-                                value={currentCustomer.location || ''}
-                                onChange={(e) => setCurrentCustomer({ ...currentCustomer, location: e.target.value })}
-                                className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:placeholder-slate-400 dark:text-white"
-                                placeholder="Enter address or use GPS"
-                                required
-                            />
-                            <button
-                                type="button"
-                                onClick={handleGetLocation}
-                                disabled={isGettingLocation}
-                                className={`px-4 py-2.5 text-sm font-medium text-white rounded-lg transition-colors flex items-center gap-2 ${
-                                    isGettingLocation 
-                                        ? 'bg-slate-400 cursor-not-allowed' 
-                                        : 'bg-green-600 hover:bg-green-700 focus:ring-4 focus:ring-green-300'
-                                }`}
-                                title="Get current GPS location"
-                            >
-                                {isGettingLocation ? (
-                                    <>
-                                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                                        <span className="hidden sm:inline">Getting...</span>
-                                    </>
-                                ) : (
-                                    <>
-                                        📍
-                                        <span className="hidden sm:inline">GPS</span>
-                                    </>
-                                )}
-                            </button>
-                        </div>
-                        {gpsCoordinates && (
-                            <div className="text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-600 p-2 rounded">
-                                📍 GPS: {gpsCoordinates.lat.toFixed(6)}, {gpsCoordinates.lng.toFixed(6)}
-                            </div>
-                        )}
-                    </div>
-                </div>
-                <div>
-                    <label htmlFor="route" className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">Route Assignment <span className="text-red-500">*</span></label>
-                    <select
-                        id="route"
-                        value={currentCustomer.route || 'Unassigned'}
-                        onChange={(e) => setCurrentCustomer({ ...currentCustomer, route: e.target.value })}
+                    <input
+                        type="text"
+                        id="location"
+                        value={currentCustomer.location || ''}
+                        onChange={(e) => setCurrentCustomer({ ...currentCustomer, location: e.target.value })}
                         className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:placeholder-slate-400 dark:text-white"
+                        placeholder="City, State"
                         required
-                    >
-                        {routes.map(route => (
-                            <option key={route} value={route}>
-                                🚛 {route}
-                            </option>
-                        ))}
-                    </select>
-                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Select which delivery route this customer belongs to</p>
+                    />
                 </div>
                  {modalMode === 'edit' && (
                     <div className="space-y-4">
@@ -1490,7 +684,6 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
                 </button>
             </div>
         </Modal>
-      </div>
     </div>
   );
 };

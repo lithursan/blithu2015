@@ -6,7 +6,6 @@ import { useData } from '../../contexts/DataContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../supabaseClient';
 import { exportSuppliers } from '../../utils/exportUtils';
-import { confirmSecureDelete } from '../../utils/passwordConfirmation';
 
 export const Suppliers: React.FC = () => {
   // Helper functions for Supabase CRUD
@@ -140,20 +139,6 @@ export const Suppliers: React.FC = () => {
 
   const handleDelete = () => {
     (async () => {
-      if (!supplierToDelete || !currentUser?.email) return;
-      
-      // Require password confirmation for delete
-      const confirmed = await confirmSecureDelete(
-        supplierToDelete.name, 
-        'Supplier', 
-        currentUser.email
-      );
-      
-      if (!confirmed) {
-        closeDeleteConfirm();
-        return;
-      }
-      
       if (supplierToDelete) {
         await deleteSupplierFromDB(supplierToDelete.id);
         // Fetch fresh suppliers and map

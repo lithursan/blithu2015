@@ -8,8 +8,6 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
   updateCurrentUser: (updatedUser: User) => void;
-  refreshAuth: () => Promise<void>;
-  isLoading: boolean;
 }
 
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -28,156 +26,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     useEffect(() => {
         const fetchCurrentUser = async () => {
-            try {
-                // First, check Supabase auth session
-                const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-                console.log('Supabase session:', session);
-                
-                // Check localStorage fallback
-                const storedUserId = localStorage.getItem('currentUserId');
-                console.log('Stored user ID:', storedUserId);
-                
-                if (storedUserId) {
-                    // Fetch user from Supabase users table
-                    const { data, error } = await supabase.from('users').select('*').eq('id', storedUserId).single();
-                    console.log('User fetch result:', { data, error });
-                    
-                    if (!error && data) {
-                        // Process assignedSupplierNames if it's a JSON string
-                        const processedUser = {
-                            ...data,
-                            assignedSupplierNames: (() => {
-                                if (!data.assignedsuppliernames) return [];
-                                if (typeof data.assignedsuppliernames === 'string') {
-                                    try {
-                                        const parsed = JSON.parse(data.assignedsuppliernames);
-                                        return Array.isArray(parsed) ? parsed : [];
-                                    } catch {
-                                        return [];
-                                    }
-                                }
-                                return Array.isArray(data.assignedsuppliernames) ? data.assignedsuppliernames : [];
-                            })()
-                        };
-                        console.log('Setting current user:', processedUser);
-                        setCurrentUser(processedUser);
-                    } else {
-                        console.warn('User not found or error:', error);
-                        // Clean up invalid stored user ID
-                        localStorage.removeItem('currentUserId');
-                        setCurrentUser(null);
-                    }
-                } else {
-                    console.log('No stored user ID found');
-                    setCurrentUser(null);
-                }
-            } catch (fetchError) {
-                console.error('Error fetching current user:', fetchError);
-                setCurrentUser(null);
-            } finally {
-                setLoading(false);
-            }
-        };
-        
-        fetchCurrentUser();
-
-        // Listen for auth changes
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(
-            async (event, session) => {
-                console.log('Auth state changed:', event, session);
-                if (event === 'SIGNED_OUT') {
-                    setCurrentUser(null);
-                    localStorage.removeItem('currentUserId');
-                }
-            }
-        );
-
-        return () => subscription.unsubscribe();
-    }, []);
-
-    const login = useCallback(async (email: string, password: string): Promise<void> => {
-        try {
-            console.log('Attempting login for:', email);
-            
-            // Query Supabase users table for matching email and password
-            const { data, error } = await supabase
-                .from('users')
-                .select('*')
-                .eq('email', email)
-                .eq('password', password)
-                .single();
-                
-            console.log('Login query result:', { data, error });
-            
-            if (!error && data) {
-                // Note: Supabase anonymous auth is disabled, using custom auth system only
-                // RLS policies may need to be adjusted or disabled for expenses table
-                console.log('Using custom authentication system (Supabase auth session not created)');
-                
-                // Process assignedSupplierNames if it's a JSON string
-                const processedUser = {
-                    ...data,
-                    assignedSupplierNames: (() => {
-                        if (!data.assignedsuppliernames) return [];
-                        if (typeof data.assignedsuppliernames === 'string') {
-                            try {
-                                const parsed = JSON.parse(data.assignedsuppliernames);
-                                return Array.isArray(parsed) ? parsed : [];
-                            } catch {
-                                return [];
-                            }
-                        }
-                        return Array.isArray(data.assignedsuppliernames) ? data.assignedsuppliernames : [];
-                    })()
-                };
-                
-                console.log('Login successful, setting user:', processedUser);
-                setCurrentUser(processedUser);
-                localStorage.setItem('currentUserId', data.id);
-                localStorage.setItem('userLoginTime', Date.now().toString());
-                return;
-            } else {
-                console.error('Login failed:', error);
-                throw new Error("Invalid email or password.");
-            }
-        } catch (loginError) {
-            console.error('Login error:', loginError);
-            throw new Error("Login failed. Please try again.");
-        }
-    }, []);
-
-    const logout = useCallback(async () => {
-        try {
-            // Sign out from Supabase to clear the auth session
-            const { error } = await supabase.auth.signOut();
-            if (error) {
-                console.warn('Supabase signout error:', error);
-            } else {
-                console.log('Supabase session cleared');
-            }
-        } catch (err) {
-            console.warn('Error during Supabase signout:', err);
-        }
-        
-        setCurrentUser(null);
-        localStorage.removeItem('currentUserId');
-        localStorage.removeItem('supabaseUserId');
-        localStorage.removeItem('userLoginTime');
-        // The redirect will be handled by the ProtectedRoute component
-    }, []);
-
-    const updateCurrentUser = useCallback((updatedUser: User) => {
-        setCurrentUser(updatedUser);
-        // Also update the mock data source in a real scenario, or have a central state management
-    }, []);
-
-    const refreshAuth = useCallback(async () => {
-        setLoading(true);
-        try {
             const storedUserId = localStorage.getItem('currentUserId');
             if (storedUserId) {
+                // Fetch user from Supabase
                 const { data, error } = await supabase.from('users').select('*').eq('id', storedUserId).single();
                 if (!error && data) {
+                    // Process assignedSupplierNames if it's a JSON string
                     const processedUser = {
                         ...data,
                         assignedSupplierNames: (() => {
@@ -194,24 +48,61 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                         })()
                     };
                     setCurrentUser(processedUser);
-                    console.log('Auth refreshed successfully');
                 } else {
-                    console.warn('Auth refresh failed, clearing session');
-                    localStorage.removeItem('currentUserId');
                     setCurrentUser(null);
                 }
-            } else {
-                setCurrentUser(null);
             }
-        } catch (error) {
-            console.error('Auth refresh error:', error);
-            setCurrentUser(null);
-        } finally {
             setLoading(false);
+        };
+        fetchCurrentUser();
+    }, []);
+
+    const login = useCallback(async (email: string, password: string): Promise<void> => {
+        // Query Supabase users table for matching email and password
+        const { data, error } = await supabase
+            .from('users')
+            .select('*')
+            .eq('email', email)
+            .eq('password', password)
+            .single();
+        if (!error && data) {
+            // Process assignedSupplierNames if it's a JSON string
+            const processedUser = {
+                ...data,
+                assignedSupplierNames: (() => {
+                    if (!data.assignedsuppliernames) return [];
+                    if (typeof data.assignedsuppliernames === 'string') {
+                        try {
+                            const parsed = JSON.parse(data.assignedsuppliernames);
+                            return Array.isArray(parsed) ? parsed : [];
+                        } catch {
+                            return [];
+                        }
+                    }
+                    return Array.isArray(data.assignedsuppliernames) ? data.assignedsuppliernames : [];
+                })()
+            };
+            setCurrentUser(processedUser);
+            localStorage.setItem('currentUserId', data.id);
+            return;
+        } else {
+            throw new Error("Invalid email or password.");
         }
     }, []);
 
-    const value = { currentUser, login, logout, updateCurrentUser, refreshAuth, isLoading: loading };
+    const logout = useCallback(() => {
+        setCurrentUser(null);
+        localStorage.removeItem('currentUserId');
+        // The redirect will be handled by the ProtectedRoute component
+    }, []);
+
+    const updateCurrentUser = useCallback((updatedUser: User) => {
+        setCurrentUser(updatedUser);
+        // Also update the mock data source in a real scenario, or have a central state management
+    }, []);
+
+
+    const value = { currentUser, login, logout, updateCurrentUser };
 
     // Don't render children until the initial auth state has been determined
     // to prevent flashing of content.

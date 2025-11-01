@@ -10,18 +10,9 @@ import { supabase, fetchOrders } from '../../supabaseClient';
 import { useAuth } from '../../contexts/AuthContext';
 import { exportOrders } from '../../utils/exportUtils';
 import { emailService } from '../../utils/emailService';
-import { confirmSecureDelete } from '../../utils/passwordConfirmation';
 import html2pdf from "html2pdf.js";
 
 const formatCurrency = (amount: number, currency: string) => {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency, minimumFractionDigits: 2 }).format(amount).replace('$', `${currency} `);
-};
-
-// Special formatting function for cheque and credit balances
-const formatBalanceAmount = (amount: number, currency: string) => {
-    if (amount === 0) {
-        return `${currency} 0`;
-    }
     return new Intl.NumberFormat('en-US', { style: 'currency', currency, minimumFractionDigits: 2 }).format(amount).replace('$', `${currency} `);
 };
 
@@ -32,92 +23,6 @@ const format = (amount: number) => {
   }).format(amount);
 };
 
-// Helper function to render customer location in orders table
-const renderCustomerLocationInOrder = (order: Order, customers: Customer[]) => {
-  const customer = customers.find(c => c.id === order.customerId);
-  if (!customer || !customer.location) {
-    return null;
-  }
-
-  const gpsMatch = customer.location.match(/GPS:\s*(-?\d+\.?\d*),\s*(-?\d+\.?\d*)/);
-  
-  if (gpsMatch) {
-    const [, lat, lng] = gpsMatch;
-    const latitude = parseFloat(lat);
-    const longitude = parseFloat(lng);
-    const mapsUrl = `https://www.google.com/maps?q=${latitude},${longitude}`;
-    
-    return (
-      <a 
-        href={mapsUrl} 
-        target="_blank" 
-        rel="noopener noreferrer"
-        className="text-blue-500 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-200 text-xs inline-flex items-center gap-1"
-        title={`Open ${customer.name}'s location in Google Maps`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        📍 Location
-      </a>
-    );
-  }
-  
-  return (
-    <span className="text-slate-400 dark:text-slate-500 text-xs">📍 Address</span>
-  );
-};
-
-// Helper function to open customer location for an order
-const openOrderLocation = (order: Order, customers: Customer[]) => {
-  const customer = customers.find(c => c.id === order.customerId);
-  if (!customer || !customer.location) {
-    alert('No location available for this customer');
-    return;
-  }
-
-  const gpsMatch = customer.location.match(/GPS:\s*(-?\d+\.?\d*),\s*(-?\d+\.?\d*)/);
-  
-  if (gpsMatch) {
-    const [, lat, lng] = gpsMatch;
-    const latitude = parseFloat(lat);
-    const longitude = parseFloat(lng);
-    const mapsUrl = `https://www.google.com/maps?q=${latitude},${longitude}`;
-    window.open(mapsUrl, '_blank');
-  } else {
-    // If no GPS coordinates, try to open with the raw address
-    const encodedAddress = encodeURIComponent(customer.location);
-    const mapsUrl = `https://www.google.com/maps/search/${encodedAddress}`;
-    window.open(mapsUrl, '_blank');
-  }
-};
-
-// Helper function to format phone numbers nicely
-const formatPhoneNumber = (phone: string) => {
-  if (!phone) return '';
-  
-  // Remove all non-digits
-  const digits = phone.replace(/\D/g, '');
-  
-  // Handle Sri Lankan numbers (+94)
-  if (digits.startsWith('94') && digits.length === 11) {
-    // Format: +94 XX XXX XXXX
-    return `+94 ${digits.slice(2, 4)} ${digits.slice(4, 7)} ${digits.slice(7)}`;
-  }
-  
-  // Handle local numbers (0XXXXXXXXX)
-  if (digits.startsWith('0') && digits.length === 10) {
-    // Format: 0XX XXX XXXX
-    return `${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6)}`;
-  }
-  
-  // Handle 9-digit numbers (XXXXXXXXX) 
-  if (digits.length === 9) {
-    // Format: XX XXX XXXX
-    return `${digits.slice(0, 2)} ${digits.slice(2, 5)} ${digits.slice(5)}`;
-  }
-  
-  // Default: return as-is if doesn't match expected patterns
-  return phone;
-};
 
 // --- Printable Bill Component ---
 interface OrderBillProps {
@@ -172,8 +77,8 @@ const OrderBill: React.FC<OrderBillProps> = ({ order, customer, products, curren
             <tr>
               <th className="py-2 px-4 text-left font-semibold">Product</th>
               <th className="py-2 px-4 text-right font-semibold">Qty</th>
-              <th className="py-2 px-4 text-right font-semibold">Free</th>
               <th className="py-2 px-4 text-right font-semibold">Price</th>
+              <th className="py-2 px-4 text-right font-semibold">Discount</th>
               <th className="py-2 px-4 text-right font-semibold">Subtotal</th>
             </tr>
           </thead>
@@ -181,13 +86,13 @@ const OrderBill: React.FC<OrderBillProps> = ({ order, customer, products, curren
             {(order.orderItems ?? []).map(item => {
               const product = findProduct(item.productId);
               if (!product) return null;
-              const subtotal = item.price * item.quantity;
+              const subtotal = item.price * item.quantity * (1 - (item.discount || 0) / 100);
               return (
                 <tr key={item.productId} className="border-b">
                   <td className="py-3 px-4">{product.name}</td>
                   <td className="py-3 px-4 text-right">{item.quantity}</td>
-                  <td className="py-3 px-4 text-right font-bold text-green-600">{item.free || 0}</td>
                   <td className="py-3 px-4 text-right">{item.price}</td>
+                  <td className="py-3 px-4 text-right">{item.discount || 0}%</td>
                   <td className="py-3 px-4 text-right font-semibold">{formatCurrency(subtotal, currency)}</td>
                 </tr>
               );
@@ -235,11 +140,11 @@ const OrderBill: React.FC<OrderBillProps> = ({ order, customer, products, curren
         </div>
         <div className="flex justify-between">
           <span className="text-gray-600">Pending Cheque:</span>
-          <span className="font-medium text-yellow-600">{formatBalanceAmount(billChequeBalance, currency)}</span>
+          <span className="font-medium text-yellow-600">{formatCurrency(billChequeBalance, currency)}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-gray-600">Credit Balance:</span>
-          <span className="font-medium text-red-600">{formatBalanceAmount(billCreditBalance, currency)}</span>
+          <span className="font-medium text-red-600">{formatCurrency(billCreditBalance, currency)}</span>
         </div>
         <div className="flex justify-between text-lg font-bold pt-2 mt-2 border-t">
           <span className="text-gray-800">Balance Due:</span>
@@ -268,6 +173,7 @@ export const Orders: React.FC = () => {
 
 // printWindow.print() and printWindow.close() should only be inside generateAndDownloadBill, not at the top level
   const [orderNotes, setOrderNotes] = useState('');
+  const [orderMethod, setOrderMethod] = useState('');
   // ...existing code...
   const { orders, setOrders, customers, products, setProducts, users, driverAllocations, setDriverAllocations, refetchData } = useData();
   const { currentUser } = useAuth();
@@ -288,19 +194,12 @@ export const Orders: React.FC = () => {
   const [orderItems, setOrderItems] = useState<Record<string, number>>({});
   const [orderDiscounts, setOrderDiscounts] = useState<Record<string, number>>({});
   const [orderItemPrices, setOrderItemPrices] = useState<Record<string, number>>({});
-  const [freeItems, setFreeItems] = useState<Record<string, number>>({});
   const [heldItems, setHeldItems] = useState<Set<string>>(new Set());
   const [orderToDelete, setOrderToDelete] = useState<Order | null>(null);
   const [viewingOrder, setViewingOrder] = useState<Order | null>(null);
   const [isPrintPreviewOpen, setIsPrintPreviewOpen] = useState(false);
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState<string>('');
-  const [deliveryAddress, setDeliveryAddress] = useState<string>('');
   const [orderToFinalize, setOrderToFinalize] = useState<Order | null>(null);
-  
-  // GPS Location for orders
-  const [orderLocation, setOrderLocation] = useState<{latitude: number, longitude: number, accuracy?: number} | null>(null);
-  const [isCapturingLocation, setIsCapturingLocation] = useState(false);
-  const [locationError, setLocationError] = useState<string | null>(null);
 
   const [editableChequeBalance, setEditableChequeBalance] = useState<number | ''>('');
   const [editableCreditBalance, setEditableCreditBalance] = useState<number | ''>('');
@@ -320,48 +219,12 @@ export const Orders: React.FC = () => {
   const canEdit = useMemo(() => 
     currentUser?.role === UserRole.Admin || 
     currentUser?.role === UserRole.Manager ||
-    currentUser?.role === UserRole.Driver ||
-    currentUser?.role === UserRole.Sales,
+    currentUser?.role === UserRole.Sales ||
+    currentUser?.role === UserRole.Driver,
     [currentUser]
   );
   
-  const canDelete = useMemo(() => currentUser?.role === UserRole.Admin, [currentUser]);
-
-  // GPS Location Capture Function
-  const captureCurrentLocation = () => {
-    if (!navigator.geolocation) {
-      setLocationError('Geolocation is not supported by this browser');
-      return;
-    }
-
-    setIsCapturingLocation(true);
-    setLocationError(null);
-
-    const options = {
-      enableHighAccuracy: true,
-      timeout: 10000,
-      maximumAge: 60000 // 1 minute
-    };
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const location = {
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          accuracy: position.coords.accuracy
-        };
-        setOrderLocation(location);
-        setIsCapturingLocation(false);
-        console.log('Order location captured:', location);
-      },
-      (error) => {
-        console.error('Location capture error:', error);
-        setLocationError(error.message);
-        setIsCapturingLocation(false);
-      },
-      options
-    );
-  };
+  const canDelete = useMemo(() => currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Manager, [currentUser]);
 
   // Sales rep cannot print bills or mark orders as delivered
   const canPrintBill = useMemo(() => 
@@ -484,11 +347,6 @@ export const Orders: React.FC = () => {
         );
     } 
     
-    // Filter orders based on user role
-    if (currentUser?.role === UserRole.Sales) {
-      // Sales rep can only see orders assigned to them
-      displayOrders = displayOrders.filter(order => order.assignedUserId === currentUser.id);
-    }
     // Remove driver filter: show all orders for driver login
     // else if (currentUser?.role === UserRole.Driver) {
     //   displayOrders = displayOrders.filter(order => order.assignedUserId === currentUser.id);
@@ -552,26 +410,7 @@ export const Orders: React.FC = () => {
         });
     }
 
-    // Sort orders: Pending first, then Delivered (for all users)
-    return displayOrders.sort((a, b) => {
-      // Priority order: Pending = 1, Delivered = 2, Other statuses = 3
-      const getStatusPriority = (order: any) => {
-        if (order.status === 'Pending') return 1; // Pending - Top priority
-        if (order.status === 'Delivered') return 2; // Delivered - Second priority
-        return 3; // Other statuses (Shipped, Cancelled)
-      };
-      
-      const priorityA = getStatusPriority(a);
-      const priorityB = getStatusPriority(b);
-      
-      // If same status priority, sort by date (newest first)
-      if (priorityA === priorityB) {
-        return new Date(b.date).getTime() - new Date(a.date).getTime();
-      }
-      
-      // Otherwise sort by status priority
-      return priorityA - priorityB;
-    });
+    return displayOrders.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [orders, products, statusFilter, searchTerm, currentUser, deliveryDateFilter, dateRangeFilter]);
     
   const ordersBySupplier = useMemo(() => {
@@ -601,11 +440,10 @@ export const Orders: React.FC = () => {
 
   const openCreateModal = () => {
     setCurrentOrder(null);
-    setSelectedCustomer('');
-    setCustomerSearch('');
+    setSelectedCustomer(customers[0]?.id || '');
+    setCustomerSearch(customers[0]?.name || '');
     setOrderItems({});
     setOrderDiscounts({});
-    setFreeItems({});
     const initialPrices = products.reduce((acc, p) => {
         acc[p.id] = p.price;
         return acc;
@@ -613,7 +451,6 @@ export const Orders: React.FC = () => {
     setOrderItemPrices(initialPrices);
     setHeldItems(new Set());
     setExpectedDeliveryDate('');
-    setDeliveryAddress('');
     setModalState('create');
   };
 
@@ -628,11 +465,8 @@ export const Orders: React.FC = () => {
       acc[item.productId] = item.quantity;
       return acc;
     }, {} as Record<string, number>);
-    const discounts = {} as Record<string, number>; // Remove discount functionality
-    const frees = allItems.reduce((acc, item) => {
-      if (item.free && item.free > 0) {
-        acc[item.productId] = item.free;
-      }
+    const discounts = (order.orderItems ?? []).reduce((acc, item) => {
+      acc[item.productId] = item.discount || 0;
       return acc;
     }, {} as Record<string, number>);
     const prices = allItems.reduce((acc, item) => {
@@ -648,11 +482,9 @@ export const Orders: React.FC = () => {
     const backorderedIds = new Set((order.backorderedItems ?? []).map(item => item.productId));
     setOrderItems(items);
     setOrderDiscounts(discounts);
-    setFreeItems(frees);
     setOrderItemPrices(prices);
     setHeldItems(backorderedIds);
     setExpectedDeliveryDate(order.expectedDeliveryDate || '');
-    setDeliveryAddress(order.deliveryAddress || '');
     setModalState('edit');
   };
   
@@ -716,23 +548,10 @@ export const Orders: React.FC = () => {
     setOrderDiscounts(prev => ({ ...prev, [productId]: newDiscount}));
   };
   
-  const handlePriceChange = (productId: string, price: number | string) => {
-    if (price === '') {
-      setOrderItemPrices(prev => ({ ...prev, [productId]: '' }));
-    } else {
-      const numPrice = typeof price === 'string' ? parseFloat(price) : price;
-      const newPrice = Math.max(0, numPrice);
-      setOrderItemPrices(prev => ({ ...prev, [productId]: newPrice }));
-    }
-  };
-
-  const handleFreeQuantityChange = (productId: string, quantity: number) => {
-    const product = products.find(p => p.id === productId);
-    if (!product) return;
-    
-    const newQuantity = Math.max(0, quantity);
-    setFreeItems(prev => ({ ...prev, [productId]: newQuantity }));
-  };
+  const handlePriceChange = (productId: string, price: number) => {
+    const newPrice = Math.max(0, price);
+    setOrderItemPrices(prev => ({ ...prev, [productId]: newPrice }));
+};
 
   const toggleHoldItem = (productId: string) => {
     setHeldItems(prev => {
@@ -757,8 +576,7 @@ export const Orders: React.FC = () => {
           if (isHeld || isOutOfStock) {
             acc.heldItemsCount += quantity;
           } else {
-            const customPrice = orderItemPrices[productId];
-            const price = (customPrice === '' || customPrice === undefined) ? product.price : (typeof customPrice === 'number' ? customPrice : (parseFloat(customPrice) || product.price));
+            const price = orderItemPrices[productId] ?? product.price;
             const discount = orderDiscounts[productId] || 0;
             const discountedPrice = price * (1 - discount / 100);
             acc.total += discountedPrice * quantity;
@@ -790,23 +608,16 @@ export const Orders: React.FC = () => {
       if (!product) return;
       const isHeld = heldItems.has(productId);
       const isOutOfStock = getEffectiveStock(product) === 0;
-      const customPrice = orderItemPrices[productId];
-      const price = (customPrice === '' || customPrice === undefined) ? (product?.price ?? 0) : (typeof customPrice === 'number' ? customPrice : (parseFloat(customPrice) || (product?.price ?? 0)));
-      const freeQuantity = freeItems[productId] || 0;
+      const price = orderItemPrices[productId] ?? product?.price ?? 0;
 
       if (isHeld || isOutOfStock) {
-        newBackorderedItems.push({ 
-          productId, 
-          quantity, 
-          price,
-          free: freeQuantity
-        });
+        newBackorderedItems.push({ productId, quantity, price });
       } else {
          newOrderItems.push({ 
           productId, 
           quantity, 
           price: price,
-          free: freeQuantity, // Include free quantity in regular order item
+          discount: orderDiscounts[productId] || 0,
         });
       }
     });
@@ -824,154 +635,31 @@ export const Orders: React.FC = () => {
         return;
       }
 
-      // Generate unique order ID using database function (safer than client-side calculation)
-      let newOrderId: string;
-      try {
-        const { data: idResult, error: idError } = await supabase.rpc('generate_next_order_id');
-        if (idError || !idResult) {
-          console.warn('Database ID generation failed, using fallback method:', idError);
-          // Fallback to client-side generation with timestamp for uniqueness
-          const maxIdNum = orders.reduce((max, order) => {
-            const num = parseInt(order.id.replace('ORD', ''), 10);
-            return num > max ? num : max;
-          }, 0);
-          const timestamp = Date.now().toString().slice(-3); // Last 3 digits of timestamp
-          newOrderId = `ORD${(maxIdNum + 1).toString().padStart(3, '0')}_${timestamp}`;
-        } else {
-          newOrderId = idResult;
-        }
-      } catch (error) {
-        console.warn('Error generating order ID:', error);
-        // Ultimate fallback with UUID-like suffix
-        const maxIdNum = orders.reduce((max, order) => {
-          const num = parseInt(order.id.replace('ORD', ''), 10);
-          return num > max ? num : max;
-        }, 0);
-        const randomSuffix = Math.random().toString(36).substr(2, 4).toUpperCase();
-        newOrderId = `ORD${(maxIdNum + 1).toString().padStart(3, '0')}_${randomSuffix}`;
-      }
-
-      // compute cost amount from products' costPrice * qty (for inventory cost tracking)
-      const costAmount = newOrderItems.reduce((sum, item) => {
-        const prod = products.find(p => p.id === item.productId);
-        const cp = prod && typeof prod.costPrice === 'number' ? prod.costPrice : 0;
-        return sum + (cp * (item.quantity || 0));
+      const maxIdNum = orders.reduce((max, order) => {
+        const num = parseInt(order.id.replace('ORD', ''), 10);
+        return num > max ? num : max;
       }, 0);
 
       const newOrder = {
-        id: newOrderId,
+        id: `ORD${(maxIdNum + 1).toString().padStart(3, '0')}`,
         customerid: customer.id,
         customername: customer.name,
         assigneduserid: currentUser?.id ?? '',
         orderitems: JSON.stringify(newOrderItems),
         backordereditems: JSON.stringify(newBackorderedItems),
-        method: '',
+        method: orderMethod || '',
         expecteddeliverydate: expectedDeliveryDate || null,
-        deliveryaddress: deliveryAddress || null,
         orderdate: expectedDeliveryDate || new Date().toISOString().slice(0, 10),
-        created_at: new Date().toISOString(), // Add creation timestamp with proper timezone
         totalamount: total,
-        costamount: costAmount,
         status: OrderStatus.Pending,
         notes: orderNotes || '',
         chequebalance: 0,
         creditbalance: 0,
       };
       
-      // Try inserting with costamount and created_at; if the DB doesn't have the columns yet, retry without them
-      let insertPayload: any = { ...newOrder };
-      try {
-        // Log the payload so we can inspect what is being POSTed to Supabase
-        console.log('Inserting order payload to Supabase:', insertPayload);
-
-        // Use .select('*') to get the representation back and surface more detailed errors
-        const { data: insertData, error } = await supabase.from('orders').insert([insertPayload]).select('*');
-        console.log('Supabase insert response:', { insertData, error });
-
-        if (error) {
-          // Provide richer debug info to the developer
-          console.error('Supabase insert error details:', {
-            message: error.message,
-            details: (error as any).details,
-            hint: (error as any).hint,
-            code: (error as any).code,
-          });
-
-          const msg = (error.message || '').toLowerCase();
-          if (msg.includes("could not find the 'created_at' column") || msg.includes('created_at')) {
-            // Retry without created_at
-            const payloadNoCreatedAt = ((({ created_at, ...rest }) => rest)(insertPayload));
-            console.log('Retrying insert without created_at:', payloadNoCreatedAt);
-            const { data: retryData, error: retryError } = await supabase.from('orders').insert([payloadNoCreatedAt]).select('*');
-            console.log('Supabase retry response:', { retryData, retryError });
-            if (retryError) {
-              const retryMsg = (retryError.message || '').toLowerCase();
-              if (retryMsg.includes('costamount')) {
-                // Both created_at and costamount missing
-                const payloadMinimal = ((({ created_at, costamount, ...rest }) => rest)(insertPayload));
-                console.log('Retrying insert without created_at and costamount:', payloadMinimal);
-                const { data: finalData, error: finalError } = await supabase.from('orders').insert([payloadMinimal]).select('*');
-                if (finalError) {
-                  alert('Error adding order - Database migration required: ' + finalError.message + '\n\nPlease run the database migration SQL.');
-                  return;
-                }
-              } else {
-                alert('Error adding order after created_at retry: ' + retryError.message + '\n\nSee console for details.');
-                return;
-              }
-            }
-          } else if (msg.includes("could not find the 'costamount' column") || msg.includes('costamount')) {
-            // Retry without costamount
-            const payloadNoCost = ((({ costamount, ...rest }) => rest)(insertPayload));
-            console.log('Retrying insert without costamount:', payloadNoCost);
-            const { data: retryData, error: retryError } = await supabase.from('orders').insert([payloadNoCost]).select('*');
-            console.log('Supabase retry response:', { retryData, retryError });
-            if (retryError) {
-              const retryMsg = (retryError.message || '').toLowerCase();
-              if (retryMsg.includes('created_at')) {
-                // Both costamount and created_at missing
-                const payloadMinimal = ((({ costamount, created_at, ...rest }) => rest)(insertPayload));
-                console.log('Retrying insert without costamount and created_at:', payloadMinimal);
-                const { data: finalData, error: finalError } = await supabase.from('orders').insert([payloadMinimal]).select('*');
-                if (finalError) {
-                  alert('Error adding order - Database migration required: ' + finalError.message + '\n\nPlease run the database migration SQL.');
-                  return;
-                }
-              } else {
-                alert('Error adding order after costamount retry: ' + retryError.message + '\n\nSee console for details.');
-                return;
-              }
-            }
-          } else if (msg.includes("could not find the 'deliveryaddress' column") || msg.includes('deliveryaddress')) {
-            // Retry without deliveryaddress
-            const payloadNoDelivery = ((({ deliveryaddress, ...rest }) => rest)(insertPayload));
-            console.log('Retrying insert without deliveryaddress:', payloadNoDelivery);
-            const { data: retryData, error: retryError } = await supabase.from('orders').insert([payloadNoDelivery]).select('*');
-            console.log('Supabase retry response:', { retryData, retryError });
-            if (retryError) {
-              // Check if other columns are missing
-              const retryMsg = (retryError.message || '').toLowerCase();
-              if (retryMsg.includes('costamount') || retryMsg.includes('created_at')) {
-                const payloadMinimal = ((({ costamount, deliveryaddress, created_at, ...rest }) => rest)(insertPayload));
-                console.log('Retrying insert without costamount, deliveryaddress, and created_at:', payloadMinimal);
-                const { data: finalData, error: finalError } = await supabase.from('orders').insert([payloadMinimal]).select('*');
-                if (finalError) {
-                  alert('Error adding order - Database migration required: ' + finalError.message + '\n\nPlease run the database migration SQL.');
-                  return;
-                }
-              } else {
-                alert('Error adding order after delivery retry: ' + retryError.message + '\n\nSee console for details.');
-                return;
-              }
-            }
-          } else {
-            alert('Error adding order: ' + error.message + '\n\nSee console for details.');
-            return;
-          }
-        }
-      } catch (err) {
-        console.error('Unexpected insert exception:', err);
-        alert('Unexpected error adding order. Check console for details.');
+      const { error } = await supabase.from('orders').insert([newOrder]);
+      if (error) {
+        alert('Error adding order: ' + error.message);
         return;
       }
       
@@ -998,59 +686,19 @@ export const Orders: React.FC = () => {
         assigneduserid: currentOrder.assigneduserid ?? '',
         orderitems: JSON.stringify(newOrderItems),
         backordereditems: JSON.stringify(newBackorderedItems),
-        method: '',
+        method: orderMethod || '',
         expecteddeliverydate: expectedDeliveryDate || null,
-        deliveryaddress: deliveryAddress || null,
         orderdate: expectedDeliveryDate || currentOrder.orderdate || new Date().toISOString().slice(0, 10),
         totalamount: total,
-          // update costamount when editing
-          costamount: newOrderItems.reduce((sum, item) => {
-            const prod = products.find(p => p.id === item.productId);
-            const cp = prod && typeof prod.costPrice === 'number' ? prod.costPrice : 0;
-            return sum + (cp * (item.quantity || 0));
-          }, 0),
         status: currentOrder.status ?? OrderStatus.Pending,
         notes: orderNotes || '',
         chequebalance: currentOrder.chequeBalance || 0,
         creditbalance: currentOrder.creditBalance || 0,
       };
       
-      try {
-        const { error } = await supabase.from('orders').update(updatedOrder).eq('id', currentOrder.id);
-        if (error) {
-          const msg = (error.message || '').toLowerCase();
-          if (msg.includes("could not find the 'costamount' column") || msg.includes('costamount')) {
-            // Retry without costamount
-            const { error: retryError } = await supabase.from('orders').update(((({ costamount, ...rest }) => rest)(updatedOrder))).eq('id', currentOrder.id);
-            if (retryError) {
-              alert('Error updating order after retry: ' + retryError.message);
-              return;
-            }
-          } else if (msg.includes("could not find the 'deliveryaddress' column") || msg.includes('deliveryaddress')) {
-            // Retry without deliveryaddress
-            const { error: retryError } = await supabase.from('orders').update(((({ deliveryaddress, ...rest }) => rest)(updatedOrder))).eq('id', currentOrder.id);
-            if (retryError) {
-              const retryMsg = (retryError.message || '').toLowerCase();
-              if (retryMsg.includes('costamount')) {
-                // Both columns missing - retry without both
-                const { error: finalError } = await supabase.from('orders').update(((({ costamount, deliveryaddress, ...rest }) => rest)(updatedOrder))).eq('id', currentOrder.id);
-                if (finalError) {
-                  alert('Error updating order - Database migration required: ' + finalError.message);
-                  return;
-                }
-              } else {
-                alert('Error updating order after delivery retry: ' + retryError.message);
-                return;
-              }
-            }
-          } else {
-            alert('Error updating order: ' + error.message);
-            return;
-          }
-        }
-      } catch (err) {
-        console.error('Unexpected update error:', err);
-        alert('Unexpected error updating order. Check console for details.');
+      const { error } = await supabase.from('orders').update(updatedOrder).eq('id', currentOrder.id);
+      if (error) {
+        alert('Error updating order: ' + error.message);
         return;
       }
       
@@ -1067,19 +715,7 @@ export const Orders: React.FC = () => {
 };
   
   const handleDeleteOrder = async () => {
-    if (!orderToDelete || !currentUser?.email) return;
-    
-    // Require password confirmation for delete
-    const confirmed = await confirmSecureDelete(
-      orderToDelete.id, 
-      'Order', 
-      currentUser.email
-    );
-    
-    if (!confirmed) {
-      closeDeleteModal();
-      return;
-    }
+    if (!orderToDelete) return;
     
     try {
       const { error } = await supabase.from('orders').delete().eq('id', orderToDelete.id);
@@ -1137,7 +773,8 @@ export const Orders: React.FC = () => {
     }
     
     const newTotal = updatedOrder.orderItems.reduce((sum: number, item: OrderItem) => {
-        const subtotal = item.price * item.quantity;
+        const discount = item.discount || 0;
+        const subtotal = item.price * item.quantity * (1 - discount / 100);
         return sum + subtotal;
     }, 0);
     updatedOrder.total = newTotal;
@@ -1239,19 +876,19 @@ export const Orders: React.FC = () => {
 
 
 
-  const handleConfirmFinalize = async (orderToProcess?: Order): Promise<boolean> => {
+  const handleConfirmFinalize = async (orderToProcess?: Order) => {
   const targetOrder = orderToProcess || orderToFinalize;
-  if (!targetOrder) return false;
+  if (!targetOrder) return;
   // Prevent double delivery logic
   if (targetOrder.status === OrderStatus.Delivered) {
     // Already delivered, skip all allocation/stock logic
-    return true;
+    return;
   }
   // Integrity check
   if (!targetOrder || !targetOrder.orderItems || targetOrder.orderItems.length === 0) {
     alert("Cannot finalize an order with no items.");
     if (!orderToProcess) setOrderToFinalize(null);
-    return false;
+    return;
   }
   // Check stock levels before proceeding
   let stockSufficient = true;
@@ -1265,7 +902,7 @@ export const Orders: React.FC = () => {
   }
   if (!stockSufficient) {
     if (!orderToProcess) setOrderToFinalize(null);
-    return false; // Abort the finalization
+    return; // Abort the finalization
   }
   // --- Update sold column in orders table ---
   const soldQty = targetOrder.orderItems.reduce((sum, i) => sum + i.quantity, 0);
@@ -1333,7 +970,6 @@ export const Orders: React.FC = () => {
     // 2. Update order status
     const updatedOrder: Order = { ...targetOrder, status: OrderStatus.Delivered };
     // End of handleConfirmFinalize function
-    return true;
   }
   
   const [billLoading, setBillLoading] = useState(false);
@@ -1359,12 +995,7 @@ export const Orders: React.FC = () => {
         return;
       }
       try {
-        const success = await handleConfirmFinalize(viewingOrder); // This will update status to Delivered and reduce stock/allocation
-        if (!success) {
-          // Stock validation failed, don't print bill and keep status as pending
-          setBillLoading(false);
-          return;
-        }
+        await handleConfirmFinalize(viewingOrder); // This will update status to Delivered and reduce stock/allocation
         // Update viewingOrder status in UI immediately for live sync
         if (setViewingOrder) setViewingOrder({ ...viewingOrder, status: OrderStatus.Delivered });
         // Also update the order in the orders list if present
@@ -1482,8 +1113,7 @@ export const Orders: React.FC = () => {
         <div class="header">
           <div class="company-info">
             <h1>${COMPANY_DETAILS.name}</h1>
-            <p>A9 Road, Kanthaswamy Kovil, Kilinochchi,</p>
-            <p>Sri Lanka.</p>
+            <p>${COMPANY_DETAILS.address}</p>
             <p>${COMPANY_DETAILS.email}</p>
             <p>${COMPANY_DETAILS.phone}</p>
           </div>
@@ -1509,7 +1139,7 @@ export const Orders: React.FC = () => {
           <tbody>
             ${(viewingOrder.orderItems ?? []).map(item => {
               const product = products.find(p => p.id === item.productId);
-              const subtotal = item.price * item.quantity;
+              const subtotal = item.price * item.quantity * (1 - (item.discount || 0) / 100);
               return `
                 <tr>
                   <td>${product?.name || 'Unknown'}</td>
@@ -1523,14 +1153,13 @@ export const Orders: React.FC = () => {
         </table>
 
         <div class="total-section">
-          <div><span>Invoice Total:</span><span>${formatCurrency(viewingOrder.total || 0, currency)}</span></div>
           <div><span>Total Items:</span><span>${viewingOrder.orderItems?.reduce((sum, item) => sum + item.quantity, 0) ?? 0}</span></div>
           <div><span>Return Amount:</span><span>${formatCurrency(viewingOrder.returnAmount || 0, currency)}</span></div>
           <div><span>Paid:</span><span>${formatCurrency(editableAmountPaid, currency)}</span></div>
-          <div><span>Cheque:</span><span>${formatBalanceAmount(editableChequeBalance, currency)}</span></div>
-          <div><span>Credit:</span><span>${formatBalanceAmount(editableCreditBalance, currency)}</span></div>
+          <div><span>Cheque:</span><span>${formatCurrency(editableChequeBalance, currency)}</span></div>
+          <div><span>Credit:</span><span>${formatCurrency(editableCreditBalance, currency)}</span></div>
           <br/>
-          <div class="grand-total"><span>Balance Due:</span><span>${formatBalanceAmount(editableChequeBalance + editableCreditBalance, currency)}</span></div>
+          <div class="grand-total"><span>Balance Due:</span><span>${formatCurrency(editableChequeBalance + editableCreditBalance, currency)}</span></div>
         </div>
 
         <div class="thank-you">
@@ -1550,8 +1179,7 @@ export const Orders: React.FC = () => {
       filename: `Invoice-${viewingOrder.id}.pdf`,
       image: { type: "jpeg" as const, quality: 1 },
       html2canvas: { scale: 2 },
-      // Cast format to a fixed tuple to satisfy TypeScript definitions
-      jsPDF: { unit: "mm", format: [80, 200] as [number, number], orientation: "portrait" as const }
+      jsPDF: { unit: "mm", format: [80, 200], orientation: "portrait" as const }
     };
 
     html2pdf().set(options).from(billHTML).save();
@@ -1582,34 +1210,31 @@ export const Orders: React.FC = () => {
         }
       `}</style>
 
-      <div className="p-3 sm:p-4 lg:p-6 space-y-6 sm:space-y-8 no-print">
-        <div className="flex flex-col sm:flex-row gap-4 sm:gap-0 sm:justify-between sm:items-center">
-          <h1 className="text-2xl sm:text-3xl font-bold text-slate-800 dark:text-slate-100">Orders</h1>
-          <div className="flex flex-wrap gap-2 sm:gap-3">
+      <div className="p-4 sm:p-6 lg:p-8 space-y-8 no-print">
+        <div className="flex justify-between items-center">
+          <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-100">Orders</h1>
+          <div className="flex gap-2">
             {/* Export Buttons */}
             <button
               onClick={() => exportOrders(filteredOrders, 'csv')}
-              className="px-3 sm:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm font-medium"
+              className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
               title="Export as CSV"
             >
-              <span className="hidden sm:inline">📊 CSV</span>
-              <span className="sm:hidden">CSV</span>
+              📊 CSV
             </button>
             <button
               onClick={() => exportOrders(filteredOrders, 'xlsx')}
-              className="px-3 sm:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm font-medium"
+              className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
               title="Export as Excel"
             >
-              <span className="hidden sm:inline">📋 Excel</span>
-              <span className="sm:hidden">Excel</span>
+              📋 Excel
             </button>
             {canEdit && (
               <button
                 onClick={openCreateModal}
-                className="px-4 sm:px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm sm:text-base font-medium"
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
               >
-                <span className="hidden sm:inline">+ New Order</span>
-                <span className="sm:hidden">+ Order</span>
+                New Order
               </button>
             )}
           </div>
@@ -1621,81 +1246,58 @@ export const Orders: React.FC = () => {
             <CardDescription>
                 {isManagerView ? 'View and manage all customer orders.' : 'View and manage orders assigned to you.'}
             </CardDescription>
-            <div className="pt-4 space-y-4">
-              {/* Search - Full width on mobile */}
-              <div>
-                <input
-                  type="text"
-                  placeholder="Search by Order ID or Customer..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full px-3 sm:px-4 py-2.5 sm:py-2 text-sm sm:text-base border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              
-              {/* Filter dropdowns - responsive grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-3 sm:gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">Status</label>
-                  <select
-                      value={statusFilter}
-                      onChange={(e) => setStatusFilter(e.target.value as OrderStatus | 'all')}
-                      className="w-full px-3 sm:px-4 py-2.5 sm:py-2 text-sm sm:text-base border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                      <option value="all">All Statuses</option>
-                      <option value={OrderStatus.Pending}>Pending</option>
-                      <option value={OrderStatus.Delivered}>Delivered</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">Time Range</label>
-                  <select
-                      value={dateRangeFilter}
-                      onChange={(e) => {
-                          setDateRangeFilter(e.target.value as 'today' | 'this_week' | 'this_month' | 'all');
-                          setDeliveryDateFilter(''); // Clear specific date when range is selected
+            <div className="pt-4 flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4">
+              <input
+                type="text"
+                placeholder="Search by Order ID or Customer..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full max-w-sm px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value as OrderStatus | 'all')}
+                  className="px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                  <option value="all">All Statuses</option>
+                  <option value={OrderStatus.Pending}>Pending</option>
+                  <option value={OrderStatus.Delivered}>Delivered</option>
+              </select>
+              <select
+                  value={dateRangeFilter}
+                  onChange={(e) => {
+                      setDateRangeFilter(e.target.value as 'today' | 'this_week' | 'this_month' | 'all');
+                      setDeliveryDateFilter(''); // Clear specific date when range is selected
+                  }}
+                  className="px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                  <option value="all">All Delivery Dates</option>
+                  <option value="today">Today's Deliveries</option>
+                  <option value="this_week">This Week</option>
+                  <option value="this_month">This Month</option>
+              </select>
+              <input
+                  type="date"
+                  value={deliveryDateFilter}
+                  onChange={(e) => {
+                      setDeliveryDateFilter(e.target.value);
+                      setDateRangeFilter('all'); // Clear range when specific date is selected
+                  }}
+                  className="px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  title="Filter by specific delivery date"
+              />
+              {(deliveryDateFilter || dateRangeFilter !== 'all') && (
+                  <button
+                      onClick={() => {
+                          setDeliveryDateFilter('');
+                          setDateRangeFilter('all');
                       }}
-                      className="w-full px-3 sm:px-4 py-2.5 sm:py-2 text-sm sm:text-base border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="px-3 py-2 text-sm bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50 rounded-lg transition-colors"
+                      title="Clear date filters"
                   >
-                      <option value="all">All Delivery Dates</option>
-                      <option value="today">Today's Deliveries</option>
-                      <option value="this_week">This Week</option>
-                      <option value="this_month">This Month</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-            
-            <div className="pt-3 flex flex-col sm:flex-row gap-3 sm:gap-4 sm:items-end">
-              <div className="flex-1 max-w-xs">
-                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">Specific Date</label>
-                <input
-                    type="date"
-                    value={deliveryDateFilter}
-                    onChange={(e) => {
-                        setDeliveryDateFilter(e.target.value);
-                        setDateRangeFilter('all'); // Clear range when specific date is selected
-                    }}
-                    className="w-full px-3 sm:px-4 py-2.5 sm:py-2 text-sm sm:text-base border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    title="Filter by specific delivery date"
-                />
-              </div>
-              
-              <div className="flex gap-2 sm:gap-3">
-                {(deliveryDateFilter || dateRangeFilter !== 'all') && (
-                    <button
-                        onClick={() => {
-                            setDeliveryDateFilter('');
-                            setDateRangeFilter('all');
-                        }}
-                        className="px-3 sm:px-4 py-2.5 sm:py-2 text-sm font-medium bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50 rounded-lg transition-colors"
-                        title="Clear date filters"
-                    >
-                        <span className="hidden sm:inline">Clear Filters</span>
-                        <span className="sm:hidden">Clear</span>
-                    </button>
-                )}
-              </div>
+                      Clear Date
+                  </button>
+              )}
             </div>
           </CardHeader>
           <CardContent>
@@ -1704,237 +1306,120 @@ export const Orders: React.FC = () => {
                 const ordersList = (supplierOrders ?? []) as Order[];
                 return (
                   <div key={supplierName}>
-                    <div className="flex items-center space-x-3 mb-6">
+                    <div className="flex items-center space-x-3 mb-4">
                       <h2 className="text-xl font-semibold text-slate-700 dark:text-slate-300">{supplierName}</h2>
                       <Badge variant="default">{ordersList.length} {ordersList.length === 1 ? 'Order' : 'Orders'}</Badge>
                     </div>
-                    
-                    {/* Compact card-based layout */}
-                    <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-                      {ordersList.map((order, orderIndex) => {
-                        const assignedUser = users.find(u => u.id === order.assignedUserId);
-                        const outstandingAmount = ((typeof order.chequeBalance === 'number' && !isNaN(order.chequeBalance) ? order.chequeBalance : 0) + (typeof order.creditBalance === 'number' && !isNaN(order.creditBalance) ? order.creditBalance : 0));
-                        
-                        // Enhanced colorful card styling based on status and outstanding amount
-                        const getCardStyle = () => {
-                          if (order.status === 'Pending') {
-                            return {
-                              border: 'bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-50 dark:from-amber-900/30 dark:via-orange-900/30 dark:to-yellow-900/30 border-l-4 border-amber-500 shadow-lg shadow-amber-100/50 dark:shadow-amber-900/20',
-                              text: 'text-amber-800 dark:text-amber-300',
-                              badge: 'bg-gradient-to-r from-amber-100 to-orange-100 text-amber-800 border border-amber-300 dark:from-amber-900/40 dark:to-orange-900/40 dark:text-amber-300 dark:border-amber-600 shadow-sm'
-                            };
-                          } else if (order.status === 'Delivered') {
-                            if (outstandingAmount === 0) {
-                              return {
-                                border: 'bg-gradient-to-br from-emerald-50 via-green-50 to-teal-50 dark:from-emerald-900/30 dark:via-green-900/30 dark:to-teal-900/30 border-l-4 border-emerald-500 shadow-lg shadow-emerald-100/50 dark:shadow-emerald-900/20',
-                                text: 'text-emerald-800 dark:text-emerald-300',
-                                badge: 'bg-gradient-to-r from-emerald-100 to-green-100 text-emerald-800 border border-emerald-300 dark:from-emerald-900/40 dark:to-green-900/40 dark:text-emerald-300 dark:border-emerald-600 shadow-sm'
-                              };
-                            } else {
-                              return {
-                                border: 'bg-gradient-to-br from-rose-50 via-red-50 to-pink-50 dark:from-rose-900/30 dark:via-red-900/30 dark:to-pink-900/30 border-l-4 border-rose-500 shadow-lg shadow-rose-100/50 dark:shadow-rose-900/20',
-                                text: 'text-rose-800 dark:text-rose-300',
-                                badge: 'bg-gradient-to-r from-rose-100 to-red-100 text-rose-800 border border-rose-300 dark:from-rose-900/40 dark:to-red-900/40 dark:text-rose-300 dark:border-rose-600 shadow-sm'
-                              };
-                            }
-                          }
-                          return {
-                            border: 'bg-gradient-to-br from-slate-50 via-gray-50 to-zinc-50 dark:from-slate-900/30 dark:via-gray-900/30 dark:to-zinc-900/30 border-l-4 border-slate-400 shadow-lg shadow-slate-100/50 dark:shadow-slate-900/20',
-                            text: 'text-slate-800 dark:text-slate-200',
-                            badge: 'bg-gradient-to-r from-slate-100 to-gray-100 text-slate-800 border border-slate-300 dark:from-slate-900/40 dark:to-gray-900/40 dark:text-slate-300 dark:border-slate-600 shadow-sm'
-                          };
-                        };
-                        
-                        const cardStyle = getCardStyle();
-                        
-                        return (
-                          <Card key={order.id} className={`${cardStyle.border} hover:shadow-xl hover:-translate-y-1 hover:scale-[1.02] transition-all duration-300 cursor-pointer border-0 overflow-hidden relative`}>
-                            <div className="absolute inset-0 bg-gradient-to-br from-white/60 via-transparent to-transparent dark:from-black/20 dark:via-transparent dark:to-transparent pointer-events-none"></div>
-                            <CardContent className="p-3 relative z-10">
-                              {/* Order Header */}
-                              <div className="flex justify-between items-start mb-2">
-                                <div>
-                                  <h3 className={`font-bold text-sm ${cardStyle.text} drop-shadow-sm`}>{order.id}</h3>
-                                  <p className={`text-xs flex items-center gap-1 mt-0.5 font-semibold ${cardStyle.text.replace('800', '700').replace('300', '400')}`}>
-                                    <span className="font-bold truncate">{order.customerName}</span>
-                                  </p>
-                                  {(() => {
-                                    const customer = customers.find(c => c.id === order.customerId);
-                                    if (customer?.phone) {
-                                      return (
-                                        <a 
-                                          href={`tel:${customer.phone}`}
-                                          className="inline-flex items-center gap-1 px-2 py-1 mt-0.5 text-xs font-medium text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/30 rounded transition-colors cursor-pointer"
-                                          title={`Call ${customer.name}`}
-                                          onClick={(e) => e.stopPropagation()}
-                                        >
-                                          📞 {formatPhoneNumber(customer.phone)}
-                                        </a>
-                                      );
-                                    }
-                                    return null;
-                                  })()}
-                                  {(() => {
-                                    const customer = customers.find(c => c.id === order.customerId);
-                                    if (customer?.route) {
-                                      return (
-                                        <div className="text-xs text-orange-600 dark:text-orange-400 flex items-center gap-1 mt-0.5">
-                                          <span>🚛</span>
-                                          <span className="font-medium">Route: {customer.route}</span>
-                                        </div>
-                                      );
-                                    }
-                                    return null;
-                                  })()}
-                                </div>
-                                <Badge variant={getStatusBadgeVariant(order.status)} className={`${cardStyle.badge} text-xs font-bold whitespace-nowrap drop-shadow-sm`}>
-                                  {order.status}
-                                </Badge>
-                              </div>
-                              
-                              {/* Order Details */}
-                              <div className="space-y-1.5">
-                                {/* Date */}
-                                <div className="text-xs text-slate-600 dark:text-slate-400">
-                                  {order.date
-                                    ? (() => {
-                                        const d = new Date(order.date);
-                                        return isNaN(d.getTime())
-                                          ? order.date
-                                          : d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
-                                      })()
-                                    : 'N/A'
-                                  }
-                                </div>
-
-                                {/* Total Amount */}
-                                <div className={`text-lg font-bold drop-shadow-sm ${cardStyle.text}`}>
-                                  {formatCurrency(order.total, currency)}
-                                </div>
-                                
-                                {/* Outstanding Amount - Always show */}
-                                <div className={`text-sm font-bold ${cardStyle.text} drop-shadow-sm`}>
-                                  Outstanding: {formatCurrency(outstandingAmount, currency)}
-                                </div>
-                                
-                                {/* Items Count */}
-                                <div className="text-xs text-slate-500 dark:text-slate-400">
-                                  {(order.orderItems || []).length} items
-                                </div>
-                                
-                                {/* Expected Delivery Date - Only if different from order date */}
-                                {order.expectedDeliveryDate && order.expectedDeliveryDate !== order.date && (
-                                  <div className="text-xs text-blue-600 dark:text-blue-400">
-                                    Expected: {new Date(order.expectedDeliveryDate).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' })}
-                                  </div>
-                                )}
-                                
-                                {/* Assigned User - Only show if exists and not empty */}
-                                {assignedUser && assignedUser.name && (
-                                  <div className="text-xs text-slate-500 dark:text-slate-400">
-                                    {assignedUser.name}
-                                  </div>
-                                )}
-
-                                {/* Payment details - show all balances including 0 */}
-                                <div className="text-xs text-orange-600 dark:text-orange-400">
-                                  Cheque: {formatBalanceAmount(order.chequeBalance || 0, currency)}
-                                </div>
-                                <div className="text-xs text-red-600 dark:text-red-400">
-                                  Credit: {formatBalanceAmount(order.creditBalance || 0, currency)}
-                                </div>
-
-
-
-
-
-                              </div>
-                              
-                              {/* Order Creation Date and Time */}
-                              <div className="mt-2 pt-2 border-t border-slate-200 dark:border-slate-600">
-                                <div className="flex justify-between items-center text-xs text-slate-500 dark:text-slate-400">
-                                  <span className="flex items-center gap-1">
-                                    📅 Created: {(() => {
-                                      // Use created_at if available, fallback to order date
-                                      const createdDate = order.created_at || order.date;
-                                      const d = new Date(createdDate);
-                                      return isNaN(d.getTime())
-                                        ? createdDate
-                                        : d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
-                                    })()}
-                                  </span>
-                                  <span className="flex items-center gap-1">
-                                    🕒 {(() => {
-                                      // Use created_at if available, fallback to order date
-                                      const createdDate = order.created_at || order.date;
-                                      const d = new Date(createdDate);
-                                      if (isNaN(d.getTime())) {
-                                        return 'N/A';
-                                      }
-                                      
-                                      // Format time in local timezone with AM/PM
-                                      const hours = d.getHours();
-                                      const minutes = d.getMinutes();
-                                      const ampm = hours >= 12 ? 'PM' : 'AM';
-                                      const displayHours = hours % 12 || 12;
-                                      const displayMinutes = minutes.toString().padStart(2, '0');
-                                      
-                                      return `${displayHours}:${displayMinutes} ${ampm}`;
-                                    })()}
-                                  </span>
-                                </div>
-                              </div>
-                              
-                              {/* Action Buttons */}
-                              <div className="flex gap-1.5 sm:gap-1 mt-2 pt-2 border-t border-slate-200 dark:border-slate-600">
-                                {/* Location Button */}
-                                {(() => {
-                                  const customer = customers.find(c => c.id === order.customerId);
-                                  if (customer?.location) {
-                                    return (
-                                      <button 
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          openOrderLocation(order, customers);
-                                        }} 
-                                        className="px-2 py-2 sm:py-1 text-xs font-medium text-green-600 hover:text-green-800 dark:text-green-400 dark:hover:text-green-300 bg-green-50 hover:bg-green-100 dark:bg-green-900/20 dark:hover:bg-green-900/30 rounded transition-colors min-h-[32px] sm:min-h-auto"
-                                        title={`Open ${customer.name}'s location`}
-                                      >
-                                        <span className="hidden sm:inline">📍 Location</span>
-                                        <span className="sm:hidden">📍</span>
-                                      </button>
-                                    );
-                                  }
-                                  return null;
-                                })()}
-                                <button 
-                                  onClick={() => openViewModal(order)} 
-                                  className="flex-1 px-2 py-2 sm:py-1 text-xs font-medium text-slate-600 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-300 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 rounded transition-colors min-h-[32px] sm:min-h-auto"
-                                >
-                                  View
-                                </button>
-                                {canEdit && (
-                                  <button 
-                                    onClick={() => openEditModal(order)} 
-                                    className="flex-1 px-2 py-2 sm:py-1 text-xs font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/20 dark:hover:bg-blue-900/30 rounded transition-colors min-h-[32px] sm:min-h-auto"
-                                  >
-                                    Edit
-                                  </button>
-                                )}
-                                {canDelete && (
-                                  <button 
-                                    onClick={() => openDeleteModal(order)} 
-                                    className="px-2 py-2 sm:py-1 text-xs font-medium text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/30 rounded transition-colors min-h-[32px] sm:min-h-auto"
-                                  >
-                                    <span className="hidden sm:inline">Delete</span>
-                                    <span className="sm:hidden">Del</span>
-                                  </button>
-                                )}
-                              </div>
-                            </CardContent>
-                          </Card>
-                        );
-                      })}
+                    <div className="overflow-x-auto border dark:border-slate-700 rounded-lg">
+                      <table className="w-full text-sm text-left text-slate-500 dark:text-slate-400">
+                        <thead className="text-xs text-slate-700 uppercase bg-slate-50 dark:bg-slate-700 dark:text-slate-400">
+                          <tr>
+                            <th scope="col" className="px-6 py-3 z-20 sticky left-0">Order ID</th>
+                            <th scope="col" className="px-6 py-3 z-20 sticky left-[112px]">Customer Name</th>
+                            {isManagerView && <th scope="col" className="px-6 py-3">Assigned To</th>}
+                            <th scope="col" className="px-6 py-3">Date</th>
+                            <th scope="col" className="px-6 py-3">Total</th>
+                            {isManagerView && <th scope="col" className="px-6 py-3">Cost Price</th>}
+                            <th scope="col" className="px-6 py-3">Items</th>
+                            <th scope="col" className="px-6 py-3">Status</th>
+                            {currentUser?.role !== UserRole.Driver && <th scope="col" className="px-6 py-3">Outstanding</th>}
+                            <th scope="col" className="px-6 py-3 z-20 sticky right-0">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {ordersList.map((order) => {
+                // Use DB columns: assigneduserid, totalamount, orderdate
+                              const assignedUser = users.find(u => u.id === order.assignedUserId);
+                let allocatedProductIds: string[] = [];
+                if (currentUser?.role === UserRole.Driver && driverAllocations.length > 0) {
+                  const todayStr = new Date().toISOString().slice(0, 10);
+                  console.log('DriverAllocations:', driverAllocations);
+                  console.log('CurrentUser:', currentUser);
+                  const allocation = driverAllocations.find((a: any) => {
+                    console.log('Checking allocation:', a);
+                    return a.driverId === currentUser.id && a.date === todayStr;
+                  });
+                  console.log('Matched allocation:', allocation);
+                  if (allocation) {
+                    allocatedProductIds = allocation.allocatedItems.map((i: any) => i.productId);
+                  }
+                }
+                return (
+                  <tr key={order.id} className="border-b dark:bg-slate-800 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600">
+                    <td className="px-6 py-4 font-medium text-slate-900 dark:text-white z-10 sticky left-0">{order.id}</td>
+                    <td className="px-6 py-4 z-10 sticky left-[112px]">{order.customerName}</td>
+                    {isManagerView && (
+                      <td className="px-6 py-4">
+                        {assignedUser ? (
+                          <div className="flex items-center space-x-2">
+                            {assignedUser.avatarUrl && <img src={assignedUser.avatarUrl} alt={assignedUser.name} className="w-6 h-6 rounded-full" />}
+                            <span className="text-xs">{assignedUser.name}</span>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-slate-400">N/A</span>
+                        )}
+                      </td>
+                    )}
+                    <td className="px-6 py-4">{
+                                        order.date
+                                          ? (() => {
+                                              const d = new Date(order.date);
+                                              return isNaN(d.getTime())
+                                                ? <span className="text-xs text-red-500">{order.date}</span>
+                                                : d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                                            })()
+                                          : 'N/A'
+                                      }</td>
+                    <td className="px-6 py-4">{typeof order.total === 'number' ? `LKR${order.total.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : 'LKR0'}</td>
+                    {isManagerView && (
+                      <td className="px-6 py-4">{
+                        (() => {
+                          if (!order.orderItems || !Array.isArray(order.orderItems)) return 'LKR0';
+                          const totalCost = order.orderItems.reduce((sum, item) => {
+                            const product = products.find(p => p.id === item.productId);
+                            return sum + ((product?.costPrice || 0) * (item.quantity || 0));
+                          }, 0);
+                          return `LKR${totalCost.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+                        })()
+                      }</td>
+                    )}
+                    <td className="px-6 py-4">
+                      <div className="flex items-center space-x-2">
+                        <span className="inline-block bg-blue-100 dark:bg-blue-700 px-2 py-1 rounded text-xs text-blue-800 dark:text-blue-200">
+                          {(order.orderItems ?? []).reduce((total, item) => total + item.quantity, 0)} items
+                        </span>
+                        <span className="text-xs text-slate-500 dark:text-slate-400">
+                          (View details to see items)
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <Badge variant={getStatusBadgeVariant(order.status)}>{order.status}</Badge>
+                    </td>
+                    {currentUser?.role !== UserRole.Driver && (
+                      <td className="px-6 py-4">
+                        <div>
+                          <span className="block text-xs text-slate-600">Cheque: <span className="font-bold">{typeof order.chequeBalance === 'number' && !isNaN(order.chequeBalance) ? `LKR${order.chequeBalance.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : 'LKR0.00'}</span></span>
+                          <span className="block text-xs text-slate-600">Credit: <span className="font-bold">{typeof order.creditBalance === 'number' && !isNaN(order.creditBalance) ? `LKR${order.creditBalance.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : 'LKR0.00'}</span></span>
+                          <span className="block text-xs text-blue-600">Return Amount: <span className="font-bold">{typeof order.returnAmount === 'number' && !isNaN(order.returnAmount) ? `LKR${order.returnAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : 'LKR0.00'}</span></span>
+                          <span className="block text-xs text-red-600">Outstanding: <span className="font-bold">{'LKR' + ((typeof order.chequeBalance === 'number' && !isNaN(order.chequeBalance) ? order.chequeBalance : 0) + (typeof order.creditBalance === 'number' && !isNaN(order.creditBalance) ? order.creditBalance : 0)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span></span>
+                        </div>
+                      </td>
+                    )}
+                    <td className="px-6 py-4 flex items-center space-x-3 z-10 sticky right-0">
+                    <button onClick={() => openViewModal(order)} className="font-medium text-slate-600 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-300">View</button>
+                    {canEdit && (
+                      <>
+                        <button onClick={() => openEditModal(order)} className="font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">Edit</button>
+                        {canDelete && <button onClick={() => openDeleteModal(order)} className="font-medium text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300">Delete</button>}
+                      </>
+                    )}
+                    </td>
+                  </tr>
+                              );
+                          })}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 );
@@ -1948,377 +1433,244 @@ export const Orders: React.FC = () => {
           </CardContent>
         </Card>
 
-        <Modal isOpen={modalState === 'create' || modalState === 'edit'} onClose={closeModal} title={modalState === 'create' ? '🛒 Create New Order' : `📝 Edit Order ${currentOrder?.id}`}>
-          <div className="flex flex-col h-[85vh] sm:h-[90vh] lg:h-[800px] max-h-[90vh] bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-slate-900 dark:to-slate-800">
-            {/* Compact Header Section */}
-            <div className="p-1 sm:p-2 border-b border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-800 flex-shrink-0">
-              {/* Date and Time Display */}
-              <div className="mb-2 p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg border border-blue-200 dark:border-blue-700">
-                <div className="flex justify-between items-center text-sm">
-                  <div className="flex items-center gap-2">
-                    <span className="text-blue-600 dark:text-blue-400">📅</span>
-                    <span className="font-medium text-slate-700 dark:text-slate-300">
-                      Order Date: {new Date().toLocaleDateString('en-GB', { 
-                        day: '2-digit', 
-                        month: '2-digit', 
-                        year: 'numeric' 
-                      })}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-blue-600 dark:text-blue-400">🕒</span>
-                    <span className="font-medium text-slate-700 dark:text-slate-300">
-                      Time: {new Date().toLocaleTimeString('en-GB', { 
-                        hour: '2-digit', 
-                        minute: '2-digit'
-                      })}
-                    </span>
-                  </div>
-                </div>
-              </div>
-              <div className="space-y-1">
-                {/* Ultra Compact Customer Selection */}
-                <div className="relative" ref={customerDropdownRef}>
-                  <label htmlFor="customer" className="block mb-0.5 text-xs font-medium text-slate-700 dark:text-slate-300">
-                    👤 Customer
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      id="customer"
-                      value={customerSearch}
-                      onChange={(e) => {
-                        setCustomerSearch(e.target.value);
-                        setIsCustomerDropdownOpen(e.target.value.length > 0);
-                      }}
-                      onFocus={() => setIsCustomerDropdownOpen(customerSearch.length > 0)}
-                      placeholder="Search customer..."
-                      className="bg-white border border-slate-300 text-slate-900 text-xs rounded focus:ring-1 focus:ring-blue-400 focus:border-blue-400 block w-full p-1.5 pr-6 dark:bg-slate-700 dark:border-slate-500 dark:placeholder-slate-400 dark:text-white"
-                    />
-                    <div className="absolute inset-y-0 right-0 flex items-center pr-2 sm:pr-4 pointer-events-none">
-                      <svg className="w-4 h-4 sm:w-5 sm:h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                      </svg>
-                    </div>
-                    
-                    {isCustomerDropdownOpen && customerSearch.length > 0 && (
-                      <div className="absolute z-50 w-full mt-2 bg-white/95 backdrop-blur-md border-2 border-blue-200 rounded-xl shadow-xl max-h-60 overflow-y-auto dark:bg-slate-700/95 dark:border-slate-500">
-                        {customers
-                          .filter(customer => 
-                            customer.name.toLowerCase().includes(customerSearch.toLowerCase()) ||
-                            customer.email?.toLowerCase().includes(customerSearch.toLowerCase()) ||
-                            customer.phone?.toLowerCase().includes(customerSearch.toLowerCase())
-                          )
-                          .map(customer => (
-                            <div
-                              key={customer.id}
-                              onClick={() => {
-                                setSelectedCustomer(customer.id);
-                                setCustomerSearch(customer.name);
-                                setIsCustomerDropdownOpen(false);
-                              }}
-                              className={`p-2 cursor-pointer hover:bg-blue-50 dark:hover:bg-slate-600 border-b border-blue-100 dark:border-slate-600 last:border-b-0 transition-all duration-150 ${
-                                selectedCustomer === customer.id ? 'bg-gradient-to-r from-blue-100 to-blue-50 dark:from-blue-900/40 dark:to-blue-800/30 border-l-4 border-l-blue-500' : ''
-                              }`}
-                            >
-                              <div className="font-medium text-sm text-slate-900 dark:text-white flex items-center gap-2">
-                                <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-                                {customer.name}
-                              </div>
-                              {customer.email && (
-                                <div className="text-xs text-slate-500 dark:text-slate-400">{customer.email}</div>
-                              )}
-                              {customer.phone && (
-                                <div className="text-xs text-slate-500 dark:text-slate-400">{customer.phone}</div>
-                              )}
-                            </div>
-                          ))
-                        }
-                        {customers.filter(customer => 
-                          customer.name.toLowerCase().includes(customerSearch.toLowerCase()) ||
-                          customer.email?.toLowerCase().includes(customerSearch.toLowerCase()) ||
-                          customer.phone?.toLowerCase().includes(customerSearch.toLowerCase())
-                        ).length === 0 && (
-                          <div className="p-3 text-sm text-slate-500 dark:text-slate-400 text-center">
-                            No customers found
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-                
-                {/* Ultra Compact Delivery Date Section */}
-                <div>
-                  <label htmlFor="deliveryDate" className="block mb-0.5 text-xs font-medium text-slate-700 dark:text-slate-300">
-                    📅 Delivery Date
-                  </label>
-                  <input
-                    type="date"
-                    id="deliveryDate"
-                    value={expectedDeliveryDate}
-                    onChange={(e) => setExpectedDeliveryDate(e.target.value)}
-                    className="bg-white border border-slate-300 text-slate-900 text-xs rounded focus:ring-1 focus:ring-blue-400 focus:border-blue-400 block w-full p-1.5 dark:bg-slate-700 dark:border-slate-500 dark:text-white"
-                  />
-                </div>
-
-                {/* Delivery Address Section */}
-                <div>
-                  <label htmlFor="deliveryAddress" className="block mb-0.5 text-xs font-medium text-slate-700 dark:text-slate-300">
-                    📍 Delivery Address
-                  </label>
-                  <div className="flex gap-1">
-                    <input
-                      type="text"
-                      id="deliveryAddress"
-                      value={deliveryAddress}
-                      onChange={(e) => setDeliveryAddress(e.target.value)}
-                      placeholder="Enter specific delivery address"
-                      className="bg-white border border-slate-300 text-slate-900 text-xs rounded focus:ring-1 focus:ring-blue-400 focus:border-blue-400 block w-full p-1.5 dark:bg-slate-700 dark:border-slate-500 dark:placeholder-slate-400 dark:text-white"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const customer = customers.find(c => c.id === selectedCustomer);
-                        if (customer) {
-                          setDeliveryAddress(customer.location);
-                        }
-                      }}
-                      className="px-2 py-1.5 text-xs bg-blue-100 hover:bg-blue-200 text-blue-600 rounded transition-colors dark:bg-blue-900 dark:text-blue-300 dark:hover:bg-blue-800 whitespace-nowrap"
-                      title="Use customer's address"
-                    >
-                      Use Default
-                    </button>
-                  </div>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                    Leave empty to use customer's default address
-                  </p>
-                </div>
-              </div>
-              
-              {/* Ultra Compact Products Search Section */}
-              <div>
-                <label className="block mb-0.5 text-xs font-medium text-slate-700 dark:text-slate-300">
-                  🛍️ Products
-                </label>
+        <Modal isOpen={modalState === 'create' || modalState === 'edit'} onClose={closeModal} title={modalState === 'create' ? 'Create New Order' : `Edit Order ${currentOrder?.id}`}>
+          <div className="p-6 space-y-6 max-h-[80vh] overflow-y-auto">
+            {/* Customer and Delivery Date Section */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="relative" ref={customerDropdownRef}>
+                <label htmlFor="customer" className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">Customer</label>
                 <div className="relative">
                   <input
                     type="text"
-                    placeholder="Search products..."
-                    value={productSearchTerm}
-                    onChange={(e) => setProductSearchTerm(e.target.value)}
-                    className="bg-white border border-slate-300 text-slate-900 text-xs rounded focus:ring-1 focus:ring-blue-400 focus:border-blue-400 block w-full p-1.5 pr-6 dark:bg-slate-700 dark:border-slate-500 dark:placeholder-slate-400 dark:text-white"
+                    id="customer"
+                    value={customerSearch}
+                    onChange={(e) => {
+                      setCustomerSearch(e.target.value);
+                      setIsCustomerDropdownOpen(true);
+                    }}
+                    onFocus={() => setIsCustomerDropdownOpen(true)}
+                    placeholder="Search and select customer..."
+                    className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 pr-10 dark:bg-slate-700 dark:border-slate-600 dark:placeholder-slate-400 dark:text-white"
                   />
-                  {productSearchTerm && (
-                    <button
-                      onClick={() => setProductSearchTerm('')}
-                      className="absolute right-4 top-1/2 transform -translate-y-1/2 text-red-400 hover:text-red-600 bg-red-50 hover:bg-red-100 rounded-full p-1 transition-all duration-200 dark:hover:text-red-300"
-                      title="Clear search"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
+                  <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                    <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                  </div>
+                  
+                  {isCustomerDropdownOpen && (
+                    <div className="absolute z-50 w-full mt-1 bg-white border border-slate-300 rounded-lg shadow-lg max-h-60 overflow-y-auto dark:bg-slate-700 dark:border-slate-600">
+                      {customers
+                        .filter(customer => 
+                          customer.name.toLowerCase().includes(customerSearch.toLowerCase()) ||
+                          customer.email?.toLowerCase().includes(customerSearch.toLowerCase()) ||
+                          customer.phone?.toLowerCase().includes(customerSearch.toLowerCase())
+                        )
+                        .map(customer => (
+                          <div
+                            key={customer.id}
+                            onClick={() => {
+                              setSelectedCustomer(customer.id);
+                              setCustomerSearch(customer.name);
+                              setIsCustomerDropdownOpen(false);
+                            }}
+                            className={`p-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-600 border-b border-slate-200 dark:border-slate-600 last:border-b-0 ${
+                              selectedCustomer === customer.id ? 'bg-blue-50 dark:bg-blue-900/30' : ''
+                            }`}
+                          >
+                            <div className="font-medium text-slate-900 dark:text-white">{customer.name}</div>
+                            {customer.email && (
+                              <div className="text-sm text-slate-500 dark:text-slate-400">{customer.email}</div>
+                            )}
+                            {customer.phone && (
+                              <div className="text-sm text-slate-500 dark:text-slate-400">{customer.phone}</div>
+                            )}
+                          </div>
+                        ))
+                      }
+                      {customers.filter(customer => 
+                        customer.name.toLowerCase().includes(customerSearch.toLowerCase()) ||
+                        customer.email?.toLowerCase().includes(customerSearch.toLowerCase()) ||
+                        customer.phone?.toLowerCase().includes(customerSearch.toLowerCase())
+                      ).length === 0 && (
+                        <div className="p-3 text-sm text-slate-500 dark:text-slate-400 text-center">
+                          No customers found
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>
-            </div>
-
-            {/* Ultra Compact Products Section */}
-            <div className="flex-1 overflow-y-auto min-h-0">
-              {/* Sticky Column Headers */}
-              <div className="sticky top-0 z-10 bg-slate-100 dark:bg-slate-800 border-b border-slate-300 dark:border-slate-600 px-1 py-1">
-                <div className="flex items-center gap-1 text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  <div className="w-4"></div> {/* Space for image */}
-                  <div className="flex-1 min-w-0 mr-0.5">Product</div>
-                  <div className="flex items-center gap-0.5">
-                    <div className="w-16 text-center">LKR</div>
-                    <div className="w-8 text-center">Qty</div>
-                    <div className="w-8 text-center">Free</div>
-                  </div>
-                  <div className="px-2 text-center">Hold</div>
-                </div>
+              <div>
+                  <label htmlFor="deliveryDate" className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">Expected Delivery Date</label>
+                  <input
+                      type="date"
+                      id="deliveryDate"
+                      value={expectedDeliveryDate}
+                      onChange={(e) => setExpectedDeliveryDate(e.target.value)}
+                      className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:placeholder-slate-400 dark:text-white"
+                  />
               </div>
-              <div className="p-1">
-                <div className="space-y-0">
-                  {availableProductsForOrder.length === 0 ? (
-                    <div className="text-center py-4 text-slate-500 dark:text-slate-400">
-                      <div className="text-2xl mb-1">📦</div>
-                      <p className="text-sm font-medium">{productSearchTerm.trim() ? 'No products found' : 'No products available'}</p>
-                    </div>
-                  ) : (
-                    availableProductsForOrder
-                      .sort((a, b) => {
-                        // First priority: Show products with quantity > 0 first (at top)
-                        const aHasQuantity = (orderItems[a.id] || 0) > 0;
-                        const bHasQuantity = (orderItems[b.id] || 0) > 0;
-                        
-                        if (aHasQuantity && !bHasQuantity) return -1;
-                        if (!aHasQuantity && bHasQuantity) return 1;
-                        
-                        // Second priority: Show in-stock products before out-of-stock products
-                        const aIsOutOfStock = getEffectiveStock(a) === 0;
-                        const bIsOutOfStock = getEffectiveStock(b) === 0;
-                        
-                        if (!aIsOutOfStock && bIsOutOfStock) return -1;
-                        if (aIsOutOfStock && !bIsOutOfStock) return 1;
-                        
-                        // Within each group, sort by name
-                        return a.name.localeCompare(b.name);
-                      })
-                      .map(product => {
-                    const isOutOfStock = getEffectiveStock(product) === 0;
-                    const isHeld = heldItems.has(product.id);
-                    const isUnavailable = isHeld || isOutOfStock;
-                    const hasQuantity = (orderItems[product.id] || 0) > 0;
-                    
-                    return (
-                      <div key={product.id} className={`p-0.5 rounded border ${
-                        hasQuantity
-                          ? 'bg-green-100 dark:bg-green-900/30 border-green-400 shadow-sm'
-                          : isHeld 
-                            ? 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-300' 
-                            : isOutOfStock 
-                              ? 'bg-red-50 dark:bg-red-900/20 border-red-300 opacity-70' 
-                              : 'bg-white dark:bg-slate-700 border-slate-200 dark:border-slate-500'
-                      }`}>
-                        {/* Super Compact Layout - Single Row */}
-                        <div className="flex items-center gap-1">
-                          <img src={product.imageUrl} alt={product.name} className="w-4 h-4 rounded object-cover flex-shrink-0" />
-                          <div className="flex-1 min-w-0 mr-0.5">
-                            <h4 className="font-medium text-xs text-slate-800 dark:text-white truncate leading-none">{product.name}</h4>
-                            <p className="text-xs text-slate-500 dark:text-slate-400 leading-none">
-                              {isOutOfStock ? (
-                                <span className="text-red-600 text-xs">OOS</span>
-                              ) : (
-                                <span className="text-green-600 text-xs">{getEffectiveStock(product)}</span>
-                              )}
-                            </p>
-                          </div>
-                          
-                          {/* Super Compact Controls - Inline */}
-                          <div className="flex items-center gap-0.5">
-                            <div className="relative w-16">
-                              <span className="absolute left-0.5 top-1/2 -translate-y-1/2 text-blue-500 text-xs">{currency}</span>
-                              <input
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                value={orderItemPrices[product.id] !== undefined ? orderItemPrices[product.id] : product.price}
-                                onChange={(e) => {
-                                  const value = e.target.value;
-                                  handlePriceChange(product.id, value);
-                                }}
-                                onFocus={(e) => e.target.select()}
-                                placeholder={product.price.toString()}
-                                className="w-full py-0.5 pl-4 pr-0.5 border border-slate-300 rounded text-xs text-center focus:ring-1 focus:ring-blue-400 dark:bg-slate-600 dark:border-slate-500 dark:text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                disabled={isUnavailable}
-                              />
-                            </div>
-
-                            <div className="w-8">
-                              <input
-                                type="number"
-                                min="0"
-                                max={isUnavailable ? undefined : getEffectiveStock(product)}
-                                value={orderItems[product.id] || ''}
-                                placeholder="0"
-                                onChange={(e) => handleQuantityChange(product.id, parseInt(e.target.value, 10) || 0)}
-                                className="w-full py-0.5 px-0.5 border border-slate-300 rounded text-xs text-center focus:ring-1 focus:ring-blue-400 dark:bg-slate-600 dark:border-slate-500 dark:text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                              />
-                            </div>
-
-                            <div className="w-8">
-                              <input
-                                type="number"
-                                min="0"
-                                value={freeItems[product.id] || ''}
-                                placeholder="0"
-                                onChange={(e) => handleFreeQuantityChange(product.id, parseInt(e.target.value, 10) || 0)}
-                                className="w-full py-0.5 px-0.5 border border-green-300 rounded text-xs text-center focus:ring-1 focus:ring-green-400 bg-green-50 dark:bg-green-900/20 dark:border-green-500 dark:text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                title="Free quantity"
-                              />
-                            </div>
-                          </div>
-                          
-                          <button
-                            onClick={() => toggleHoldItem(product.id)}
-                            className={`px-2 py-1 text-xs font-medium rounded ${
-                              isHeld 
-                                ? 'bg-yellow-400 text-yellow-900' 
-                                : 'bg-blue-500 text-white'
-                            }`}
-                          >
-                            {isHeld ? 'H' : 'Hold'}
-                          </button>
+            </div>
+            
+            {/* Products Section */}
+            <div>
+              <label className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">Products</label>
+              
+              {/* Product Search Input */}
+              <div className="mb-4 relative">
+                <input
+                  type="text"
+                  placeholder="Search products by name, category, or SKU..."
+                  value={productSearchTerm}
+                  onChange={(e) => setProductSearchTerm(e.target.value)}
+                  className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 pr-10 dark:bg-slate-700 dark:border-slate-600 dark:placeholder-slate-400 dark:text-white"
+                />
+                {productSearchTerm && (
+                  <button
+                    onClick={() => setProductSearchTerm('')}
+                    className="absolute right-2 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                    title="Clear search"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+              
+              {/* Products List */}
+              <div className="space-y-3 border border-slate-200 dark:border-slate-600 rounded-lg p-3 bg-slate-50 dark:bg-slate-800">
+                {availableProductsForOrder.length === 0 ? (
+                  <div className="text-center py-4 text-slate-500 dark:text-slate-400">
+                    {productSearchTerm.trim() ? 'No products found matching your search.' : 'No products available.'}
+                  </div>
+                ) : (
+                  availableProductsForOrder.map(product => {
+                  const isOutOfStock = getEffectiveStock(product) === 0;
+                  const isHeld = heldItems.has(product.id);
+                  const isUnavailable = isHeld || isOutOfStock;
+                  
+                  return (
+                    <div key={product.id} className={`grid grid-cols-12 gap-2 items-center p-2 rounded-lg transition-colors ${isHeld ? 'bg-yellow-50 dark:bg-yellow-900/40' : 'bg-slate-50 dark:bg-slate-700'} ${isOutOfStock && !isHeld ? 'opacity-70' : ''}`}>
+                      <div className="flex items-center space-x-3 col-span-12 sm:col-span-4">
+                        <img src={product.imageUrl} alt={product.name} className="w-10 h-10 rounded-md" />
+                        <div>
+                          <p className="font-medium text-slate-900 dark:text-white">{product.name}</p>
+                           <p className="text-xs text-slate-500 dark:text-slate-400">
+                            {isOutOfStock ? <span className="text-red-500 font-semibold ml-1">Out of Stock</span> : (
+                              currentUser?.role === UserRole.Driver 
+                                ? ` Allocated: ${getEffectiveStock(product)}`
+                                : ` Stock: ${getEffectiveStock(product)}`
+                            )}
+                          </p>
                         </div>
                       </div>
-                    )
-                  }))}
-                </div>
+                      <div className="col-span-4 sm:col-span-2">
+                        <label htmlFor={`price-${product.id}`} className="sr-only">Unit Price for {product.name}</label>
+                        <div className="relative">
+                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm">{currency}</span>
+                            <input
+                                type="number"
+                                id={`price-${product.id}`}
+                                min="0"
+                                step="0.01"
+                                value={orderItemPrices[product.id] ?? ''}
+                                placeholder={product.price.toFixed(2)}
+                                onChange={(e) => handlePriceChange(product.id, parseFloat(e.target.value) || 0)}
+                                className="w-full p-1.5 border border-slate-300 rounded-md dark:bg-slate-600 dark:border-slate-500 dark:text-white text-center pl-10"
+                                disabled={isUnavailable}
+                            />
+                        </div>
+                      </div>
+                      <div className="col-span-4 sm:col-span-2">
+                        <label htmlFor={`discount-${product.id}`} className="sr-only">Discount for {product.name}</label>
+                         <div className="relative">
+                            <input
+                                type="number"
+                                id={`discount-${product.id}`}
+                                min="0"
+                                max="100"
+                                value={orderDiscounts[product.id] || ''}
+                                placeholder="0"
+                                onChange={(e) => handleDiscountChange(product.id, parseInt(e.target.value, 10) || 0)}
+                                className="w-full p-1.5 border border-slate-300 rounded-md dark:bg-slate-600 dark:border-slate-500 dark:text-white text-center disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:cursor-not-allowed"
+                                disabled={isUnavailable}
+                            />
+                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm">%</span>
+                         </div>
+                      </div>
+                       <div className="col-span-4 sm:col-span-2">
+                        <label htmlFor={`quantity-${product.id}`} className="sr-only">Quantity for {product.name}</label>
+                        <input
+                            type="number"
+                            id={`quantity-${product.id}`}
+                            min="0"
+                            max={isUnavailable ? undefined : getEffectiveStock(product)}
+                            value={orderItems[product.id] || ''}
+                            placeholder="0"
+                            onChange={(e) => handleQuantityChange(product.id, parseInt(e.target.value, 10) || 0)}
+                            className="w-full p-1.5 border border-slate-300 rounded-md dark:bg-slate-600 dark:border-slate-500 dark:text-white text-center"
+                        />
+                      </div>
+                       <div className="col-span-12 sm:col-span-2">
+                          <button
+                            onClick={() => toggleHoldItem(product.id)}
+                            className={`w-full py-1.5 text-xs font-medium rounded-md transition-colors ${isHeld ? 'bg-yellow-400 text-yellow-900 hover:bg-yellow-500' : 'bg-slate-200 dark:bg-slate-600 hover:bg-slate-300 dark:hover:bg-slate-500'}`}
+                            >
+                            {isHeld ? 'Unhold' : 'Hold'}
+                          </button>
+                      </div>
+                    </div>
+                  )
+                }))}
               </div>
-            </div>
-
-            {/* Compact Bottom Section */}
-            <div className="border-t border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 flex-shrink-0">
-              <div className="p-0.5 sm:p-1 space-y-1">
-                {/* Ultra Compact Order Summary */}
-                <div className="p-1.5 bg-slate-50 dark:bg-slate-700 rounded border border-slate-300 dark:border-slate-500">
-                  <div className="flex items-center justify-between text-xs">
-                    <div className="flex items-center gap-2">
-                      <span className="text-green-700 dark:text-green-300">✅ {inStockItems}</span>
-                      {heldItemsCount > 0 && (
-                        <span className="text-yellow-700 dark:text-yellow-300">⏳ {heldItemsCount}</span>
-                      )}
+              
+              {/* Order Summary */}
+              <div className="mt-6 p-4 bg-slate-50 dark:bg-slate-800 rounded-lg">
+                <h4 className="text-sm font-medium text-slate-900 dark:text-white mb-3">Order Summary</h4>
+                <div className="text-sm space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-slate-600 dark:text-slate-300">Items (In Stock):</span>
+                    <span className="font-bold text-slate-900 dark:text-white">{inStockItems}</span>
+                  </div>
+                  {heldItemsCount > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-yellow-600 dark:text-yellow-400">Items (Held/OOS):</span>
+                      <span className="font-bold text-yellow-600 dark:text-yellow-400">{heldItemsCount}</span>
                     </div>
-                    <div className="font-semibold text-blue-600 dark:text-blue-300">
-                      {formatCurrency(total, currency)}
-                    </div>
+                  )}
+                  <div className="flex justify-between text-base border-t pt-2 mt-2">
+                    <span className="text-slate-700 dark:text-slate-300">Total Price:</span>
+                    <span className="font-bold text-slate-900 dark:text-white">{formatCurrency(total, currency)}</span>
                   </div>
                 </div>
-                
-                {/* Ultra Compact Order Notes */}
+              </div>
+              
+              {/* Order Notes and Payment Method */}
+              <div className="space-y-4">
                 <div>
-                  <label htmlFor="orderNotes" className="block mb-0.5 text-xs font-medium text-slate-700 dark:text-slate-300">
-                    📝 Notes
-                  </label>
-                  <input 
-                    type="text"
-                    id="orderNotes" 
-                    value={orderNotes} 
-                    onChange={e => setOrderNotes(e.target.value)} 
-                    placeholder="Order notes..."
-                    className="bg-white border border-slate-300 text-slate-900 text-xs rounded focus:ring-1 focus:ring-blue-400 focus:border-blue-400 block w-full p-1.5 dark:bg-slate-700 dark:border-slate-500 dark:text-white" 
-                  />
+                  <label htmlFor="orderNotes" className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">Order Notes</label>
+                  <input type="text" id="orderNotes" value={orderNotes} onChange={e => setOrderNotes(e.target.value)} className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white" />
                 </div>
-                
-                {/* Compact Action Section */}
-                <div className="space-y-1">
-                  <div className="text-center text-xs font-medium text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-800 p-1 sm:p-1.5 rounded">
-                    Items: {inStockItems + heldItemsCount}
-                  </div>
-                  
-                  <div className="flex gap-1 sm:gap-2 w-full">
-                    <button 
-                      onClick={closeModal} 
-                      type="button" 
-                      className="flex-1 px-2 py-1.5 sm:px-3 sm:py-2 text-slate-600 bg-white hover:bg-slate-50 border border-slate-200 text-xs font-medium rounded transition-all duration-200 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-500"
-                    >
-                      Cancel
-                    </button>
-                    <button 
-                      onClick={handleSaveOrder} 
-                      type="button" 
-                      className="flex-1 px-2 py-1.5 sm:px-3 sm:py-2 text-white bg-blue-600 hover:bg-blue-700 border border-blue-600 text-xs font-semibold rounded transition-all duration-200 disabled:bg-slate-400 disabled:cursor-not-allowed" 
-                      disabled={(inStockItems + heldItemsCount) === 0 || !selectedCustomer}
-                    >
-                      {modalState === 'create' ? 'Create' : 'Save'}
-                    </button>
-                  </div>
+                <div>
+                  <label htmlFor="orderMethod" className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">Payment Method</label>
+                  <input type="text" id="orderMethod" value={orderMethod} onChange={e => setOrderMethod(e.target.value)} className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white" />
                 </div>
               </div>
-              {/* Safe area padding for mobile devices */}
-              <div className="h-4 sm:h-0 bg-white dark:bg-slate-800 flex-shrink-0"></div>
+              
+              {/* Footer Buttons */}
+              <div className="flex items-center justify-between pt-6 border-t border-slate-200 dark:border-slate-600">
+                <div className="text-sm text-slate-600 dark:text-slate-400">
+                  Total Items: <span className="font-medium">{inStockItems + heldItemsCount}</span>
+                </div>
+                <div className="flex space-x-3">
+                  <button onClick={closeModal} type="button" className="text-slate-500 bg-white hover:bg-slate-100 focus:ring-4 focus:outline-none focus:ring-blue-300 rounded-lg border border-slate-200 text-sm font-medium px-5 py-2.5 hover:text-slate-900 focus:z-10 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-500 dark:hover:text-white dark:hover:bg-slate-600">
+                    Cancel
+                  </button>
+                  <button onClick={handleSaveOrder} type="button" className="text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-blue-600 dark:hover:bg-blue-700 disabled:bg-blue-400 dark:disabled:bg-blue-800 disabled:cursor-not-allowed" disabled={(inStockItems + heldItemsCount) === 0 || !selectedCustomer}>
+                    {modalState === 'create' ? 'Create Order' : 'Save Changes'}
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </Modal>
@@ -2342,70 +1694,37 @@ export const Orders: React.FC = () => {
               const customer = customers.find(c => c.id === viewingOrder.customerId);
               return (
                   <Modal isOpen={!!viewingOrder} onClose={closeViewModal} title={`Order Details: ${viewingOrder.id}`}>
-                      <div className="p-3 space-y-2 max-h-[80vh] overflow-y-auto">
-                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 text-xs">
+                      <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-sm">
                               <div>
-                                  <p className="font-medium text-xs text-slate-700 dark:text-slate-300">Customer:</p>
-                                  <div className="flex items-center gap-2">
-                                    <p className="text-xs text-slate-900 dark:text-white">{viewingOrder.customerName}</p>
-                                    {renderCustomerLocationInOrder(viewingOrder, customers)}
-                                  </div>
+                                  <p className="font-semibold text-slate-700 dark:text-slate-300">Customer:</p>
+                                  <p className="text-slate-900 dark:text-white">{viewingOrder.customerName}</p>
                               </div>
                               <div>
-                                  <p className="font-medium text-xs text-slate-700 dark:text-slate-300">Location:</p>
-                                  {customer?.location ? (
-                                    (() => {
-                                      const gpsMatch = customer.location.match(/GPS:\s*(-?\d+\.?\d*),\s*(-?\d+\.?\d*)/);
-                                      if (gpsMatch) {
-                                        const [fullMatch, lat, lng] = gpsMatch;
-                                        const latitude = parseFloat(lat);
-                                        const longitude = parseFloat(lng);
-                                        const addressPart = customer.location.replace(fullMatch, '').replace(/\s*\(\s*\)\s*$/, '').trim();
-                                        const mapsUrl = `https://www.google.com/maps?q=${latitude},${longitude}`;
-                                        return (
-                                          <div className="text-xs">
-                                            {addressPart && (
-                                              <p className="text-slate-900 dark:text-white truncate">{addressPart}</p>
-                                            )}
-                                            <a 
-                                              href={mapsUrl} 
-                                              target="_blank" 
-                                              rel="noopener noreferrer"
-                                              className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 underline inline-flex items-center gap-1"
-                                              title={`Open location in Google Maps (${latitude}, ${longitude})`}
-                                            >
-                                              📍 GPS: {latitude.toFixed(4)}, {longitude.toFixed(4)}
-                                            </a>
-                                          </div>
-                                        );
-                                      }
-                                      return <p className="text-xs text-slate-900 dark:text-white">{customer.location}</p>;
-                                    })()
-                                  ) : (
-                                    <p className="text-xs text-slate-500 dark:text-slate-400">N/A</p>
-                                  )}
+                                  <p className="font-semibold text-slate-700 dark:text-slate-300">Location:</p>
+                                  <p className="text-slate-900 dark:text-white">{customer?.location || 'N/A'}</p>
                               </div>
                 <div>
-                  <p className="font-medium text-xs text-slate-700 dark:text-slate-300">Order Date:</p>
-                  <p className="text-xs text-slate-900 dark:text-white">{viewingOrder.orderdate}</p>
+                  <p className="font-semibold text-slate-700 dark:text-slate-300">Order Date:</p>
+                  <p className="text-slate-900 dark:text-white">{viewingOrder.orderdate}</p>
                 </div>
                               <div>
-                                  <p className="font-medium text-xs text-slate-700 dark:text-slate-300">Status:</p>
+                                  <p className="font-semibold text-slate-700 dark:text-slate-300">Status:</p>
                                   <p><Badge variant={getStatusBadgeVariant(viewingOrder.status)}>{viewingOrder.status}</Badge></p>
                 <div>
-                  <p className="font-medium text-xs text-slate-700 dark:text-slate-300">Assigned To:</p>
-                  <p className="text-xs text-slate-900 dark:text-white">{viewingOrder.assigneduserid}</p>
+                  <p className="font-semibold text-slate-700 dark:text-slate-300">Assigned To:</p>
+                  <p className="text-slate-900 dark:text-white">{viewingOrder.assigneduserid}</p>
                 </div>
                               </div>
                           </div>
                           
-                          <div className="pt-2 border-t dark:border-slate-700">
-                              <h4 className="text-sm font-medium text-slate-800 dark:text-slate-200 mb-1">Financial Summary</h4>
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                          <div className="pt-4 border-t dark:border-slate-700">
+                              <h4 className="text-md font-semibold text-slate-800 dark:text-slate-200 mb-2">Financial Summary</h4>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                   <div>
-                    <label htmlFor="chequeBalance" className="block mb-0.5 text-xs font-medium text-slate-700 dark:text-slate-300">Pending Cheque</label>
+                    <label htmlFor="chequeBalance" className="block mb-1 text-sm font-medium text-slate-700 dark:text-slate-300">Pending Cheque</label>
                     <div className="relative">
-                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">{currency}</span>
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">{currency}</span>
                       <input 
                         type="number"
                         id="chequeBalance"
@@ -2425,15 +1744,15 @@ export const Orders: React.FC = () => {
                           const newCredit = viewingOrder.total - (editableAmountPaid === '' ? 0 : editableAmountPaid) - cheque - (editableReturnAmount === '' ? 0 : editableReturnAmount);
                           setEditableCreditBalance(newCredit > 0 ? newCredit : 0);
                         }}
-                        className="bg-slate-50 border border-slate-300 text-slate-900 text-xs rounded focus:ring-blue-500 focus:border-blue-500 block w-full p-1.5 pl-7 dark:bg-slate-700 dark:border-slate-600 dark:text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 pl-10 dark:bg-slate-700 dark:border-slate-600 dark:text-white"
                         disabled={!canEdit}
                       />
                     </div>
                   </div>
                   <div>
-                    <label htmlFor="amountPaid" className="block mb-0.5 text-xs font-medium text-slate-700 dark:text-slate-300">Amount Paid</label>
+                    <label htmlFor="amountPaid" className="block mb-1 text-sm font-medium text-slate-700 dark:text-slate-300">Amount Paid</label>
                     <div className="relative">
-                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">{currency}</span>
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">{currency}</span>
                       <input 
                         type="number"
                         id="amountPaid"
@@ -2453,7 +1772,7 @@ export const Orders: React.FC = () => {
                           const newCredit = viewingOrder.total - paid - (editableChequeBalance === '' ? 0 : editableChequeBalance) - (editableReturnAmount === '' ? 0 : editableReturnAmount);
                           setEditableCreditBalance(newCredit > 0 ? newCredit : 0);
                         }}
-                        className="bg-slate-50 border border-slate-300 text-slate-900 text-xs rounded focus:ring-blue-500 focus:border-blue-500 block w-full p-1.5 pl-7 dark:bg-slate-700 dark:border-slate-600 dark:text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 pl-10 dark:bg-slate-700 dark:border-slate-600 dark:text-white"
                         disabled={!canEdit}
                       />
                     </div>
@@ -2481,7 +1800,7 @@ export const Orders: React.FC = () => {
                           const newCredit = viewingOrder.total - (editableAmountPaid === '' ? 0 : editableAmountPaid) - (editableChequeBalance === '' ? 0 : editableChequeBalance) - ret;
                           setEditableCreditBalance(newCredit > 0 ? newCredit : 0);
                         }}
-                        className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 pl-10 dark:bg-slate-700 dark:border-slate-600 dark:text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 pl-10 dark:bg-slate-700 dark:border-slate-600 dark:text-white"
                         disabled={!canEdit}
                       />
                     </div>
@@ -2495,7 +1814,7 @@ export const Orders: React.FC = () => {
                                               step="1"
                                               min="0"
                                               value={editableCreditBalance === '' ? '' : editableCreditBalance}
-                                              className="bg-gray-100 border border-slate-300 text-slate-900 text-sm rounded-lg block w-full p-2.5 pl-10 dark:bg-slate-800 dark:border-slate-600 dark:text-white cursor-not-allowed [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                              className="bg-gray-100 border border-slate-300 text-slate-900 text-sm rounded-lg block w-full p-2.5 pl-10 dark:bg-slate-800 dark:border-slate-600 dark:text-white cursor-not-allowed"
                                               disabled
                                               readOnly
                                           />
@@ -2508,7 +1827,7 @@ export const Orders: React.FC = () => {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-600 dark:text-slate-400">Pending Cheque:</span> 
-                      <span className="font-medium text-orange-600">{formatBalanceAmount(editableChequeBalance, currency)}</span>
+                      <span className="font-medium text-orange-600">{formatCurrency(editableChequeBalance, currency)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-600 dark:text-slate-400">Return Amount:</span>
@@ -2516,50 +1835,54 @@ export const Orders: React.FC = () => {
                     </div>
                     <div className="flex justify-between font-bold text-base mt-1">
                       <span className="text-slate-800 dark:text-slate-200">Balance Due:</span> 
-                      <span className="text-red-600">{formatBalanceAmount(editableChequeBalance + editableCreditBalance, currency)}</span>
+                      <span className="text-red-600">{formatCurrency(editableChequeBalance + editableCreditBalance, currency)}</span>
                     </div>
                                   </div>
                               </div>
                           </div>
 
                           <div className="pt-2">
-                              <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-1">Items Ordered</h4>
+                              <h4 className="text-md font-semibold text-slate-800 dark:text-slate-200 mb-2">Items Ordered</h4>
                               <div className="overflow-x-auto border rounded-lg dark:border-slate-700">
-                                  <table className="min-w-full text-xs">
+                                  <table className="min-w-full text-sm">
                                       <thead className="text-xs text-slate-700 uppercase bg-slate-50 dark:bg-slate-700 dark:text-slate-400">
                       <tr>
-                        <th className="py-1 px-2 text-left">Product</th>
-                        <th className="py-1 px-2 text-right">Quantity</th>
-                        <th className="py-1 px-2 text-right">Free</th>
-                        <th className="py-1 px-2 text-right">Unit Price</th>
-                        <th className="py-1 px-2 text-right">Subtotal</th>
-                        <th className="py-1 px-2 text-center">Actions</th>
+                        <th className="py-2 px-4 text-left">Product</th>
+                        <th className="py-2 px-4 text-right">Quantity</th>
+                        <th className="py-2 px-4 text-right">Unit Price</th>
+                        {isManagerView && <th className="py-2 px-4 text-right">Cost Price</th>}
+                        <th className="py-2 px-4 text-right">Discount</th>
+                        <th className="py-2 px-4 text-right">Subtotal</th>
+                        <th className="py-2 px-4 text-center">Actions</th>
                       </tr>
                                       </thead>
                                       <tbody className="text-slate-600 dark:text-slate-400 bg-white dark:bg-slate-800 divide-y divide-slate-200 dark:divide-slate-700">
                       {(viewingOrder.orderItems ?? []).map(item => {
                         const product = products.find(p => p.id === item.productId);
                         if (!product) return null;
-                        const subtotal = (item.quantity * item.price);
+                        const subtotal = (item.quantity * item.price) * (1 - (item.discount || 0) / 100);
                         const totalCostPrice = (product.costPrice || 0) * (item.quantity || 0);
                         return (
                           <tr key={item.productId}>
-                            <td className="py-1 px-2">
-                              <div className="flex items-center space-x-2">
-                                <img src={product.imageUrl} alt={product.name} className="w-6 h-6 rounded object-cover" />
-                                <span className="font-medium text-xs text-slate-800 dark:text-slate-200">{product.name}</span>
+                            <td className="py-3 px-4">
+                              <div className="flex items-center space-x-3">
+                                <img src={product.imageUrl} alt={product.name} className="w-10 h-10 rounded-md object-cover" />
+                                <span className="font-medium text-slate-800 dark:text-slate-200">{product.name}</span>
                               </div>
                             </td>
-                            <td className="py-1 px-2 text-right text-xs">{item.quantity}</td>
-                            <td className="py-1 px-2 text-right text-xs font-bold text-green-600">{item.free || 0}</td>
-                            <td className="py-1 px-2 text-right text-xs">{formatCurrency(item.price, currency)}</td>
-                            <td className="py-1 px-2 text-right font-semibold text-xs text-slate-900 dark:text-white">
+                            <td className="py-3 px-4 text-right">{item.quantity}</td>
+                            <td className="py-3 px-4 text-right">{formatCurrency(item.price, currency)}</td>
+                            {isManagerView && (
+                            <td className="py-3 px-4 text-right">{formatCurrency(totalCostPrice, currency)}</td>
+                            )}
+                            <td className="py-3 px-4 text-right text-green-600 dark:text-green-400">{item.discount ? `${item.discount}%` : '-'}</td>
+                            <td className="py-3 px-4 text-right font-semibold text-slate-900 dark:text-white">
                               {formatCurrency(subtotal, currency)}
                             </td>
-                            <td className="py-1 px-2 text-center">
+                            <td className="py-3 px-4 text-center">
                               <button 
                                 onClick={() => handleToggleHoldInView(item.productId, 'hold')}
-                                className="px-2 py-0.5 text-xs font-medium rounded transition-colors bg-yellow-400 text-yellow-900 hover:bg-yellow-500 focus:outline-none focus:ring-1 focus:ring-yellow-500"
+                                className="px-3 py-1 text-xs font-medium rounded-md transition-colors bg-yellow-400 text-yellow-900 hover:bg-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800"
                               >
                                 Hold
                               </button>
@@ -2616,13 +1939,13 @@ export const Orders: React.FC = () => {
                               </div>
                           )}
                       </div>
-                      <div className="flex items-center justify-between p-2 border-t border-slate-200 dark:border-slate-600">
+                      <div className="flex items-center justify-between p-6 border-t border-slate-200 dark:border-slate-600">
             <div className="flex-1">
-              <p className="text-xs text-slate-600 dark:text-slate-300">Grand Total: <span className="font-bold text-slate-900 dark:text-white">{formatCurrency(viewingOrder.total, currency)}</span></p>
+              <p className="text-sm text-slate-600 dark:text-slate-300">Grand Total: <span className="font-bold text-slate-900 dark:text-white">{formatCurrency(viewingOrder.total, currency)}</span></p>
             </div>
-                        <div className="flex flex-wrap items-center gap-1">
+                        <div className="flex flex-wrap items-center gap-2">
                            {canEdit && (
-                                <button onClick={handleSaveBalances} type="button" className="text-white bg-green-600 hover:bg-green-700 font-medium rounded text-xs px-2 py-1 text-center">
+                                <button onClick={handleSaveBalances} type="button" className="text-white bg-green-600 hover:bg-green-700 focus:ring-4 focus:outline-none focus:ring-green-300 font-medium rounded-lg text-sm px-4 py-2 text-center">
                                     Save Balances
                                 </button>
                            )}
@@ -2630,13 +1953,13 @@ export const Orders: React.FC = () => {
                               <button 
                                   onClick={handleDownloadBill} 
                                   type="button" 
-                                  className="text-white bg-blue-600 hover:bg-blue-700 font-medium rounded text-xs px-2 py-1 text-center disabled:bg-blue-400 disabled:cursor-not-allowed"
+                                  className="text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-4 py-2 text-center disabled:bg-blue-400 disabled:cursor-not-allowed"
                                   disabled={billLoading}
                               >
-                                  {billLoading ? 'Processing...' : (viewingOrder.status === OrderStatus.Delivered ? 'Download Bill' : 'Download Bill & Confirm')}
+                                  {billLoading ? 'Processing...' : (viewingOrder.status === OrderStatus.Delivered ? '📄 Download Bill' : '📄 Download Bill & Confirm Sale')}
                               </button>
                             )}
-                            <button onClick={closeViewModal} type="button" className="text-white bg-slate-600 hover:bg-slate-700 font-medium rounded text-xs px-2 py-1 text-center">
+                            <button onClick={closeViewModal} type="button" className="text-white bg-slate-600 hover:bg-slate-700 focus:ring-4 focus:outline-none focus:ring-slate-300 font-medium rounded-lg text-sm px-4 py-2 text-center">
                                 Close
                             </button>
                         </div>
@@ -2655,13 +1978,7 @@ export const Orders: React.FC = () => {
                     <button onClick={() => setOrderToFinalize(null)} type="button" className="text-slate-500 bg-white hover:bg-slate-100 focus:ring-4 focus:outline-none focus:ring-blue-300 rounded-lg border border-slate-200 text-sm font-medium px-5 py-2.5 hover:text-slate-900 focus:z-10 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-500 dark:hover:text-white dark:hover:bg-slate-600">
                         Cancel
                     </button>
-                    <button onClick={async () => {
-                      const success = await handleConfirmFinalize();
-                      if (success) {
-                        setOrderToFinalize(null);
-                      }
-                      // If not successful, modal stays open and order status remains pending
-                    }} type="button" className="text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-blue-600 dark:hover:bg-blue-700">
+                    <button onClick={handleConfirmFinalize} type="button" className="text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-blue-600 dark:hover:bg-blue-700">
                         Proceed & Print
                     </button>
                 </div>

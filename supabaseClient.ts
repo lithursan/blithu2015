@@ -55,7 +55,6 @@ export const fetchOrders = async () => {
     assignedUserId: row.assigneduserid,
     orderItems: typeof row.orderitems === 'string' ? JSON.parse(row.orderitems) : (row.orderitems || []),
     backorderedItems: [],
-    freeItems: typeof row.freeitems === 'string' ? JSON.parse(row.freeitems) : (row.freeitems || []),
     chequeBalance: row.chequebalance == null || isNaN(Number(row.chequebalance)) ? 0 : Number(row.chequebalance),
     creditBalance: row.creditbalance == null || isNaN(Number(row.creditbalance)) ? 0 : Number(row.creditbalance),
     returnAmount: row.returnamount == null || isNaN(Number(row.returnamount)) ? 0 : Number(row.returnamount),
