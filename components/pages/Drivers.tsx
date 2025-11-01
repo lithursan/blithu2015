@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useData } from '../../contexts/DataContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { User, UserRole, UserStatus, Product, DriverAllocation, DriverSale } from '../../types';
@@ -8,6 +8,7 @@ import { Badge } from '../ui/Badge';
 import { COMPANY_DETAILS } from '../../constants';
 import { supabase } from '../../supabaseClient';
 import { exportDriverAllocations, exportDriverSales } from '../../utils/exportUtils';
+import { LoadingSpinner } from '@/hooks/useLoading';
 
 const formatCurrency = (amount: number, currency: string) => {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency, minimumFractionDigits: 2 }).format(amount).replace('$', `${currency} `);
@@ -37,28 +38,20 @@ export const Drivers: React.FC = () => {
     const currency = currentUser?.settings.currency || 'LKR';
 
     const [selectedDriver, setSelectedDriver] = useState<User | null>(null);
+    const [selectedDate, setSelectedDate] = useState<string>(todayStr);
     const [modal, setModal] = useState<'closed' | 'allocate' | 'log'>('closed');
     const [allocationQuantities, setAllocationQuantities] = useState<Record<string, number>>({});
     const [isEditMode, setIsEditMode] = useState(false);
     const [allocationSupplier, setAllocationSupplier] = useState<string>('');
     
     const drivers = useMemo(() => users.filter(u => u.role === UserRole.Driver && u.status === UserStatus.Active), [users]);
-    const todayAllocations = useMemo(() => driverAllocations.filter(alloc => alloc.date === todayStr), [driverAllocations]);
+    const todayAllocations = useMemo(() => driverAllocations.filter(alloc => alloc.date === selectedDate), [driverAllocations, selectedDate]);
 
     // Move fallback UI after all hooks
     let fallbackUI: React.ReactNode = null;
     if (!drivers || drivers.length === 0) {
         fallbackUI = (
-            <div className="p-8 text-center">
-                <Card className="max-w-md mx-auto">
-                    <CardHeader>
-                        <CardTitle>No Active Drivers Found</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <p className="text-slate-600 dark:text-slate-400">No drivers are currently active in the system. Please add drivers or check your database.</p>
-                    </CardContent>
-                </Card>
-            </div>
+            <LoadingSpinner size="lg"/>
         );
     }
 
@@ -244,7 +237,7 @@ export const Drivers: React.FC = () => {
                     id: crypto.randomUUID(),
                     driverId: selectedDriver.id,
                     driverName: selectedDriver.name,
-                    date: todayStr,
+                    date: selectedDate,
                     allocatedItems: newAllocatedItems,
                     returnedItems: null,
                     salesTotal: 0,
@@ -320,7 +313,7 @@ export const Drivers: React.FC = () => {
 
 
     return fallbackUI ? fallbackUI : (
-        <div className="p-4 sm:p-6 lg:p-8 space-y-8">
+        <div className="p-3 sm:p-4 lg:p-6 space-y-6 sm:space-y-8">
              <style>{`
                 @media print {
                   .no-print { display: none !important; }
@@ -329,29 +322,36 @@ export const Drivers: React.FC = () => {
                   #printable-invoice-content { position: absolute; left: 0; top: 0; width: 100%; }
                 }
             `}</style>
-            <div className="flex justify-between items-center">
-                <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-100">Driver Management</h1>
-                <div className="flex gap-2 items-center">
+            <div className="flex flex-col sm:flex-row gap-4 sm:justify-between sm:items-center">
+                <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-slate-800 dark:text-slate-100">Driver Management</h1>
+                <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
                     {/* Export Buttons */}
-                    <button
-                        onClick={() => exportDriverAllocations(driverAllocations, 'csv')}
-                        className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
-                        title="Export Allocations as CSV"
-                    >
-                        📊 Allocations CSV
-                    </button>
-                    <button
-                        onClick={() => exportDriverAllocations(driverAllocations, 'xlsx')}
-                        className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
-                        title="Export Allocations as Excel"
-                    >
-                        📋 Allocations Excel
-                    </button>
-                    <p className="text-lg text-slate-500 dark:text-slate-400">Date: {todayStr}</p>
+                    <div className="flex gap-2 order-2 sm:order-1">
+                        <button
+                            onClick={() => exportDriverAllocations(driverAllocations, 'csv')}
+                            className="px-2 sm:px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm flex-1 sm:flex-none"
+                            title="Export Allocations as CSV"
+                        >
+                            <span className="hidden sm:inline">📊 Allocations CSV</span>
+                            <span className="sm:hidden">CSV</span>
+                        </button>
+                        <button
+                            onClick={() => exportDriverAllocations(driverAllocations, 'xlsx')}
+                            className="px-2 sm:px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm flex-1 sm:flex-none"
+                            title="Export Allocations as Excel"
+                        >
+                            <span className="hidden sm:inline">📋 Allocations Excel</span>
+                            <span className="sm:hidden">XLS</span>
+                        </button>
+                    </div>
+                    <div className="flex items-center gap-2 sm:gap-3 order-1 sm:order-2">
+                        <label htmlFor="selectedDate" className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 whitespace-nowrap">Date:</label>
+                        <input id="selectedDate" name="selectedDate" type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="p-2 border rounded bg-white dark:bg-slate-700 text-sm flex-1 sm:flex-none min-h-[40px]" />
+                    </div>
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
                 {drivers.map(driver => {
                     const { status, badge } = getDriverStatus(driver.id);
                     const allocation = todayAllocations.find(a => a.driverId === driver.id);
@@ -395,14 +395,14 @@ export const Drivers: React.FC = () => {
 
             {/* Allocate Stock Modal */}
             <Modal isOpen={modal === 'allocate'} onClose={handleCloseModal} title={isEditMode ? `Edit Allocation for ${selectedDriver?.name}` : `Allocate Stock to ${selectedDriver?.name}`}>
-                <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+                <div className="p-4 sm:p-6 space-y-4 max-h-[70vh] overflow-y-auto">
                     <div>
                         <label htmlFor="supplier-filter" className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">Filter by Supplier</label>
                         <select 
                             id="supplier-filter"
                             value={allocationSupplier}
                             onChange={e => setAllocationSupplier(e.target.value)}
-                            className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white"
+                            className="bg-slate-50 border border-slate-300 text-slate-900 text-sm sm:text-base rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-3 sm:p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white min-h-[44px]"
                         >
                             <option value="">{isEditMode ? "All Assigned Suppliers" : "Select a Supplier"}</option>
                             {availableSuppliers.map(supplier => (
@@ -411,7 +411,7 @@ export const Drivers: React.FC = () => {
                         </select>
                     </div>
 
-                    <p className="text-sm text-slate-600 dark:text-slate-400">Select products from the main warehouse to allocate for today's sales route.</p>
+                    <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400">Select products from the main warehouse to allocate for today's sales route.</p>
                     <div className="space-y-3">
                          {productsToShowInModal.map(product => {
                             const originalAllocation = isEditMode ? todayAllocations.find(a => a.driverId === selectedDriver?.id) : null;
@@ -421,25 +421,26 @@ export const Drivers: React.FC = () => {
                             if (maxAllocatable === 0 && !originalQuantity) return null;
 
                             return (
-                                <div key={product.id} className="grid grid-cols-12 gap-4 items-center p-2 rounded-lg bg-slate-50 dark:bg-slate-700/50">
-                                    <div className="col-span-6 flex items-center space-x-3">
-                                        <img src={product.imageUrl} alt={product.name} className="w-10 h-10 rounded-md"/>
-                                        <div>
-                                            <p className="font-medium text-slate-900 dark:text-white">{product.name}</p>
+                                <div key={product.id} className="flex flex-col sm:grid sm:grid-cols-12 gap-3 sm:gap-4 sm:items-center p-3 sm:p-2 rounded-lg bg-slate-50 dark:bg-slate-700/50">
+                                    <div className="sm:col-span-7 flex items-center space-x-3">
+                                        <img src={product.imageUrl} alt={product.name} className="w-12 h-12 sm:w-10 sm:h-10 rounded-md flex-shrink-0"/>
+                                        <div className="min-w-0 flex-1">
+                                            <p className="font-medium text-slate-900 dark:text-white text-sm sm:text-base truncate">{product.name}</p>
                                             <p className="text-xs text-slate-500 dark:text-slate-400">Warehouse Stock: {product.stock}</p>
                                         </div>
                                     </div>
-                                    <div className="col-span-6">
-                                        <label htmlFor={`alloc-${product.id}`} className="sr-only">Allocation quantity for {product.name}</label>
+                                    <div className="sm:col-span-5">
+                                        <label htmlFor={`alloc-${product.id}`} className="block text-xs text-slate-500 dark:text-slate-400 mb-1 sm:hidden">Allocate Quantity:</label>
                                         <input
                                             type="number"
                                             id={`alloc-${product.id}`}
+                                            name={`alloc-${product.id}`}
                                             value={allocationQuantities[product.id] || ''}
                                             onChange={e => handleAllocationChange(product.id, parseInt(e.target.value, 10) || 0, maxAllocatable)}
                                             min="0"
                                             max={maxAllocatable}
                                             placeholder="0"
-                                            className="w-full p-2 border border-slate-300 rounded-md dark:bg-slate-600 dark:border-slate-500 dark:text-white text-center"
+                                            className="w-full p-3 sm:p-2 border border-slate-300 rounded-md dark:bg-slate-600 dark:border-slate-500 dark:text-white text-center min-h-[44px] sm:min-h-0"
                                         />
                                     </div>
                                 </div>
@@ -447,11 +448,11 @@ export const Drivers: React.FC = () => {
                          })}
                     </div>
                 </div>
-                <div className="flex items-center justify-end p-6 space-x-2 border-t border-slate-200 rounded-b dark:border-slate-600">
-                    <button onClick={handleCloseModal} type="button" className="text-slate-500 bg-white hover:bg-slate-100 focus:ring-4 focus:outline-none focus:ring-blue-300 rounded-lg border border-slate-200 text-sm font-medium px-5 py-2.5 hover:text-slate-900 focus:z-10 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-500 dark:hover:text-white dark:hover:bg-slate-600">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end p-4 sm:p-6 space-y-2 sm:space-y-0 sm:space-x-2 border-t border-slate-200 rounded-b dark:border-slate-600">
+                    <button onClick={handleCloseModal} type="button" className="text-slate-500 bg-white hover:bg-slate-100 focus:ring-4 focus:outline-none focus:ring-blue-300 rounded-lg border border-slate-200 text-sm font-medium px-5 py-3 sm:py-2.5 hover:text-slate-900 focus:z-10 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-500 dark:hover:text-white dark:hover:bg-slate-600 min-h-[44px] order-2 sm:order-1">
                         Cancel
                     </button>
-                    <button onClick={handleSaveAllocation} type="button" className="text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-blue-600 dark:hover:bg-blue-700">
+                    <button onClick={handleSaveAllocation} type="button" className="text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-3 sm:py-2.5 text-center dark:bg-blue-600 dark:hover:bg-blue-700 min-h-[44px] order-1 sm:order-2">
                         {isEditMode ? 'Save Changes' : 'Confirm Allocation'}
                     </button>
                 </div>
@@ -478,7 +479,7 @@ interface DailyLogProps {
 }
 
 const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
-    const { products, setProducts, customers, setCustomers, driverAllocations, setDriverAllocations, driverSales, setDriverSales } = useData();
+    const { products, setProducts, customers, setCustomers, driverAllocations, setDriverAllocations, driverSales, setDriverSales, orders, refetchData } = useData();
     const [activeTab, setActiveTab] = useState<'log' | 'reconcile'>('log');
     const [isSaleModalOpen, setIsSaleModalOpen] = useState(false);
     const [viewingSaleInvoice, setViewingSaleInvoice] = useState<DriverSale | null>(null);
@@ -493,6 +494,11 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
     
     // State for reconciliation
     const [returnedQuantities, setReturnedQuantities] = useState<Record<string, number>>({});
+    
+    // Refresh data when Daily Log opens to ensure we have latest orders
+    useEffect(() => {
+        refetchData();
+    }, [driver.id, refetchData]);
     
     const allocation = useMemo(() => 
         driverAllocations.find(a => a.driverId === driver.id && a.date === todayStr), 
@@ -893,35 +899,105 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
         return <Modal isOpen={true} onClose={onClose} title="Error"><div className="p-6">No allocation found for this driver today.</div></Modal>;
     }
     
-    const collections = salesForAllocation.reduce((acc, sale) => {
-        acc.total += sale.total;
-        acc.paid += sale.amountPaid;
-        acc.credit += sale.creditAmount;
-        return acc;
-    }, { total: 0, paid: 0, credit: 0 });
+    // Calculate collections from both driver sales and today's delivered orders
+    const collections = useMemo(() => {
+        const todayStr = new Date().toISOString().slice(0, 10);
+        
+        console.log('Recalculating collections for driver:', driver.name);
+        console.log('Total orders available:', orders.length);
+        
+        // Get today's delivered orders for this driver
+        const todayOrders = orders.filter(order => {
+            const isAssignedToDriver = order.assignedUserId === driver.id;
+            const isDelivered = order.status === 'Delivered';
+            const orderDate = order.orderdate || order.date;
+            const isTodayOrder = orderDate === todayStr || 
+                                (orderDate && new Date(orderDate).toISOString().slice(0, 10) === todayStr);
+            
+            console.log(`Order ${order.id}:`, {
+                assignedToDriver: isAssignedToDriver,
+                isDelivered,
+                orderDate,
+                isTodayOrder,
+                shouldInclude: isAssignedToDriver && isDelivered && isTodayOrder
+            });
+            
+            return isAssignedToDriver && isDelivered && isTodayOrder;
+        });
+        
+        console.log('Filtered today orders for driver:', todayOrders.length);
+        
+        // Start with driver sales data
+        let result = salesForAllocation.reduce((acc, sale) => {
+            acc.total += sale.total || 0;
+            acc.paid += sale.amountPaid || 0;
+            acc.credit += sale.creditAmount || 0;
+            const method = sale.paymentMethod || '';
+            // Breakdown collected amounts by payment method when possible
+            if (method === 'Cheque') {
+                acc.cheque += sale.amountPaid || 0;
+            } else if (method === 'Cash') {
+                acc.cash += sale.amountPaid || 0;
+            } else if (method === 'Bank') {
+                acc.bank += sale.amountPaid || 0;
+            } else if (method === 'Mixed') {
+                // Mixed payments: amountPaid may include cheque/bank/cash combined
+                acc.mixed += sale.amountPaid || 0;
+            } else if (method === 'Credit') {
+                // credit only - amountPaid is likely 0
+            }
+            return acc;
+        }, { total: 0, paid: 0, credit: 0, cheque: 0, cash: 0, bank: 0, mixed: 0 });
+        
+        console.log('Result after driver sales:', result);
+        
+        // Add data from today's delivered orders
+        todayOrders.forEach(order => {
+            const orderTotal = order.total || 0;
+            const orderPaid = order.amountPaid || (orderTotal - (order.chequeBalance || 0) - (order.creditBalance || 0));
+            const orderCredit = order.creditBalance || 0;
+            const orderCheque = order.chequeBalance || 0;
+            
+            console.log(`Adding order ${order.id}:`, {
+                total: orderTotal,
+                paid: orderPaid,
+                credit: orderCredit,
+                cheque: orderCheque
+            });
+            
+            result.total += orderTotal;
+            result.paid += orderPaid;
+            result.credit += orderCredit;
+            result.cheque += orderCheque;
+        });
+        
+        console.log('Final result:', result);
+        return result;
+    }, [salesForAllocation, orders, driver.id, driver.name]);
 
     return (
       <Modal isOpen={true} onClose={onClose} title={`Daily Log: ${driver.name} (${todayStr})`}>
           <div className="border-b border-slate-200 dark:border-slate-700 no-print">
-                <nav className="flex space-x-2 px-6" aria-label="Tabs">
-                    <button onClick={() => setActiveTab('log')} className={`px-3 py-3 text-sm font-medium border-b-2 ${activeTab === 'log' ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}>Sales Log</button>
-                    <button onClick={() => setActiveTab('reconcile')} disabled={allocation.status === 'Reconciled'} className={`px-3 py-3 text-sm font-medium border-b-2 ${activeTab === 'reconcile' ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'} disabled:text-slate-400 dark:disabled:text-slate-600 disabled:cursor-not-allowed`}>Reconciliation</button>
+                <nav className="flex space-x-1 sm:space-x-2 px-4 sm:px-6" aria-label="Tabs">
+                    <button onClick={() => setActiveTab('log')} className={`px-2 sm:px-3 py-3 text-xs sm:text-sm font-medium border-b-2 ${activeTab === 'log' ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}>Sales Log</button>
+                    <button onClick={() => setActiveTab('reconcile')} disabled={allocation.status === 'Reconciled'} className={`px-2 sm:px-3 py-3 text-xs sm:text-sm font-medium border-b-2 ${activeTab === 'reconcile' ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'} disabled:text-slate-400 dark:disabled:text-slate-600 disabled:cursor-not-allowed`}>Reconciliation</button>
                 </nav>
           </div>
           
-          <div className="p-6 max-h-[60vh] overflow-y-auto">
+          <div className="p-4 sm:p-6 max-h-[60vh] overflow-y-auto">
             {activeTab === 'log' && (
                 <div className="space-y-4">
-                    <div className="flex justify-between items-center">
-                        <h4 className="text-lg font-semibold text-slate-800 dark:text-slate-200">Sales Summary</h4>
-                         <button onClick={handleOpenSaleModal} disabled={allocation.status === 'Reconciled'} className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:bg-slate-400 dark:disabled:bg-slate-600">
+                    <div className="flex flex-col sm:flex-row gap-3 sm:justify-between sm:items-center">
+                        <h4 className="text-base sm:text-lg font-semibold text-slate-800 dark:text-slate-200">Sales Summary</h4>
+                         <button onClick={handleOpenSaleModal} disabled={allocation.status === 'Reconciled'} className="px-4 py-2.5 text-xs sm:text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:bg-slate-400 dark:disabled:bg-slate-600 min-h-[40px] self-start sm:self-auto">
                             Add Sale
                          </button>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
-                        <div className="p-4 rounded-lg bg-blue-50 dark:bg-blue-900/40"><p className="text-xs text-blue-600 dark:text-blue-300">Total Sales</p><p className="text-xl font-bold text-blue-800 dark:text-blue-200">{formatCurrency(collections.total, currency)}</p></div>
-                        <div className="p-4 rounded-lg bg-green-50 dark:bg-green-900/40"><p className="text-xs text-green-600 dark:text-green-300">Total Collected</p><p className="text-xl font-bold text-green-800 dark:text-green-200">{formatCurrency(collections.paid, currency)}</p></div>
-                        <div className="p-4 rounded-lg bg-red-50 dark:bg-red-900/40"><p className="text-xs text-red-600 dark:text-red-300">Outstanding Credit</p><p className="text-xl font-bold text-red-800 dark:text-red-200">{formatCurrency(collections.credit, currency)}</p></div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 text-center">
+                        <div className="p-3 sm:p-4 rounded-lg bg-blue-50 dark:bg-blue-900/40"><p className="text-xs text-blue-600 dark:text-blue-300">Total Sales</p><p className="text-lg sm:text-xl font-bold text-blue-800 dark:text-blue-200 break-words">{formatCurrency(collections.total, currency)}</p></div>
+                        <div className="p-3 sm:p-4 rounded-lg bg-green-50 dark:bg-green-900/40"><p className="text-xs text-green-600 dark:text-green-300">Total Collected</p><p className="text-lg sm:text-xl font-bold text-green-800 dark:text-green-200 break-words">{formatCurrency(collections.paid, currency)}</p></div>
+                        <div className="p-3 sm:p-4 rounded-lg bg-yellow-50 dark:bg-yellow-900/40"><p className="text-xs text-yellow-600 dark:text-yellow-300">Collected (Cheque)</p><p className="text-lg sm:text-xl font-bold text-yellow-800 dark:text-yellow-200 break-words">{formatCurrency(collections.cheque, currency)}</p></div>
+                        <div className="p-3 sm:p-4 rounded-lg bg-red-50 dark:bg-red-900/40"><p className="text-xs text-red-600 dark:text-red-300">Outstanding Credit</p><p className="text-lg sm:text-xl font-bold text-red-800 dark:text-red-200 break-words">{formatCurrency(collections.credit, currency)}</p></div>
                     </div>
                      <div className="space-y-3">
                         {salesForAllocation.map(sale => (
@@ -976,6 +1052,8 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
                                             <td className={`py-1 px-4 text-center ${discrepancy ? 'bg-red-100 dark:bg-red-900/50' : ''}`}>
                                                 <input
                                                     type="number"
+                                                    id={`returned-${productId}`}
+                                                    name={`returned-${productId}`}
                                                     value={returnedQuantities[productId] || ''}
                                                     onChange={e => handleReturnedQtyChange(productId, parseInt(e.target.value, 10) || 0)}
                                                     placeholder="0"
@@ -1015,12 +1093,14 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
                              return (
                                  <div key={productId} className="flex justify-between items-center bg-slate-50 dark:bg-slate-700/50 p-2 rounded-lg">
                                     <p>{product.name} <span className="text-xs text-slate-500">(In van: {remaining})</span></p>
-                                     <input
-                                        type="number" min="0" max={remaining}
-                                        value={saleQuantities[productId] || ''}
-                                        onChange={e => handleSaleQuantityChange(productId, parseInt(e.target.value) || 0)}
-                                        className="w-20 p-1 border rounded-md text-center dark:bg-slate-600 dark:border-slate-500"
-                                     />
+                                                 <input
+                                                     type="number" min="0" max={remaining}
+                                                     id={`saleqty-${productId}`}
+                                                     name={`saleqty-${productId}`}
+                                                     value={saleQuantities[productId] || ''}
+                                                     onChange={e => handleSaleQuantityChange(productId, parseInt(e.target.value) || 0)}
+                                                     className="w-20 p-1 border rounded-md text-center dark:bg-slate-600 dark:border-slate-500"
+                                                 />
                                  </div>
                              )
                         })}

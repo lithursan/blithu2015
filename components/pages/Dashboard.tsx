@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+﻿import React, { useState, useMemo, useEffect } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { SalesChart } from '../charts/SalesChart';
@@ -6,6 +6,7 @@ import { TopProductsChart } from '../charts/TopProductsChart';
 import { OrderStatus, Product, UserRole } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
+import { supabase } from '../../supabaseClient';
 
 const getStatusBadgeVariant = (status: OrderStatus) => {
     switch (status) {
@@ -19,6 +20,270 @@ const getStatusBadgeVariant = (status: OrderStatus) => {
 
 const formatCurrency = (amount: number, currency: string) => {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency, minimumFractionDigits: 0 }).format(amount).replace('$', `${currency} `);
+};
+
+// Helper function to get appropriate font size based on the number of digits
+const getFontSizeClass = (value: string | number) => {
+    const valueStr = value.toString().replace(/[^\d]/g, ''); // Remove non-digits
+    const digitCount = valueStr.length;
+    
+    if (digitCount >= 10) {
+        return 'text-2xl'; // Smaller font for 10+ digits
+    } else if (digitCount >= 7) {
+        return 'text-3xl'; // Medium font for 7-9 digits
+    } else {
+        return 'text-4xl'; // Large font for smaller numbers
+    }
+};
+
+// Expenses Card Component
+const ExpensesCard: React.FC<{ currency: string; dateRange: { start: string; end: string } }> = ({ currency, dateRange }) => {
+    const [expenses, setExpenses] = useState<any[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    const fetchExpenses = async () => {
+        try {
+            setLoading(true);
+            const { data, error } = await supabase.from('expenses').select('*').order('date', { ascending: false });
+            
+            if (error) {
+                // If error, try localStorage fallback
+                try {
+                    const local = localStorage.getItem('app_expenses_v1');
+                    setExpenses(local ? JSON.parse(local) : []);
+                } catch {
+                    setExpenses([]);
+                }
+            } else {
+                setExpenses(data || []);
+            }
+        } catch (error) {
+            console.error('Error fetching expenses:', error);
+            setExpenses([]);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchExpenses();
+    }, []);
+
+    // Filter expenses based on date range
+    const filteredExpenses = useMemo(() => {
+        if (!dateRange.start && !dateRange.end) {
+            // If no date filter, show current month
+            const currentMonth = new Date().getMonth();
+            const currentYear = new Date().getFullYear();
+            return expenses.filter(expense => {
+                const expenseDate = new Date(expense.date);
+                return expenseDate.getMonth() === currentMonth && expenseDate.getFullYear() === currentYear;
+            });
+        }
+
+        return expenses.filter(expense => {
+            const expenseDate = new Date(expense.date);
+            
+            if (dateRange.start && expenseDate < new Date(dateRange.start)) {
+                return false;
+            }
+            
+            if (dateRange.end) {
+                const endDate = new Date(dateRange.end);
+                endDate.setDate(endDate.getDate() + 1); // Make end date inclusive
+                if (expenseDate >= endDate) {
+                    return false;
+                }
+            }
+            
+            return true;
+        });
+    }, [expenses, dateRange]);
+
+    // Calculate total expenses
+    const totalExpenses = filteredExpenses.reduce((sum, expense) => sum + (expense.amount || 0), 0);
+
+    // Calculate previous period for comparison
+    const previousPeriodExpenses = useMemo(() => {
+        if (!dateRange.start || !dateRange.end) {
+            // Default: previous month comparison
+            const lastMonth = new Date();
+            lastMonth.setMonth(lastMonth.getMonth() - 1);
+            
+            return expenses.filter(expense => {
+                const expenseDate = new Date(expense.date);
+                return expenseDate.getMonth() === lastMonth.getMonth() && 
+                       expenseDate.getFullYear() === lastMonth.getFullYear();
+            });
+        }
+
+        // Calculate previous period based on selected date range
+        const startDate = new Date(dateRange.start);
+        const endDate = new Date(dateRange.end);
+        const periodDuration = endDate.getTime() - startDate.getTime();
+        
+        const prevEndDate = new Date(startDate.getTime() - 1);
+        const prevStartDate = new Date(prevEndDate.getTime() - periodDuration);
+
+        return expenses.filter(expense => {
+            const expenseDate = new Date(expense.date);
+            return expenseDate >= prevStartDate && expenseDate <= prevEndDate;
+        });
+    }, [expenses, dateRange]);
+
+    const prevTotalExpenses = previousPeriodExpenses.reduce((sum, expense) => sum + (expense.amount || 0), 0);
+    
+    // Calculate percentage change
+    const expensesChange = prevTotalExpenses > 0 ? ((totalExpenses - prevTotalExpenses) / prevTotalExpenses) * 100 : 0;
+
+    return (
+        <Card className="bg-gradient-to-br from-pink-50 to-pink-100 dark:from-pink-950 dark:to-pink-900 border-pink-200 dark:border-pink-800 min-h-[180px] flex flex-col">
+          <CardHeader className="flex-shrink-0">
+            <CardTitle className="text-pink-700 dark:text-pink-300">Total Expenses</CardTitle>
+          </CardHeader>
+          <CardContent className="flex-1 flex flex-col justify-between">
+            <div className="flex justify-between items-start">
+              <div>
+                {loading ? (
+                  <p className="text-4xl font-bold text-pink-600 dark:text-pink-400">Loading...</p>
+                ) : (
+                  <p className={`${getFontSizeClass(formatCurrency(totalExpenses, currency))} font-bold text-pink-600 dark:text-pink-400`}>{formatCurrency(totalExpenses, currency)}</p>
+                )}
+              </div>
+            </div>
+            <div className="flex justify-end mt-4">
+              <ChangeIndicator change={expensesChange} />
+            </div>
+          </CardContent>
+        </Card>
+    );
+};
+
+// Net Profit Card Component - Admin Only
+const NetProfitCard: React.FC<{ 
+    currency: string; 
+    dateRange: { start: string; end: string }; 
+    totalSales: number; 
+    totalCost: number; 
+}> = ({ currency, dateRange, totalSales, totalCost }) => {
+    const [expenses, setExpenses] = useState<any[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    const fetchExpenses = async () => {
+        try {
+            setLoading(true);
+            const { data, error } = await supabase.from('expenses').select('*').order('date', { ascending: false });
+            
+            if (error) {
+                // If error, try localStorage fallback
+                try {
+                    const local = localStorage.getItem('app_expenses_v1');
+                    setExpenses(local ? JSON.parse(local) : []);
+                } catch {
+                    setExpenses([]);
+                }
+            } else {
+                setExpenses(data || []);
+            }
+        } catch (error) {
+            console.error('Error fetching expenses for net profit:', error);
+            setExpenses([]);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchExpenses();
+    }, []);
+
+    // Filter expenses based on date range (same logic as ExpensesCard)
+    const filteredExpenses = useMemo(() => {
+        if (!dateRange.start && !dateRange.end) {
+            // If no date filter, show current month
+            const currentMonth = new Date().getMonth();
+            const currentYear = new Date().getFullYear();
+            return expenses.filter(expense => {
+                const expenseDate = new Date(expense.date);
+                return expenseDate.getMonth() === currentMonth && expenseDate.getFullYear() === currentYear;
+            });
+        }
+
+        return expenses.filter(expense => {
+            const expenseDate = new Date(expense.date);
+            
+            if (dateRange.start && expenseDate < new Date(dateRange.start)) {
+                return false;
+            }
+            
+            if (dateRange.end) {
+                const endDate = new Date(dateRange.end);
+                endDate.setDate(endDate.getDate() + 1); // Make end date inclusive
+                if (expenseDate >= endDate) {
+                    return false;
+                }
+            }
+            
+            return true;
+        });
+    }, [expenses, dateRange]);
+
+    // Calculate total expenses for the period
+    const totalExpenses = filteredExpenses.reduce((sum, expense) => sum + (expense.amount || 0), 0);
+    
+    // Calculate gross profit (Sales - Cost)
+    const grossProfit = totalSales - totalCost;
+    
+    // Calculate net profit (Gross Profit - Expenses)
+    const netProfit = grossProfit - totalExpenses;
+    
+    // Calculate net profit margin
+    const netProfitMargin = totalSales > 0 ? (netProfit / totalSales * 100) : 0;
+    
+    // Determine card color based on profit/loss
+    const isProfit = netProfit >= 0;
+    
+    const cardGradientColor = isProfit 
+        ? "bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-950 dark:to-emerald-900 border-emerald-200 dark:border-emerald-800" 
+        : "bg-gradient-to-br from-red-50 to-red-100 dark:from-red-950 dark:to-red-900 border-red-200 dark:border-red-800";
+    
+    const titleColor = isProfit 
+        ? "text-emerald-700 dark:text-emerald-300" 
+        : "text-red-700 dark:text-red-300";
+    
+    const amountColor = isProfit 
+        ? "text-emerald-600 dark:text-emerald-400" 
+        : "text-red-600 dark:text-red-400";
+        
+    const changeColor = isProfit 
+        ? "text-emerald-400 dark:text-emerald-500" 
+        : "text-red-400 dark:text-red-500";
+
+    return (
+        <Card className={`${cardGradientColor} min-h-[180px] flex flex-col`}>
+          <CardHeader className="flex-shrink-0">
+            <CardTitle className={titleColor}>
+                Net Profit (Admin)
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex-1 flex flex-col justify-between">
+            <div className="flex justify-between items-start">
+              <div className="flex-1">
+                {loading ? (
+                  <p className={`text-4xl font-bold ${amountColor}`}>Loading...</p>
+                ) : (
+                  <p className={`${getFontSizeClass(formatCurrency(netProfit, currency))} font-bold ${amountColor}`}>
+                      {formatCurrency(netProfit, currency)}
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="flex justify-end mt-4">
+              <ChangeIndicator change={netProfit > 0 ? 5.2 : -8.5} />
+            </div>
+          </CardContent>
+        </Card>
+    );
 };
 
 // Percentage change indicator component
@@ -266,8 +531,27 @@ export const Dashboard: React.FC = () => {
     return ['all', ...new Set(relevantProducts.map(p => p.category))]
   }, [safeProducts, accessibleSuppliers]);
 
+  // Filtered products based on current filter selections
+  const filteredProducts = useMemo(() => {
+    let filtered = accessibleSuppliers 
+      ? safeProducts.filter(p => accessibleSuppliers.has(p.supplier))
+      : safeProducts;
+
+    // Filter by supplier
+    if (selectedSupplier !== 'all') {
+      filtered = filtered.filter(p => p.supplier === selectedSupplier);
+    }
+
+    // Filter by category
+    if (selectedCategory !== 'all') {
+      filtered = filtered.filter(p => p.category === selectedCategory);
+    }
+
+    return filtered;
+  }, [safeProducts, selectedSupplier, selectedCategory, accessibleSuppliers]);
+
     const salesDataForChart = useMemo(() => {
-        const monthlySales: { [key: string]: number } = {};
+        const monthlyData: { [key: string]: { sales: number; cost: number; orders: any[] } } = {};
         const monthYearSet = new Set<string>();
 
         filteredOrders.forEach(order => {
@@ -278,7 +562,13 @@ export const Dashboard: React.FC = () => {
                 const key = `${month} ${year}`;
                 
                 monthYearSet.add(key);
-                monthlySales[key] = (monthlySales[key] || 0) + order.total;
+                
+                if (!monthlyData[key]) {
+                    monthlyData[key] = { sales: 0, cost: 0, orders: [] };
+                }
+                
+                monthlyData[key].sales += order.total;
+                monthlyData[key].orders.push(order);
             }
         });
         
@@ -286,12 +576,39 @@ export const Dashboard: React.FC = () => {
              return new Date(a).getTime() - new Date(b).getTime();
         });
 
-        return sortedMonths.map(key => ({
-            month: key,
-            sales: monthlySales[key] || 0
-        }));
+        return sortedMonths.map(key => {
+            const data = monthlyData[key] || { sales: 0, cost: 0, orders: [] };
+            
+            // Calculate delivery cost for this month
+            const deliveryCost = data.orders.reduce((sum, order) => {
+                if (!order.orderItems) return sum;
+                const orderCost = order.orderItems.reduce((itemSum, item) => {
+                    const product = safeProducts.find(p => p.id === item.productId);
+                    const costPrice = (typeof product?.costPrice === 'number' && product.costPrice > 0) ? product.costPrice : 0;
+                    return itemSum + (costPrice * (item.quantity || 0));
+                }, 0);
+                return sum + orderCost;
+            }, 0);
+            
+            // Calculate gross profit (sales - delivery cost)
+            const grossProfit = data.sales - deliveryCost;
+            
+            // Get monthly expenses (simplified - you may need to fetch actual expenses data)
+            const monthlyExpenses = 0; // You can add expense calculation here if needed
+            
+            // Calculate net profit
+            const netProfit = grossProfit - monthlyExpenses;
 
-    }, [filteredOrders]);
+            return {
+                month: key,
+                sales: data.sales,
+                deliveryCost: deliveryCost,
+                grossProfit: grossProfit,
+                netProfit: netProfit
+            };
+        });
+
+    }, [filteredOrders, safeProducts]);
 
 
     const handleResetFilters = () => {
@@ -304,8 +621,9 @@ export const Dashboard: React.FC = () => {
     // Stats based on filtered data
     // Calculate total cost for delivered orders in current period
     const totalSales = filteredOrders.reduce((sum, order) => order.status === 'Delivered' ? sum + order.total : sum, 0);
-    // Sum all orders' cost price (order-wise), not just delivered
+    // Sum cost only for delivered orders in the current filtered period
     const totalCost = filteredOrders.reduce((sum, order) => {
+      if (order.status !== OrderStatus.Delivered) return sum;
       if (!order.orderItems) return sum;
       const orderCost = order.orderItems.reduce((itemSum, item) => {
         const product = safeProducts.find(p => p.id === item.productId);
@@ -315,14 +633,17 @@ export const Dashboard: React.FC = () => {
       return sum + orderCost;
     }, 0);
     const totalOrders = filteredOrders.length;
+    const totalOrdersAmount = filteredOrders.reduce((sum, order) => sum + order.total, 0);
     
     // Previous period stats for comparison
     const prevTotalSales = previousPeriodOrders.reduce((sum, order) => order.status === 'Delivered' ? sum + order.total : sum, 0);
     const prevTotalOrders = previousPeriodOrders.length;
+    const prevTotalOrdersAmount = previousPeriodOrders.reduce((sum, order) => sum + order.total, 0);
     
     // Calculate percentage changes
     const salesChange = prevTotalSales > 0 ? ((totalSales - prevTotalSales) / prevTotalSales) * 100 : 0;
     const ordersChange = prevTotalOrders > 0 ? ((totalOrders - prevTotalOrders) / prevTotalOrders) * 100 : 0;
+    const ordersAmountChange = prevTotalOrdersAmount > 0 ? ((totalOrdersAmount - prevTotalOrdersAmount) / prevTotalOrdersAmount) * 100 : 0;
     
     // Calculate percentage changes based on filtered data vs previous period
     const calculateChange = (current: number, previous: number) => {
@@ -333,20 +654,12 @@ export const Dashboard: React.FC = () => {
     // Financial stats for current filtered period
     const currentChequeBalance = filteredOrders.reduce((sum, order) => sum + (order.chequeBalance || 0), 0);
     const currentCreditBalance = filteredOrders.reduce((sum, order) => sum + (order.creditBalance || 0), 0);
-    const currentPaid = filteredOrders.reduce((sum, order) => {
-        const cheque = order.chequeBalance || 0;
-        const credit = order.creditBalance || 0;
-        return sum + (order.total - cheque - credit);
-    }, 0);
+    const currentPaid = totalSales - currentCreditBalance;
     
     // Financial stats for previous period
     const prevChequeBalance = previousPeriodOrders.reduce((sum, order) => sum + (order.chequeBalance || 0), 0);
     const prevCreditBalance = previousPeriodOrders.reduce((sum, order) => sum + (order.creditBalance || 0), 0);
-    const prevPaid = previousPeriodOrders.reduce((sum, order) => {
-        const cheque = order.chequeBalance || 0;
-        const credit = order.creditBalance || 0;
-        return sum + (order.total - cheque - credit);
-    }, 0);
+    const prevPaid = prevTotalSales - prevCreditBalance;
     
     // Calculate changes
     const chequeChange = calculateChange(currentChequeBalance, prevChequeBalance);
@@ -354,27 +667,55 @@ export const Dashboard: React.FC = () => {
     const paidChange = calculateChange(currentPaid, prevPaid);    // Financial stats calculations (overall totals)
     const totalChequeBalance = orders.reduce((sum, order) => sum + (order.chequeBalance || 0), 0);
     const totalCreditBalance = orders.reduce((sum, order) => sum + (order.creditBalance || 0), 0);
-    const totalPaid = orders.reduce((sum, order) => {
-        const cheque = order.chequeBalance || 0;
-        const credit = order.creditBalance || 0;
-        return sum + (order.total - cheque - credit);
-    }, 0);
+    const overallTotalSales = orders.reduce((sum, order) => order.status === 'Delivered' ? sum + order.total : sum, 0);
+    const totalPaid = overallTotalSales - totalCreditBalance;
     
-    // Stats that remain unfiltered (inventory-wide)
-    const totalProducts = products.length;
-    const lowStockItems = products.filter(p => p.stock < 100).length;
+    // Stats that are now filtered based on selected criteria
+    const totalProducts = filteredProducts.length;
+    const lowStockItems = filteredProducts.filter(p => p.stock < 100).length;
+
+  // Total inventory value (sum of costPrice * stock) - now filtered
+  const totalInventoryValue = filteredProducts.reduce((sum, p) => {
+    const cost = (typeof p.costPrice === 'number' && !isNaN(p.costPrice)) ? p.costPrice : 0;
+    const stock = (typeof p.stock === 'number' && !isNaN(p.stock)) ? p.stock : 0;
+    return sum + (cost * stock);
+  }, 0);
+
+  // Modal state for inventory/delivery cost details
+  const [isInventoryModalOpen, setInventoryModalOpen] = useState(false);
+
+  // Today's delivered orders (used for cost breakdown)
+  const todayStr = new Date().toISOString().split('T')[0];
+  const todaysDeliveredOrders = orders.filter(o => {
+    try {
+      const d = new Date(o.date).toISOString().split('T')[0];
+      return d === todayStr && o.status === OrderStatus.Delivered;
+    } catch { return false; }
+  });
+
+  const todaysDeliveryCost = todaysDeliveredOrders.reduce((sum, order) => {
+    if (!order.orderItems) return sum;
+    const cost = order.orderItems.reduce((s, item) => {
+      const prod = safeProducts.find(p => p.id === item.productId);
+      const cp = (prod && typeof prod.costPrice === 'number') ? prod.costPrice : 0;
+      return s + (cp * (item.quantity || 0));
+    }, 0);
+    return sum + cost;
+  }, 0);
 
     return (
-    <div className="p-4 sm:p-6 lg:p-8 space-y-8">
-        <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-100">
+    <div className="p-3 sm:p-4 lg:p-6 space-y-6 sm:space-y-8">
+        <h1 className="text-2xl sm:text-3xl font-bold text-slate-800 dark:text-slate-100">
             {isAdmin || isManager ? 'Admin Dashboard' : 'Dashboard'}
-        </h1>        {/* Filter Section */}
+        </h1>
+        
+        {/* Filter Section */}
         <Card>
           <CardHeader>
             <CardTitle>Filters</CardTitle>
             <CardDescription>Refine the sales data shown on the dashboard.</CardDescription>
           </CardHeader>
-          <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 items-end">
+          <CardContent className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-4 items-end">
              <div>
                 <label htmlFor="supplier-filter" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Supplier</label>
                 <select id="supplier-filter" value={selectedSupplier} onChange={e => setSelectedSupplier(e.target.value)} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
@@ -413,10 +754,10 @@ export const Dashboard: React.FC = () => {
         </Card>
 
       {/* Stat Cards */}
-  <div className="flex flex-wrap gap-4">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between">
+  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <Card className="bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-950 dark:to-blue-900 border-blue-200 dark:border-blue-800 min-h-[180px] flex flex-col">
+          <CardHeader className="flex-shrink-0">
+            <CardTitle className="flex items-center justify-between text-blue-700 dark:text-blue-300">
               <span>Total Sales</span>
               {isAdmin && (
                 <button
@@ -424,17 +765,15 @@ export const Dashboard: React.FC = () => {
                   className="text-xs px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded-md hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors"
                   title="Calculate percentage of total sales"
                 >
-                  📊 %
+                  %
                 </button>
               )}
             </CardTitle>
-            <CardDescription>Revenue from delivered orders</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="flex-1 flex flex-col justify-between">
             <div className="flex justify-between items-start">
               <div className="flex-1">
-                <p className="text-3xl font-bold text-slate-900 dark:text-white">{formatCurrency(totalSales, currency)}</p>
-                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Current period</p>
+                <p className={`${getFontSizeClass(formatCurrency(totalSales, currency))} font-bold text-blue-600 dark:text-blue-400`}>{formatCurrency(totalSales, currency)}</p>
                 {/* Percentage Calculator */}
                 {showPercentageCalculator && isAdmin && (
                   <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
@@ -468,147 +807,264 @@ export const Dashboard: React.FC = () => {
                   </div>
                 )}
               </div>
+            </div>
+            <div className="flex justify-end mt-4">
               <ChangeIndicator change={salesChange} />
             </div>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Total Cost</CardTitle>
-            <CardDescription>Cost of goods for delivered orders</CardDescription>
+        <Card className="bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-950 dark:to-purple-900 border-purple-200 dark:border-purple-800 min-h-[180px] flex flex-col">
+          <CardHeader className="flex-shrink-0">
+            <CardTitle className="text-purple-700 dark:text-purple-300">
+              <button onClick={() => setInventoryModalOpen(true)} className="text-left w-full">
+                Total Inventory
+              </button>
+            </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="flex-1 flex flex-col justify-between">
             <div className="flex justify-between items-start">
               <div>
-                <p className="text-3xl font-bold text-slate-900 dark:text-white">{formatCurrency(totalCost, currency)}</p>
-                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Current period</p>
+                <button onClick={() => setInventoryModalOpen(true)} className={`${getFontSizeClass(formatCurrency(totalInventoryValue, currency))} font-bold text-purple-600 dark:text-purple-400 text-left`}>
+                  {formatCurrency(totalInventoryValue, currency)}
+                </button>
               </div>
             </div>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Total Orders</CardTitle>
-            <CardDescription>Orders in current period</CardDescription>
+
+        {/* Inventory / Today's delivery cost modal */}
+        {isInventoryModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/50" onClick={() => setInventoryModalOpen(false)} />
+            <div className="relative bg-white dark:bg-slate-800 rounded-lg w-full max-w-3xl p-6 z-10">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-semibold">Today's Delivered Cost Breakdown</h3>
+                <button onClick={() => setInventoryModalOpen(false)} className="text-sm text-slate-600 dark:text-slate-300">Close</button>
+              </div>
+              <div className="max-h-72 overflow-y-auto space-y-4">
+                {/* Today's Delivered Orders */}
+                <div>
+                  <h4 className="font-medium">Today's Delivered Cost</h4>
+                  {todaysDeliveredOrders.length === 0 ? (
+                    <p className="text-sm text-slate-500">No delivered orders for today.</p>
+                  ) : (
+                    <table className="w-full text-sm text-left">
+                      <thead className="text-xs text-slate-700 uppercase bg-slate-50 dark:bg-slate-700 dark:text-slate-400">
+                        <tr>
+                          <th className="px-3 py-2">Order ID</th>
+                          <th className="px-3 py-2">Customer</th>
+                          <th className="px-3 py-2">Cost</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {todaysDeliveredOrders.map(order => {
+                          const cost = order.orderItems?.reduce((s, item) => {
+                            const prod = safeProducts.find(p => p.id === item.productId);
+                            const cp = (prod && typeof prod.costPrice === 'number') ? prod.costPrice : 0;
+                            return s + (cp * (item.quantity || 0));
+                          }, 0) || 0;
+                          return (
+                            <tr key={order.id} className="border-b dark:border-slate-700">
+                              <td className="px-3 py-2 font-medium">{order.id}</td>
+                              <td className="px-3 py-2">{order.customerName}</td>
+                              <td className="px-3 py-2">{formatCurrency(cost, currency)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      <tfoot>
+                        <tr>
+                          <td className="px-3 py-2 font-semibold">Total</td>
+                          <td />
+                          <td className="px-3 py-2 font-semibold">{formatCurrency(todaysDeliveryCost, currency)}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  )}
+                </div>
+
+                {/* Filtered period delivered cost */}
+                <div>
+                  <h4 className="font-medium">Current Period Delivered Cost</h4>
+                  {filteredOrders.filter(o => o.status === OrderStatus.Delivered).length === 0 ? (
+                    <p className="text-sm text-slate-500">No delivered orders in the current period / filters.</p>
+                  ) : (
+                    <table className="w-full text-sm text-left">
+                      <thead className="text-xs text-slate-700 uppercase bg-slate-50 dark:bg-slate-700 dark:text-slate-400">
+                        <tr>
+                          <th className="px-3 py-2">Order ID</th>
+                          <th className="px-3 py-2">Customer</th>
+                          <th className="px-3 py-2">Cost</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredOrders.filter(o => o.status === OrderStatus.Delivered).map(order => {
+                          const cost = order.orderItems?.reduce((s, item) => {
+                            const prod = safeProducts.find(p => p.id === item.productId);
+                            const cp = (prod && typeof prod.costPrice === 'number') ? prod.costPrice : 0;
+                            return s + (cp * (item.quantity || 0));
+                          }, 0) || 0;
+                          return (
+                            <tr key={order.id} className="border-b dark:border-slate-700">
+                              <td className="px-3 py-2 font-medium">{order.id}</td>
+                              <td className="px-3 py-2">{order.customerName}</td>
+                              <td className="px-3 py-2">{formatCurrency(cost, currency)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      <tfoot>
+                        <tr>
+                          <td className="px-3 py-2 font-semibold">Total</td>
+                          <td />
+                          <td className="px-3 py-2 font-semibold">{formatCurrency(totalCost, currency)}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        <Card className="bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-950 dark:to-emerald-900 border-emerald-200 dark:border-emerald-800 min-h-[180px] flex flex-col">
+          <CardHeader className="flex-shrink-0">
+            <CardTitle className="text-emerald-700 dark:text-emerald-300">Total Orders</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="flex-1 flex flex-col justify-between">
             <div className="flex justify-between items-start">
               <div>
-                <p className="text-3xl font-bold text-slate-900 dark:text-white">{totalOrders}</p>
-                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Current period</p>
+                <p className={`${getFontSizeClass(totalOrders)} font-bold text-emerald-600 dark:text-emerald-400`}>{totalOrders}</p>
+                <p className="text-lg font-semibold text-emerald-500 dark:text-emerald-300">{formatCurrency(totalOrdersAmount, currency)}</p>
               </div>
+            </div>
+            <div className="flex justify-end mt-4 space-x-2">
               <ChangeIndicator change={ordersChange} />
+              <ChangeIndicator change={ordersAmountChange} />
             </div>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Total Paid</CardTitle>
-            <CardDescription>Amount received this month</CardDescription>
+        <Card className="bg-gradient-to-br from-indigo-50 to-indigo-100 dark:from-indigo-950 dark:to-indigo-900 border-indigo-200 dark:border-indigo-800 min-h-[180px] flex flex-col">
+          <CardHeader className="flex-shrink-0">
+            <CardTitle className="text-indigo-700 dark:text-indigo-300">Delivered Cost</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="flex-1 flex flex-col justify-between">
             <div className="flex justify-between items-start">
               <div>
-                <p className="text-3xl font-bold text-green-600">{formatCurrency(currentPaid, currency)}</p>
-                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Current period</p>
+                <p className={`${getFontSizeClass(formatCurrency(totalCost, currency))} font-bold text-indigo-600 dark:text-indigo-400`}>{formatCurrency(totalCost, currency)}</p>
               </div>
+            </div>
+            <div className="flex justify-end mt-4">
+              <ChangeIndicator change={calculateChange(totalCost, 0)} />
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="bg-gradient-to-br from-green-50 to-green-100 dark:from-green-950 dark:to-green-900 border-green-200 dark:border-green-800 min-h-[180px] flex flex-col">
+          <CardHeader className="flex-shrink-0">
+            <CardTitle className="text-green-700 dark:text-green-300">Total Paid</CardTitle>
+          </CardHeader>
+          <CardContent className="flex-1 flex flex-col justify-between">
+            <div className="flex justify-between items-start">
+              <div>
+                <p className={`${getFontSizeClass(formatCurrency(currentPaid, currency))} font-bold text-green-600 dark:text-green-400`}>{formatCurrency(currentPaid, currency)}</p>
+              </div>
+            </div>
+            <div className="flex justify-end mt-4">
               <ChangeIndicator change={paidChange} />
             </div>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Cheque Balance</CardTitle>
-            <CardDescription>Pending cheques this month</CardDescription>
+        <Card className="bg-gradient-to-br from-orange-50 to-orange-100 dark:from-orange-950 dark:to-orange-900 border-orange-200 dark:border-orange-800 min-h-[180px] flex flex-col">
+          <CardHeader className="flex-shrink-0">
+            <CardTitle className="text-orange-700 dark:text-orange-300">Total Cheque Balance</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="flex-1 flex flex-col justify-between">
             <div className="flex justify-between items-start">
               <div>
-                <p className="text-3xl font-bold text-orange-600">{formatCurrency(currentChequeBalance, currency)}</p>
-                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Current period</p>
+                <p className={`${getFontSizeClass(formatCurrency(totalChequeBalance, currency))} font-bold text-orange-600 dark:text-orange-400`}>{formatCurrency(totalChequeBalance, currency)}</p>
               </div>
-              <ChangeIndicator change={chequeChange} />
+            </div>
+            <div className="flex justify-end mt-4">
+              <ChangeIndicator change={totalChequeBalance > 0 ? 0 : 0} />
             </div>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Credit Balance</CardTitle>
-            <CardDescription>Outstanding credit this month</CardDescription>
+        <Card className="bg-gradient-to-br from-red-50 to-red-100 dark:from-red-950 dark:to-red-900 border-red-200 dark:border-red-800 min-h-[180px] flex flex-col">
+          <CardHeader className="flex-shrink-0">
+            <CardTitle className="text-red-700 dark:text-red-300">Total Credit Balance</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="flex-1 flex flex-col justify-between">
             <div className="flex justify-between items-start">
               <div>
-                <p className="text-3xl font-bold text-red-600">{formatCurrency(currentCreditBalance, currency)}</p>
-                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Current period</p>
+                <p className={`${getFontSizeClass(formatCurrency(totalCreditBalance, currency))} font-bold text-red-600 dark:text-red-400`}>{formatCurrency(totalCreditBalance, currency)}</p>
               </div>
-              <ChangeIndicator change={creditChange} />
+            </div>
+            <div className="flex justify-end mt-4">
+              <ChangeIndicator change={totalCreditBalance > 0 ? 0 : 0} />
             </div>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Low Stock</CardTitle>
-            <CardDescription>Items needing attention</CardDescription>
+        <Card className="bg-gradient-to-br from-amber-50 to-amber-100 dark:from-amber-950 dark:to-amber-900 border-amber-200 dark:border-amber-800 min-h-[180px] flex flex-col">
+          <CardHeader className="flex-shrink-0">
+            <CardTitle className="text-amber-700 dark:text-amber-300">Total Outstanding</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="flex-1 flex flex-col justify-between">
             <div className="flex justify-between items-start">
               <div>
-                <p className="text-3xl font-bold text-red-500">{lowStockItems}</p>
-                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Items below 100</p>
+                <p className={`${getFontSizeClass(formatCurrency(totalChequeBalance + totalCreditBalance, currency))} font-bold text-amber-600 dark:text-amber-400`}>{formatCurrency(totalChequeBalance + totalCreditBalance, currency)}</p>
               </div>
+            </div>
+            <div className="flex justify-end mt-4">
+              <ChangeIndicator change={(totalChequeBalance + totalCreditBalance) > 0 ? 0 : 0} />
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="bg-gradient-to-br from-rose-50 to-rose-100 dark:from-rose-950 dark:to-rose-900 border-rose-200 dark:border-rose-800 min-h-[180px] flex flex-col">
+          <CardHeader className="flex-shrink-0">
+            <CardTitle className="text-rose-700 dark:text-rose-300">Low Stock</CardTitle>
+          </CardHeader>
+          <CardContent className="flex-1 flex flex-col justify-between">
+            <div className="flex justify-between items-start">
+              <div>
+                <p className={`${getFontSizeClass(lowStockItems)} font-bold text-rose-600 dark:text-rose-400`}>{lowStockItems}</p>
+              </div>
+            </div>
+            <div className="flex justify-end mt-4">
               <ChangeIndicator change={lowStockItems > 0 ? -5.2 : 0} />
             </div>
           </CardContent>
         </Card>
+        {/* Total Profit Card - Admin Only */}
+        {isAdmin && (
+          <Card className="bg-gradient-to-br from-teal-50 to-teal-100 dark:from-teal-950 dark:to-teal-900 border-teal-200 dark:border-teal-800 min-h-[180px] flex flex-col">
+            <CardHeader>
+              <CardTitle className="text-teal-700 dark:text-teal-300">�Total Profit (Admin)</CardTitle>
+            </CardHeader>
+            <CardContent className="flex-1 flex flex-col justify-between">
+              <div className="flex justify-between items-start">
+                <div>
+                  <p className={`${getFontSizeClass(formatCurrency(totalSales - totalCost, currency))} font-bold text-teal-600 dark:text-teal-400`}>{formatCurrency(totalSales - totalCost, currency)}</p>
+                </div>
+              </div>
+              <div className="flex justify-end mt-4">
+                <ChangeIndicator change={calculateChange(totalSales - totalCost, 0)} />
+              </div>
+            </CardContent>
+          </Card>
+        )}
+        <ExpensesCard currency={currency} dateRange={dateRange} />
+        {/* Net Profit Card - Admin Only */}
+        {isAdmin && <NetProfitCard currency={currency} dateRange={dateRange} totalSales={totalSales} totalCost={totalCost} />}
       </div>
 
-      {/* Monthly Comparison Summary */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Period Performance Comparison</CardTitle>
-          <CardDescription>Current filtered period vs previous period performance</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <div className="text-center">
-              <p className="text-sm text-slate-600 dark:text-slate-400">Sales Growth</p>
-              <p className="text-2xl font-bold text-blue-600">{formatCurrency(totalSales, currency)}</p>
-              <div className="mt-1">
-                <ChangeIndicator change={salesChange} />
-              </div>
-            </div>
-            <div className="text-center">
-              <p className="text-sm text-slate-600 dark:text-slate-400">Order Growth</p>
-              <p className="text-2xl font-bold text-green-600">{totalOrders}</p>
-              <div className="mt-1">
-                <ChangeIndicator change={ordersChange} />
-              </div>
-            </div>
-            <div className="text-center">
-              <p className="text-sm text-slate-600 dark:text-slate-400">Payment Collection</p>
-              <p className="text-2xl font-bold text-purple-600">{formatCurrency(currentPaid, currency)}</p>
-              <div className="mt-1">
-                <ChangeIndicator change={paidChange} />
-              </div>
-            </div>
-            <div className="text-center">
-              <p className="text-sm text-slate-600 dark:text-slate-400">Outstanding Balance</p>
-              <p className="text-2xl font-bold text-red-600">{formatCurrency(currentChequeBalance + currentCreditBalance, currency)}</p>
-              <div className="mt-1">
-                <ChangeIndicator change={(chequeChange + creditChange) / 2} />
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+
 
       {/* Charts */}
-      <div className="grid gap-8 lg:grid-cols-2">
+      <div className="grid gap-6 sm:gap-8 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Sales Overview</CardTitle>
-            <CardDescription>Monthly performance of filtered sales</CardDescription>
+            <CardTitle>Financial Overview</CardTitle>
+            <CardDescription>Monthly performance of sales, costs, and profits</CardDescription>
           </CardHeader>
           <CardContent>
             {salesDataForChart.length > 0 ? (
@@ -756,7 +1212,15 @@ const DriverDashboard: React.FC<{
 
     return (
         <div className="p-4 sm:p-6 lg:p-8 space-y-8">
-            <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-100">Driver Dashboard</h1>
+            <div className="flex justify-between items-center">
+                <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-100">Driver Dashboard</h1>
+                <a 
+                    href="#/my-location" 
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors"
+                >
+                    📍 Enable Location Sharing
+                </a>
+            </div>
             
             {/* Driver Stats */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -957,7 +1421,15 @@ const SalesRepDashboard: React.FC<{
 
     return (
         <div className="p-4 sm:p-6 lg:p-8 space-y-8">
-            <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-100">Sales Rep Dashboard</h1>
+            <div className="flex justify-between items-center">
+                <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-100">Sales Rep Dashboard</h1>
+                <a 
+                    href="#/my-location" 
+                    className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors"
+                >
+                    📍 Enable Location Sharing
+                </a>
+            </div>
             
             {/* Sales Rep Stats */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">

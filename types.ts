@@ -38,6 +38,13 @@ export interface User {
   password?: string;
   settings: UserSettings;
   assignedSupplierNames?: string[];
+  currentLocation?: {
+    latitude: number;
+    longitude: number;
+    timestamp: string;
+    accuracy?: number;
+  };
+  locationSharing?: boolean;
 }
 
 export interface Product {
@@ -56,7 +63,7 @@ export interface OrderItem {
   productId: string;
   quantity: number;
   price: number; // price at the time of order to prevent changes if product price updates
-  discount?: number; // discount percentage
+  free?: number; // free quantity given with this item
   isReturn?: boolean; // true if this item is a returned product
 }
 
@@ -65,11 +72,14 @@ export interface Order {
   customerId: string;
   customerName: string;
   date: string;
+  created_at?: string; // Timestamp when the order was created
   expectedDeliveryDate?: string;
+  deliveryAddress?: string; // Specific delivery address for this order
   total: number;
   status: OrderStatus;
   orderItems: OrderItem[];
   backorderedItems?: OrderItem[];
+  freeItems?: OrderItem[]; // Free items given with the order
   chequeBalance?: number;
   creditBalance?: number;
   assignedUserId?: string; // ID of the user (Sales Rep or Driver) who created/manages the order
@@ -83,6 +93,8 @@ export interface Customer {
   email: string;
   phone: string;
   location: string;
+  gpsCoordinates?: string; // GPS coordinates in "lat, lng" format
+  route?: string; // Route assignment for delivery planning
   joinDate: string;
   totalSpent: number;
   avatarUrl: string;

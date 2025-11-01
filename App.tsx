@@ -5,13 +5,17 @@ import { Header } from './components/layout/Header';
 import { Dashboard } from './components/pages/Dashboard';
 import { Products } from './components/pages/Products';
 import { Orders } from './components/pages/Orders';
-import { Customers } from './components/pages/Customers';
+import { Deliveries } from './components/pages/Deliveries';
+import { CustomerManagement } from './components/pages/CustomerManagement';
 import { UserManagement } from './components/pages/UserManagement';
 import { Settings } from './components/pages/Settings';
 import { Login } from './components/pages/Login';
 import { Drivers } from './components/pages/Drivers';
 import { Suppliers } from './components/pages/Suppliers';
 import { Collections } from './components/pages/Collections';
+import Expenses from './components/pages/Expenses';
+import { LiveTracking } from './components/pages/LiveTracking';
+import { MyLocation } from './components/pages/MyLocation';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { DataProvider } from './contexts/DataContext';
@@ -21,25 +25,45 @@ const ProtectedRoute = () => {
   return currentUser ? <MainLayout /> : <Navigate to="/login" />;
 };
 
+const RoleProtectedRoute: React.FC<{ allowedRoles: string[]; element: React.ReactElement }> = ({ allowedRoles, element }) => {
+  const { currentUser } = useAuth();
+  if (!currentUser) return <Navigate to="/login" />;
+  if (!allowedRoles.includes(currentUser.role)) return <Navigate to="/" />;
+  return element;
+};
+
 const MainLayout = () => {
     const [isSidebarOpen, setSidebarOpen] = useState(false);
     const toggleSidebar = () => setSidebarOpen(!isSidebarOpen);
     const closeSidebar = () => setSidebarOpen(false);
 
     return (
-        <div className="flex h-screen bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-200">
+        <div className="relative flex h-screen bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-200 overflow-hidden">
+            {/* Mobile overlay */}
+            {isSidebarOpen && (
+                <div 
+                    className="fixed inset-0 bg-black bg-opacity-50 z-20 lg:hidden"
+                    onClick={closeSidebar}
+                />
+            )}
+            
             <Sidebar isSidebarOpen={isSidebarOpen} closeSidebar={closeSidebar} />
-            <div className="flex flex-col flex-1 overflow-y-auto">
+            
+            <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
                 <Header toggleSidebar={toggleSidebar} />
-                <main>
+                <main className="flex-1 overflow-y-auto px-2 sm:px-4 lg:px-6 py-4 sm:py-6">
                     <Routes>
                         <Route path="/" element={<Dashboard />} />
                         <Route path="/products" element={<Products />} />
                         <Route path="/orders" element={<Orders />} />
-                        <Route path="/customers" element={<Customers />} />
+                        <Route path="/deliveries" element={<RoleProtectedRoute allowedRoles={["Admin", "Manager"]} element={<Deliveries />} />} />
+                        <Route path="/customers" element={<CustomerManagement />} />
                         <Route path="/suppliers" element={<Suppliers />} />
                         <Route path="/collections" element={<Collections />} />
                         <Route path="/drivers" element={<Drivers />} />
+                        <Route path="/expenses" element={<RoleProtectedRoute allowedRoles={["Admin", "Manager"]} element={<Expenses />} />} />
+                        <Route path="/live-tracking" element={<RoleProtectedRoute allowedRoles={["Admin", "Manager"]} element={<LiveTracking />} />} />
+                        <Route path="/my-location" element={<RoleProtectedRoute allowedRoles={["Sales Rep", "Driver"]} element={<MyLocation />} />} />
                         <Route path="/users" element={<UserManagement />} />
                         <Route path="/settings" element={<Settings />} />
                         {/* Redirect any other nested routes to dashboard */}

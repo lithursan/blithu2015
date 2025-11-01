@@ -29,6 +29,16 @@ export const NAV_ITEMS = [
     ),
   },
   {
+    path: '/deliveries',
+    label: 'Deliveries',
+    icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7h4l3 9h6l3-6h-4" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 21v-2M8 21v-2" />
+      </svg>
+    ),
+  },
+  {
     path: '/customers',
     label: 'Customers',
     icon: (
@@ -50,13 +60,43 @@ export const NAV_ITEMS = [
     path: '/drivers',
     label: 'Drivers',
     icon: (
-       <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M12 11c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3z" />
         <path strokeLinecap="round" strokeLinejoin="round" d="M21 21c-3.333-3.333-6.667-5-10-5s-6.667 1.667-10 5" />
         <path strokeLinecap="round" strokeLinejoin="round" d="M12 11v10" />
         <path strokeLinecap="round" strokeLinejoin="round" d="M15.536 12.464l-3.536 3.536-3.536-3.536" />
         <path strokeLinecap="round" strokeLinejoin="round" d="M18 9h-2a2 2 0 100 4h2" />
         <path strokeLinecap="round" strokeLinejoin="round" d="M6 9h2a2 2 0 110 4H6" />
+      </svg>
+    ),
+  },
+  {
+    path: '/expenses',
+    label: 'Expenses',
+    icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+      </svg>
+    ),
+  },
+  {
+    path: '/live-tracking',
+    label: 'Live Tracking',
+    icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+      </svg>
+    ),
+  },
+  {
+    path: '/my-location',
+    label: 'My Location',
+    icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18.5a6 6 0 100-12 6 6 0 000 12zm0 0v.5m0-.5a6 6 0 100-12 6 6 0 000 12zm0 0v.5" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l2 2" />
+        <circle cx="12" cy="12" r="3" />
       </svg>
     ),
   },
