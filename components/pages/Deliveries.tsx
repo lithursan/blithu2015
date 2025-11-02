@@ -10,7 +10,7 @@ import { COMPANY_DETAILS } from '../../constants';
 
 // Deliveries page: group orders by expected delivery date, aggregate product quantities
 export const Deliveries: React.FC = () => {
-  const { orders, products, users, driverAllocations, setDriverAllocations, refetchData } = useData();
+  const { orders, products, users, driverAllocations, setDriverAllocations, refetchData, deliveryAggregatedProducts, setDeliveryAggregatedProducts } = useData();
   // Allow selecting multiple dates to combine allocations/aggregation
   const [selectedDates, setSelectedDates] = useState<Set<string>>(new Set());
   const [allocatingToDriver, setAllocatingToDriver] = useState<string | null>(null);
@@ -44,6 +44,27 @@ export const Deliveries: React.FC = () => {
     });
     return Array.from(map.entries()).map(([productId, qty]) => ({ productId, qty }));
   }, [ordersByDate, selectedDates]);
+
+  // Publish per-date aggregated products into DataContext so other pages (Drivers) can consume
+  React.useEffect(() => {
+    if (!setDeliveryAggregatedProducts) return;
+    // Build map for each selected date individually so Drivers can import per-date lists
+    const perDate: Record<string, { productId: string; qty: number }[]> = {};
+    if (selectedDates && selectedDates.size > 0) {
+      Array.from(selectedDates).forEach(selDate => {
+        const dateOrders = ordersByDate[selDate] || [];
+        const map = new Map<string, number>();
+        dateOrders.forEach(order => {
+          (order.orderItems || []).forEach((item: any) => {
+            const prev = map.get(item.productId) || 0;
+            map.set(item.productId, prev + (item.quantity || 0));
+          });
+        });
+        perDate[selDate] = Array.from(map.entries()).map(([productId, qty]) => ({ productId, qty }));
+      });
+    }
+    setDeliveryAggregatedProducts(prev => ({ ...prev, ...perDate }));
+  }, [selectedDates, ordersByDate, setDeliveryAggregatedProducts]);
 
   const drivers = users.filter(u => u.role === 'Driver');
 
@@ -104,18 +125,10 @@ export const Deliveries: React.FC = () => {
         return;
       }
       const insertedArray = Array.isArray(data) ? data : [];
-      const newAllocs: DriverAllocation[] = insertedArray.map((row: any) => ({
-        id: row.id,
-        driverId,
-        driverName,
-        date: row.date,
-        allocatedItems: items as any,
-        returnedItems: null,
-        salesTotal: 0,
-        status: 'Allocated',
-      }));
-      setDriverAllocations(prev => [...prev, ...newAllocs]);
-      await refetchData();
+      // rely on refetchData to load fresh (and deduplicated) allocations from DB
+      if (insertedArray.length > 0) {
+        await refetchData();
+      }
     } catch (err: any) {
       setLoading(false);
       console.error(err);

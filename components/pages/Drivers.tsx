@@ -17,7 +17,7 @@ const formatCurrency = (amount: number, currency: string) => {
 const todayStr = new Date().toISOString().split('T')[0];
 
 export const Drivers: React.FC = () => {
-    const { users, products, setProducts, driverAllocations, setDriverAllocations, suppliers } = useData();
+    const { users, products, setProducts, driverAllocations, setDriverAllocations, suppliers, deliveryAggregatedProducts, setDeliveryAggregatedProducts } = useData();
     const { currentUser } = useAuth();
 
     if (currentUser?.role !== UserRole.Admin && currentUser?.role !== UserRole.Manager && currentUser?.role !== UserRole.Sales) {
@@ -45,7 +45,28 @@ export const Drivers: React.FC = () => {
     const [allocationSupplier, setAllocationSupplier] = useState<string>('');
     
     const drivers = useMemo(() => users.filter(u => u.role === UserRole.Driver && u.status === UserStatus.Active), [users]);
-    const todayAllocations = useMemo(() => driverAllocations.filter(alloc => alloc.date === selectedDate), [driverAllocations, selectedDate]);
+    const todayAllocations = useMemo(() => {
+        if (!driverAllocations || !selectedDate) return [];
+        return driverAllocations.filter(alloc => {
+            if (!alloc || !alloc.date) return false;
+            const d = typeof alloc.date === 'string' ? alloc.date.slice(0,10) : new Date(alloc.date).toISOString().slice(0,10);
+            return d === selectedDate;
+        });
+    }, [driverAllocations, selectedDate]);
+
+    // Helper: robust driver-allocation matcher (compare trimmed ids and fallback to name)
+    const matchAllocationToDriver = (alloc: any, driver: User | { id?: string; name?: string }) => {
+        if (!alloc) return false;
+        const aid = (alloc.driverId || alloc.driver_id || '').toString().trim();
+        const aname = (alloc.driverName || alloc.driver_name || '').toString().trim().toLowerCase();
+        const did = (driver.id || '').toString().trim();
+        const dname = (driver.name || '').toString().trim().toLowerCase();
+        if (aid && did && aid === did) return true;
+        if (aid && did && (aid.includes(did) || did.includes(aid))) return true;
+        if (aname && dname && aname === dname) return true;
+        if (aname && dname && (aname.includes(dname) || dname.includes(aname))) return true;
+        return false;
+    };
 
     // Move fallback UI after all hooks
     let fallbackUI: React.ReactNode = null;
@@ -74,14 +95,24 @@ export const Drivers: React.FC = () => {
 
     const handleOpenAllocateModal = (driver: User) => {
         setSelectedDriver(driver);
-        setAllocationQuantities({});
+        // If there are aggregated delivery products for the currently selectedDate, prefill quantities
+        if (!isEditMode && deliveryAggregatedProducts && deliveryAggregatedProducts[selectedDate]) {
+            const list = deliveryAggregatedProducts[selectedDate];
+            const initialQuantities = list.reduce((acc, it) => {
+                acc[it.productId] = it.qty;
+                return acc;
+            }, {} as Record<string, number>);
+            setAllocationQuantities(initialQuantities);
+        } else {
+            setAllocationQuantities({});
+        }
         setIsEditMode(false);
         setAllocationSupplier(availableSuppliers.length > 0 ? availableSuppliers[0].name : '');
         setModal('allocate');
     };
     
     const handleOpenEditAllocateModal = (driver: User) => {
-        const allocation = todayAllocations.find(a => a.driverId === driver.id);
+        const allocation = todayAllocations.find(a => matchAllocationToDriver(a, driver));
         if (!allocation) {
             console.warn('No allocation found for driver:', driver.id, driver.name, todayAllocations);
             alert('No allocation found for this driver today. Please allocate first.');
@@ -212,7 +243,7 @@ export const Drivers: React.FC = () => {
         const doSave = async () => {
             if (isEditMode) {
                 // Find the correct allocation from DB (by id)
-                const originalAllocation = driverAllocations.find(a => a.driverId === selectedDriver.id && a.date === selectedDate);
+                const originalAllocation = driverAllocations.find(a => selectedDriver ? ( ( (a.driverId || a.driver_id || '').toString().trim() === (selectedDriver.id || '').toString().trim() || (a.driverId || '').toString().trim().includes((selectedDriver.id || '').toString().trim()) ) && a.date === selectedDate ) : false);
                 if (!originalAllocation) {
                     alert('No allocation found to edit.');
                     return;
@@ -277,7 +308,16 @@ export const Drivers: React.FC = () => {
     const getDriverStatus = (driverId: string): { status: 'Allocated' | 'Reconciled' | 'Not Allocated', badge: 'info' | 'success' | 'default' } => {
         // Status should reflect allocations up to the selected date (inclusive). If any active (non-reconciled)
         // allocation exists on or before the selected date, consider the driver Allocated.
-        const allocsUpToDate = driverAllocations.filter(a => a.driverId === driverId && new Date(a.date) <= new Date(selectedDate));
+        const did = (driverId || '').toString().trim();
+        const allocsUpToDate = (driverAllocations || []).filter(a => {
+            if (!a || !a.date) return false;
+            const aid = (a.driverId || a.driver_id || '').toString().trim();
+            const dateOk = new Date(a.date) <= new Date(selectedDate);
+            if (!aid || !did) return false;
+            // match by exact id or substring (defensive)
+            const idMatch = aid === did || aid.includes(did) || did.includes(aid);
+            return idMatch && dateOk;
+        });
         if (!allocsUpToDate || allocsUpToDate.length === 0) return { status: 'Not Allocated', badge: 'default' };
         // If any allocation up to date is not reconciled, show Allocated
         if (allocsUpToDate.some(a => (a.status ?? 'Allocated') !== 'Reconciled')) {
@@ -290,7 +330,7 @@ export const Drivers: React.FC = () => {
     const productsToShowInModal = useMemo(() => {
         // In edit mode, find the IDs of products that are already part of the allocation.
         const originallyAllocatedProductIds = isEditMode
-            ? todayAllocations.find(a => a.driverId === selectedDriver?.id)?.allocatedItems.map(i => i.productId) ?? []
+            ? todayAllocations.find(a => selectedDriver ? matchAllocationToDriver(a, selectedDriver) : false)?.allocatedItems.map(i => i.productId) ?? []
             : [];
 
         // Filter the main product list.
@@ -353,7 +393,7 @@ export const Drivers: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
                 {drivers.map(driver => {
                     const { status, badge } = getDriverStatus(driver.id);
-                    const allocation = todayAllocations.find(a => a.driverId === driver.id);
+                    const allocation = todayAllocations.find(a => matchAllocationToDriver(a, driver));
                     const isAllocated = !!allocation;
 
                     return (
@@ -412,7 +452,7 @@ export const Drivers: React.FC = () => {
                     <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400">Select products from the main warehouse to allocate for today's sales route.</p>
                     <div className="space-y-3">
                          {productsToShowInModal.map(product => {
-                            const originalAllocation = isEditMode ? todayAllocations.find(a => a.driverId === selectedDriver?.id) : null;
+                            const originalAllocation = isEditMode ? todayAllocations.find(a => selectedDriver ? matchAllocationToDriver(a, selectedDriver) : false) : null;
                             const originalQuantity = originalAllocation?.allocatedItems.find(i => i.productId === product.id)?.quantity || 0;
                             const maxAllocatable = product.stock + originalQuantity;
 
@@ -500,8 +540,16 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
     
             // Use all active (non-reconciled) allocations up to today for this driver (cumulative view)
             const activeAllocations = useMemo(() =>
-                    driverAllocations
-                        .filter(a => a.driverId === driver.id && new Date(a.date) <= new Date(todayStr) && (a.status ?? 'Allocated') !== 'Reconciled')
+                    (driverAllocations || [])
+                        .filter(a => {
+                            if (!a || !a.date) return false;
+                            const aid = (a.driverId || a.driver_id || '').toString().trim();
+                            const did = (driver.id || '').toString().trim();
+                            const dateOk = new Date(a.date) <= new Date(todayStr);
+                            if (!aid || !did) return false;
+                            const idMatch = aid === did || aid.includes(did) || did.includes(aid);
+                            return idMatch && dateOk && ((a.status ?? 'Allocated') !== 'Reconciled');
+                        })
                         .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()),
                     [driverAllocations, driver.id]
             );

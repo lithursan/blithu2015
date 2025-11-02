@@ -30,6 +30,9 @@ interface DataContextType {
   setSuppliers: Dispatch<SetStateAction<Supplier[]>>;
   refetchData: () => Promise<void>;
   calculateCustomerOutstanding?: (customerId: string) => number;
+    // Aggregated delivery products keyed by date (YYYY-MM-DD) produced by the Deliveries page
+    deliveryAggregatedProducts?: Record<string, { productId: string; qty: number }[]>;
+    setDeliveryAggregatedProducts?: Dispatch<SetStateAction<Record<string, { productId: string; qty: number }[]>>>;
 }
 
 export const DataContext = createContext<DataContextType | undefined>(undefined);
@@ -50,6 +53,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const [driverAllocations, setDriverAllocations] = useState<DriverAllocation[]>([]);
     const [driverSales, setDriverSales] = useState<DriverSale[]>([]);
     const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+    const [deliveryAggregatedProducts, setDeliveryAggregatedProducts] = useState<Record<string, { productId: string; qty: number }[]>>({});
 
     React.useEffect(() => {
         // Fetch all data from Supabase tables
@@ -167,7 +171,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     }
                     continue; // Skip this table and continue with others
                 }
-                if (data) {
+                    if (data) {
                     console.log(`Successfully fetched ${name}:`, data.length, 'records');
                     if (name === 'customers') {
                         console.log('Raw customers data:', data[0]); // Debug first record
@@ -218,9 +222,11 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                         console.log('Debug - Driver_allocations error:', error);
                         const mappedAllocations = data.map((row: any) => ({
                             id: row.id,
-                            driverId: row.driver_id ?? row.driverid,
-                            driverName: row.driver_name ?? row.drivername,
-                            date: row.date,
+                            // Normalize and trim driver id/name so UI comparisons succeed
+                            driverId: row.driver_id ?? row.driverid ? String(row.driver_id ?? row.driverid).trim() : '',
+                            driverName: row.driver_name ?? row.drivername ? String(row.driver_name ?? row.drivername).trim() : '',
+                            // Normalize date to YYYY-MM-DD for consistent comparisons in UI
+                            date: row.date ? (typeof row.date === 'string' ? row.date.slice(0,10) : new Date(row.date).toISOString().slice(0,10)) : null,
                             allocatedItems: (() => {
                                 console.log(`Debug - Row ${row.id} allocated_items:`, row.allocated_items);
                                 console.log(`Debug - Row ${row.id} allocateditems:`, row.allocateditems);
@@ -282,7 +288,21 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                             status: row.status ?? 'Allocated',
                         }));
                         console.log('Debug - Mapped driver allocations:', mappedAllocations);
-                        setter(mappedAllocations);
+                        // Deduplicate allocations by id (prefer) or driverId+date as fallback
+                        const deduped = (() => {
+                            const byId = new Map<string | number, any>();
+                            const byKey = new Map<string, any>();
+                            for (const a of mappedAllocations) {
+                                if (a.id) {
+                                    byId.set(String(a.id), a);
+                                } else {
+                                    const key = `${a.driverId}::${a.date}`;
+                                    if (!byKey.has(key)) byKey.set(key, a);
+                                }
+                            }
+                            return [...Array.from(byId.values()), ...Array.from(byKey.values())];
+                        })();
+                        setter(deduped);
                     } else if (name === 'users') {
                         const mappedUsers = data.map((row: any) => ({
                             id: row.id,
@@ -459,9 +479,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 if (!allocationsError && allocationsData) {
                     const mappedAllocations = allocationsData.map((row: any) => ({
                         id: row.id,
-                        driverId: row.driver_id ?? row.driverid,
-                        driverName: row.driver_name ?? row.drivername,
-                        date: row.date,
+                        driverId: row.driver_id ?? row.driverid ? String(row.driver_id ?? row.driverid).trim() : '',
+                        driverName: row.driver_name ?? row.drivername ? String(row.driver_name ?? row.drivername).trim() : '',
+                        // Normalize date to YYYY-MM-DD for consistent comparisons in UI
+                        date: row.date ? (typeof row.date === 'string' ? row.date.slice(0,10) : new Date(row.date).toISOString().slice(0,10)) : null,
                         allocatedItems: (() => {
                             if (row.allocated_items) {
                                 if (typeof row.allocated_items === 'string') {
@@ -495,7 +516,21 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                         salesTotal: row.sales_total ?? row.salestotal ?? 0,
                         status: row.status ?? 'Allocated',
                     }));
-                    setDriverAllocations(mappedAllocations);
+                    // Deduplicate allocations by id or driverId+date to avoid duplicates from DB or transient merges
+                    const deduped = (() => {
+                        const byId = new Map<string | number, any>();
+                        const byKey = new Map<string, any>();
+                        for (const a of mappedAllocations) {
+                            if (a.id) {
+                                byId.set(String(a.id), a);
+                            } else {
+                                const key = `${a.driverId}::${a.date}`;
+                                if (!byKey.has(key)) byKey.set(key, a);
+                            }
+                        }
+                        return [...Array.from(byId.values()), ...Array.from(byKey.values())];
+                    })();
+                    setDriverAllocations(deduped);
                 }
             } catch (err) {
                 console.error('Error fetching driver_allocations in refetchData:', err);
@@ -538,6 +573,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         driverAllocations, setDriverAllocations,
         driverSales, setDriverSales,
         suppliers, setSuppliers,
+        deliveryAggregatedProducts,
+        setDeliveryAggregatedProducts,
         refetchData,
         calculateCustomerOutstanding,
     };

@@ -321,6 +321,9 @@ export const Orders: React.FC = () => {
   // Editable return amount for input
   const [editableReturnAmount, setEditableReturnAmount] = useState<number | ''>('');
 
+  // Prevent duplicate submissions when saving/creating orders
+  const [isSavingOrder, setIsSavingOrder] = useState(false);
+
   // Load amountPaid into editableAmountPaid when viewing/editing an order
   useEffect(() => {
     if (viewingOrder) {
@@ -817,8 +820,14 @@ export const Orders: React.FC = () => {
         });
       }
     });
-
   // Patch: Always assign customerId (snake_case for DB)
+  // Prevent duplicate submissions
+  if (isSavingOrder) {
+    console.warn('Order save already in progress — ignoring duplicate submit');
+    return;
+  }
+  setIsSavingOrder(true);
+  try {
   if (modalState === 'create') {
     try {
       if (!customer.id) {
@@ -1069,6 +1078,9 @@ export const Orders: React.FC = () => {
       alert('An unexpected error occurred. Please try again.');
       return;
     }
+  }
+  } finally {
+    setIsSavingOrder(false);
   }
   closeModal();
 };
@@ -2424,9 +2436,9 @@ export const Orders: React.FC = () => {
                       onClick={handleSaveOrder} 
                       type="button" 
                       className="flex-1 px-2 py-1.5 sm:px-3 sm:py-2 text-white bg-blue-600 hover:bg-blue-700 border border-blue-600 text-xs font-semibold rounded transition-all duration-200 disabled:bg-slate-400 disabled:cursor-not-allowed" 
-                      disabled={(inStockItems + heldItemsCount) === 0 || !selectedCustomer}
+                      disabled={(inStockItems + heldItemsCount) === 0 || !selectedCustomer || isSavingOrder}
                     >
-                      {modalState === 'create' ? 'Create' : 'Save'}
+                      {modalState === 'create' ? (isSavingOrder ? 'Creating...' : 'Create') : (isSavingOrder ? 'Saving...' : 'Save')}
                     </button>
                   </div>
                 </div>
