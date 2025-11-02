@@ -1603,7 +1603,7 @@ export const Orders: React.FC = () => {
           </div>
         </div>
 
-  <p class="billTo"><strong>Bill To:</strong> ${customer.name}</p>
+        <p class="billTo"><strong>Bill To:</strong> ${customer.name}</p>
 
         <table>
           <thead>
