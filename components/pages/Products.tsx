@@ -9,7 +9,6 @@ import { supabase, fetchProducts } from '../../supabaseClient';
 import { exportProducts } from '../../utils/exportUtils';
 import { useLoading, LoadingButton, LoadingSpinner } from '../../hooks/useLoading';
 import { useValidation, validationRules } from '../../hooks/useValidation';
-import { confirmSecureDelete } from '../../utils/passwordConfirmation';
 
 const getStockBadgeVariant = (stock: number): 'success' | 'warning' | 'danger' | 'info' => {
     if (stock > 100) return 'success';
@@ -209,20 +208,6 @@ export const Products: React.FC = () => {
   };
 
   const handleDelete = async () => {
-    if (!productToDelete || !currentUser?.email) return;
-    
-    // Require password confirmation for delete
-    const confirmed = await confirmSecureDelete(
-      productToDelete.name, 
-      'Product', 
-      currentUser.email
-    );
-    
-    if (!confirmed) {
-      closeDeleteConfirm();
-      return;
-    }
-    
     if (productToDelete) {
       try {
         setLoading('delete', true);
@@ -281,20 +266,19 @@ export const Products: React.FC = () => {
   }, [filteredProducts]);
 
   return (
-    <div className="p-3 sm:p-4 lg:p-6 space-y-6 sm:space-y-8">
-      <div className="flex flex-col sm:flex-row gap-4 sm:justify-between sm:items-center">
-        <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-slate-800 dark:text-slate-100">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-8">
+      <div className="flex justify-between items-center">
+        <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-100">
             {isDriver ? 'My Allocated Stock' : 'Products'}
         </h1>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex gap-2">
           {/* Export Buttons */}
           <button
             onClick={() => exportProducts(filteredProducts, 'csv')}
             className="px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-xl hover:from-emerald-600 hover:to-emerald-700 transition-all duration-300 text-xs sm:text-sm min-h-[42px] flex items-center justify-center shadow-md hover:shadow-lg transform hover:-translate-y-0.5 font-semibold"
             title="Export as CSV"
           >
-            <span className="hidden xs:inline">📊 CSV</span>
-            <span className="xs:hidden">CSV</span>
+            📊 CSV
           </button>
           <button
             onClick={() => exportProducts(filteredProducts, 'xlsx')}
@@ -317,9 +301,9 @@ export const Products: React.FC = () => {
       </div>
 
       <Card>
-        <CardHeader className="pb-4">
-            <CardTitle className="text-lg sm:text-xl">{isDriver ? "Products for Today's Route" : 'Product Inventory'}</CardTitle>
-            <CardDescription className="text-sm sm:text-base">
+        <CardHeader>
+            <CardTitle>{isDriver ? "Products for Today's Route" : 'Product Inventory'}</CardTitle>
+            <CardDescription>
                 {isDriver
                     ? "View the products allocated to you for today. The stock level reflects your allocated amount."
                     : "View and manage all products in your inventory, grouped by supplier."}
@@ -379,85 +363,49 @@ export const Products: React.FC = () => {
         </CardHeader>
         <CardContent>
         {isDriver ? (
-            // Driver View: Mobile-responsive layout
-            <div className="space-y-6 sm:space-y-8">
+            // Driver View: Simplified table
+            <div className="space-y-8">
                 {filteredProducts.length > 0 ? (
-                    <>
-                      {/* Desktop Table View */}
-                      <div className="hidden lg:block overflow-x-auto border dark:border-slate-700 rounded-lg">
-                          <table className="w-full text-sm text-left text-slate-500 dark:text-slate-400">
-                              <thead className="text-xs text-slate-700 uppercase bg-slate-50 dark:bg-slate-700 dark:text-slate-400">
-                                  <tr>
-                                      <th scope="col" className="px-6 py-3">Product</th>
-                                      <th scope="col" className="px-6 py-3">Category</th>
-                                      <th scope="col" className="px-6 py-3">Price</th>
-                                      <th scope="col" className="px-6 py-3">Allocated Stock</th>
-                                      <th scope="col" className="px-6 py-3">SKU</th>
-                                  </tr>
-                              </thead>
-                              <tbody>
-                                  {filteredProducts.map((product) => (
-                                      <tr key={product.id} className="bg-white border-b dark:bg-slate-800 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600">
-                                          <td className="px-6 py-4 font-medium text-slate-900 dark:text-white">
-                                              <div className="flex items-center space-x-3">
-                            {product.imageUrl ? (
-                              <img src={product.imageUrl} alt={product.name} className="w-10 h-10 rounded-full" />
-                            ) : (
-                              <div className="w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-slate-500 dark:text-slate-400 text-xl">
-                                <span>?</span>
-                              </div>
-                            )}
-                                                  <span>{product.name}</span>
-                                              </div>
-                                          </td>
-                                          <td className="px-6 py-4">{product.category}</td>
-                                          <td className="px-6 py-4">{formatCurrency(product.price, currency)}</td>
-                                          <td className="px-6 py-4">
-                                              <Badge variant={getDriverStockBadgeVariant(product.stock)}>{product.stock}</Badge>
-                                          </td>
-                                          <td className="px-6 py-4">{product.sku}</td>
-                                      </tr>
-                                  ))}
-                              </tbody>
-                          </table>
-                      </div>
-
-                      {/* Mobile Card View */}
-                      <div className="lg:hidden space-y-3">
-                          {filteredProducts.map((product) => (
-                              <div key={product.id} className="bg-slate-50 dark:bg-slate-800 rounded-lg p-4 border border-slate-200 dark:border-slate-700">
-                                  <div className="flex items-start justify-between mb-3">
-                                      <div className="flex items-center space-x-3 flex-1">
-                                          {product.imageUrl ? (
-                                              <img src={product.imageUrl} alt={product.name} className="w-12 h-12 rounded-full flex-shrink-0" />
-                                          ) : (
-                                              <div className="w-12 h-12 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-slate-500 dark:text-slate-400 text-lg flex-shrink-0">
-                                                  <span>?</span>
-                                              </div>
-                                          )}
-                                          <div className="min-w-0 flex-1">
-                                              <div className="font-semibold text-slate-900 dark:text-white text-sm sm:text-base truncate">{product.name}</div>
-                                              <div className="text-xs sm:text-sm text-slate-600 dark:text-slate-400">{product.category}</div>
-                                              <div className="text-xs sm:text-sm text-slate-500 dark:text-slate-500">SKU: {product.sku}</div>
-                                          </div>
-                                      </div>
-                                  </div>
-                                  
-                                  <div className="flex items-center justify-between">
-                                      <div className="text-sm sm:text-base font-semibold text-slate-900 dark:text-white">
-                                          {formatCurrency(product.price, currency)}
-                                      </div>
-                                      <Badge variant={getDriverStockBadgeVariant(product.stock)} className="text-xs">
-                                          Stock: {product.stock}
-                                      </Badge>
-                                  </div>
-                              </div>
-                          ))}
-                      </div>
-                    </>
+                    <div className="overflow-x-auto border dark:border-slate-700 rounded-lg">
+                        <table className="w-full text-sm text-left text-slate-500 dark:text-slate-400">
+                            <thead className="text-xs text-slate-700 uppercase bg-slate-50 dark:bg-slate-700 dark:text-slate-400">
+                                <tr>
+                                    <th scope="col" className="px-6 py-3">Product</th>
+                                    <th scope="col" className="px-6 py-3">Category</th>
+                                    <th scope="col" className="px-6 py-3">Price</th>
+                                    <th scope="col" className="px-6 py-3">Allocated Stock</th>
+                                    <th scope="col" className="px-6 py-3">SKU</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {filteredProducts.map((product) => (
+                                    <tr key={product.id} className="bg-white border-b dark:bg-slate-800 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600">
+                                        <td className="px-6 py-4 font-medium text-slate-900 dark:text-white">
+                                            <div className="flex items-center space-x-3">
+                        {product.imageUrl ? (
+                          <img src={product.imageUrl} alt={product.name} className="w-10 h-10 rounded-full" />
+                        ) : (
+                          <div className="w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-slate-500 dark:text-slate-400 text-xl">
+                            <span>?</span>
+                          </div>
+                        )}
+                                                <span>{product.name}</span>
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4">{product.category}</td>
+                                        <td className="px-6 py-4">{formatCurrency(product.price, currency)}</td>
+                                        <td className="px-6 py-4">
+                                            <Badge variant={getDriverStockBadgeVariant(product.stock)}>{product.stock}</Badge>
+                                        </td>
+                                        <td className="px-6 py-4">{product.sku}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
                 ) : (
-                    <div className="text-center py-8 sm:py-10">
-                         <p className="text-slate-500 dark:text-slate-400 text-sm sm:text-base px-4">
+                    <div className="text-center py-10">
+                         <p className="text-slate-500 dark:text-slate-400">
                             {displayedProducts.length === 0 
                                 ? "You have no products allocated for today."
                                 : "No products found matching your criteria."
@@ -467,8 +415,8 @@ export const Products: React.FC = () => {
                 )}
             </div>
         ) : (
-            // Admin/Manager/Sales View: Mobile-responsive grouped by supplier
-            <div className="space-y-6 sm:space-y-8">
+            // Admin/Manager/Sales View: Grouped by supplier
+            <div className="space-y-8">
                 {Object.entries(productsBySupplier).map(([supplierName, supplierProducts]) => {
                   const productsArr = supplierProducts as Product[];
                   return (
@@ -614,8 +562,8 @@ export const Products: React.FC = () => {
                   );
                 })}
                 {Object.keys(productsBySupplier).length === 0 && (
-                <div className="text-center py-8 sm:py-10">
-                    <p className="text-slate-500 dark:text-slate-400 text-sm sm:text-base px-4">No products found matching your criteria.</p>
+                <div className="text-center py-10">
+                    <p className="text-slate-500 dark:text-slate-400">No products found matching your criteria.</p>
                 </div>
                 )}
             </div>
@@ -624,31 +572,31 @@ export const Products: React.FC = () => {
       </Card>
       
       <Modal isOpen={isModalOpen} onClose={closeModal} title={modalMode === 'add' ? 'Add New Product' : 'Edit Product'}>
-        <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 max-h-[70vh] overflow-y-auto">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label htmlFor="name" className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">Product Name</label>
-              <input type="text" id="name" value={currentProduct.name || ''} onChange={e => handleInputChange('name', e.target.value)} className="bg-slate-50 border border-slate-300 text-slate-900 text-sm sm:text-base rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-3 sm:p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white min-h-[44px]" required />
+              <input type="text" id="name" value={currentProduct.name || ''} onChange={e => handleInputChange('name', e.target.value)} className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white" required />
             </div>
             <div>
               <label htmlFor="category" className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">Category</label>
-              <input type="text" id="category" value={currentProduct.category || ''} onChange={e => handleInputChange('category', e.target.value)} className="bg-slate-50 border border-slate-300 text-slate-900 text-sm sm:text-base rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-3 sm:p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white min-h-[44px]" required />
+              <input type="text" id="category" value={currentProduct.category || ''} onChange={e => handleInputChange('category', e.target.value)} className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white" required />
             </div>
             <div>
               <label htmlFor="price" className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">Price ({currency})</label>
-              <input type="number" id="price" value={currentProduct.price || ''} onChange={e => handleInputChange('price', parseFloat(e.target.value) || 0)} className="bg-slate-50 border border-slate-300 text-slate-900 text-sm sm:text-base rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-3 sm:p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white min-h-[44px]" required />
+              <input type="number" id="price" value={currentProduct.price || ''} onChange={e => handleInputChange('price', parseFloat(e.target.value) || 0)} className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white" required />
             </div>
             <div>
               <label htmlFor="costPrice" className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">Cost Price ({currency})</label>
-              <input type="number" id="costPrice" value={currentProduct.costPrice || ''} onChange={e => handleInputChange('costPrice', parseFloat(e.target.value) || 0)} className="bg-slate-50 border border-slate-300 text-slate-900 text-sm sm:text-base rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-3 sm:p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white min-h-[44px]" required />
+              <input type="number" id="costPrice" value={currentProduct.costPrice || ''} onChange={e => handleInputChange('costPrice', parseFloat(e.target.value) || 0)} className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white" required />
             </div>
             <div>
               <label htmlFor="stock" className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">Stock</label>
-              <input type="number" id="stock" value={currentProduct.stock || ''} onChange={e => handleInputChange('stock', parseInt(e.target.value, 10) || 0)} className="bg-slate-50 border border-slate-300 text-slate-900 text-sm sm:text-base rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-3 sm:p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white min-h-[44px]" required />
+              <input type="number" id="stock" value={currentProduct.stock || ''} onChange={e => handleInputChange('stock', parseInt(e.target.value, 10) || 0)} className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white" required />
             </div>
             <div>
               <label htmlFor="sku" className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">SKU</label>
-              <input type="text" id="sku" value={currentProduct.sku || ''} onChange={e => handleInputChange('sku', e.target.value)} placeholder="Auto-generated if left empty" className="bg-slate-50 border border-slate-300 text-slate-900 text-sm sm:text-base rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-3 sm:p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white min-h-[44px]" />
+              <input type="text" id="sku" value={currentProduct.sku || ''} onChange={e => handleInputChange('sku', e.target.value)} placeholder="Auto-generated if left empty" className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white" />
             </div>
             <div>
               <label htmlFor="supplier" className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">Supplier</label>
@@ -656,7 +604,7 @@ export const Products: React.FC = () => {
                 id="supplier" 
                 value={currentProduct.supplier || ''} 
                 onChange={e => handleInputChange('supplier', e.target.value)} 
-                className="bg-slate-50 border border-slate-300 text-slate-900 text-sm sm:text-base rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-3 sm:p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white min-h-[44px]" 
+                className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white" 
                 required
               >
                   <option value="" disabled>Select a supplier</option>
@@ -665,20 +613,20 @@ export const Products: React.FC = () => {
                   ))}
               </select>
             </div>
-            <div className="sm:col-span-2">
+            <div className="md:col-span-2">
               <label htmlFor="imageUrl" className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">Image URL</label>
-              <input type="text" id="imageUrl" value={currentProduct.imageUrl || ''} onChange={e => handleInputChange('imageUrl', e.target.value)} className="bg-slate-50 border border-slate-300 text-slate-900 text-sm sm:text-base rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-3 sm:p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white min-h-[44px]" />
+              <input type="text" id="imageUrl" value={currentProduct.imageUrl || ''} onChange={e => handleInputChange('imageUrl', e.target.value)} className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white" />
             </div>
           </div>
         </div>
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end p-4 sm:p-6 space-y-2 sm:space-y-0 sm:space-x-2 border-t border-slate-200 rounded-b dark:border-slate-600">
-            <button onClick={closeModal} type="button" className="text-slate-500 bg-white hover:bg-slate-100 focus:ring-4 focus:outline-none focus:ring-blue-300 rounded-lg border border-slate-200 text-sm font-medium px-5 py-3 sm:py-2.5 hover:text-slate-900 focus:z-10 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-500 dark:hover:text-white dark:hover:bg-slate-600 min-h-[44px] order-2 sm:order-1">
+        <div className="flex items-center justify-end p-6 space-x-2 border-t border-slate-200 rounded-b dark:border-slate-600">
+            <button onClick={closeModal} type="button" className="text-slate-500 bg-white hover:bg-slate-100 focus:ring-4 focus:outline-none focus:ring-blue-300 rounded-lg border border-slate-200 text-sm font-medium px-5 py-2.5 hover:text-slate-900 focus:z-10 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-500 dark:hover:text-white dark:hover:bg-slate-600">
                 Cancel
             </button>
             <LoadingButton 
                 isLoading={isLoading('save')}
                 onClick={handleSave}
-                className="text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-3 sm:py-2.5 text-center dark:bg-blue-600 dark:hover:bg-blue-700 min-h-[44px] order-1 sm:order-2"
+                className="text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-blue-600 dark:hover:bg-blue-700"
             >
                 {modalMode === 'add' ? 'Save Product' : 'Save Changes'}
             </LoadingButton>
@@ -686,18 +634,18 @@ export const Products: React.FC = () => {
       </Modal>
 
       <Modal isOpen={!!productToDelete} onClose={closeDeleteConfirm} title="Confirm Deletion">
-            <div className="p-4 sm:p-6">
-                <p className="text-slate-600 dark:text-slate-300 text-sm sm:text-base">Are you sure you want to delete the product "{productToDelete?.name}"?</p>
-                <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">This action cannot be undone.</p>
+            <div className="p-6">
+                <p className="text-slate-600 dark:text-slate-300">Are you sure you want to delete the product "{productToDelete?.name}"?</p>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">This action cannot be undone.</p>
             </div>
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end p-4 sm:p-6 space-y-2 sm:space-y-0 sm:space-x-2 border-t border-slate-200 rounded-b dark:border-slate-600">
-                <button onClick={closeDeleteConfirm} type="button" className="text-slate-500 bg-white hover:bg-slate-100 focus:ring-4 focus:outline-none focus:ring-blue-300 rounded-lg border border-slate-200 text-sm font-medium px-5 py-3 sm:py-2.5 hover:text-slate-900 focus:z-10 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-500 dark:hover:text-white dark:hover:bg-slate-600 min-h-[44px] order-2 sm:order-1">
+            <div className="flex items-center justify-end p-6 space-x-2 border-t border-slate-200 rounded-b dark:border-slate-600">
+                <button onClick={closeDeleteConfirm} type="button" className="text-slate-500 bg-white hover:bg-slate-100 focus:ring-4 focus:outline-none focus:ring-blue-300 rounded-lg border border-slate-200 text-sm font-medium px-5 py-2.5 hover:text-slate-900 focus:z-10 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-500 dark:hover:text-white dark:hover:bg-slate-600">
                     Cancel
                 </button>
                 <LoadingButton 
                     isLoading={isLoading('delete')}
                     onClick={handleDelete}
-                    className="text-white bg-red-600 hover:bg-red-700 focus:ring-4 focus:outline-none focus:ring-red-300 font-medium rounded-lg text-sm px-5 py-3 sm:py-2.5 text-center dark:bg-red-600 dark:hover:bg-red-700 min-h-[44px] order-1 sm:order-2"
+                    className="text-white bg-red-600 hover:bg-red-700 focus:ring-4 focus:outline-none focus:ring-red-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-red-600 dark:hover:bg-red-700"
                 >
                     Delete
                 </LoadingButton>

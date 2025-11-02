@@ -88,15 +88,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             if (!ordersError && ordersData) {
                 const mappedOrders = ordersData.map((row: DatabaseOrder & { returnamount?: number }) => {
                     const orderItemsResult = safeJsonParse(row.orderitems, [], 'orderitems', row.id);
-                    const freeItemsResult = safeJsonParse(row.freeitems, [], 'freeitems', row.id);
-                    
                     if (!orderItemsResult.success) {
                         // Log error but continue with fallback
                         console.warn(`Using empty array for order items in order ${row.id}`);
-                    }
-                    if (!freeItemsResult.success) {
-                        // Log error but continue with fallback
-                        console.warn(`Using empty array for free items in order ${row.id}`);
                     }
 
                     return {
@@ -104,7 +98,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                         customerId: row.customerid,
                         customerName: row.customername,
                         date: row.orderdate,
-                        created_at: row.created_at,
                         total: row.totalamount,
                         status: row.status,
                         paymentMethod: row.paymentmethod,
@@ -112,7 +105,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                         assignedUserId: row.assigneduserid,
                         orderItems: orderItemsResult.success ? orderItemsResult.data : [],
                         backorderedItems: [],
-                        freeItems: freeItemsResult.success ? freeItemsResult.data : [],
                         expectedDeliveryDate: row.expecteddeliverydate,
                         chequeBalance: row.chequebalance == null || isNaN(Number(row.chequebalance)) ? 0 : Number(row.chequebalance),
                         creditBalance: row.creditbalance == null || isNaN(Number(row.creditbalance)) ? 0 : Number(row.creditbalance),
@@ -141,7 +133,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     
                     // Try with explicit column list for customers
                     if (name === 'customers') {
-                        const customerColumns = 'id,name,email,phone,location,joindate,totalspent,outstandingbalance,avatarurl,discounts,route';
+                        const customerColumns = 'id,name,email,phone,location,joindate,totalspent,outstandingbalance,avatarurl,discounts';
                         const { data: retryData, error: retryError } = await supabase
                             .from('customers')
                             .select(customerColumns);
@@ -178,7 +170,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                             const email = row.email;
                             const phone = row.phone;
                             const location = row.location;
-                            const route = row.route || 'Unassigned';
                             // Handle potential column name variations
                             const joinDate = row.joindate || row.joinDate || row.join_date;
                             const totalSpent = row.totalspent || row.totalSpent || row.total_spent || 0;
@@ -192,7 +183,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                                 email,
                                 phone,
                                 location,
-                                route,
                                 joinDate,
                                 totalSpent: typeof totalSpent === 'number' ? totalSpent : parseFloat(totalSpent) || 0,
                                 outstandingBalance: typeof outstandingBalance === 'number' ? outstandingBalance : parseFloat(outstandingBalance) || 0,
@@ -388,7 +378,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     email: row.email,
                     phone: row.phone,
                     location: row.location,
-                    route: row.route || 'Unassigned',
                     joinDate: row.joindate,
                     totalSpent: row.totalspent,
                     outstandingBalance: row.outstandingbalance,
@@ -452,78 +441,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     settings: row.settings ?? {},
                 }));
                 setUsers(mappedUsers);
-            }
-            // Fetch driver_allocations
-            try {
-                const { data: allocationsData, error: allocationsError } = await supabase.from('driver_allocations').select('*');
-                if (!allocationsError && allocationsData) {
-                    const mappedAllocations = allocationsData.map((row: any) => ({
-                        id: row.id,
-                        driverId: row.driver_id ?? row.driverid,
-                        driverName: row.driver_name ?? row.drivername,
-                        date: row.date,
-                        allocatedItems: (() => {
-                            if (row.allocated_items) {
-                                if (typeof row.allocated_items === 'string') {
-                                    try { return JSON.parse(row.allocated_items); } catch { return []; }
-                                }
-                                return row.allocated_items;
-                            }
-                            if (row.allocateditems) {
-                                if (typeof row.allocateditems === 'string') {
-                                    try { return JSON.parse(row.allocateditems); } catch { return []; }
-                                }
-                                return row.allocateditems;
-                            }
-                            return [];
-                        })(),
-                        returnedItems: (() => {
-                            if (row.returned_items) {
-                                if (typeof row.returned_items === 'string') {
-                                    try { return JSON.parse(row.returned_items); } catch { return null; }
-                                }
-                                return row.returned_items;
-                            }
-                            if (row.returneditems) {
-                                if (typeof row.returneditems === 'string') {
-                                    try { return JSON.parse(row.returneditems); } catch { return null; }
-                                }
-                                return row.returneditems;
-                            }
-                            return null;
-                        })(),
-                        salesTotal: row.sales_total ?? row.salestotal ?? 0,
-                        status: row.status ?? 'Allocated',
-                    }));
-                    setDriverAllocations(mappedAllocations);
-                }
-            } catch (err) {
-                console.error('Error fetching driver_allocations in refetchData:', err);
-            }
-
-            // Fetch driver_sales
-            try {
-                const { data: salesData, error: salesError } = await supabase.from('driver_sales').select('*');
-                if (!salesError && salesData) {
-                    const mappedSales = salesData.map((row: any) => ({
-                        id: row.id,
-                        driverId: row.driver_id,
-                        allocationId: row.allocation_id,
-                        date: row.date,
-                        soldItems: typeof row.sold_items === 'string' ? JSON.parse(row.sold_items) : (row.sold_items || []),
-                        total: row.total || 0,
-                        customerName: row.customer_name,
-                        customerId: row.customer_id,
-                        amountPaid: row.amount_paid || 0,
-                        creditAmount: row.credit_amount || 0,
-                        paymentMethod: row.payment_method,
-                        paymentReference: row.payment_reference,
-                        notes: row.notes,
-                    }));
-                    setDriverSales(mappedSales);
-                }
-            } catch (err) {
-                console.error('Error fetching driver_sales in refetchData:', err);
             }
         } catch (error) {
             console.error('Refetch data error:', error);
