@@ -32,6 +32,17 @@ const format = (amount: number) => {
   }).format(amount);
 };
 
+// Local date-time formatter (avoids UTC-style display when using ISO strings)
+const formatDateTimeLocal = (isoOrDateStr?: string) => {
+  if (!isoOrDateStr) return 'N/A';
+  const d = new Date(isoOrDateStr);
+  if (isNaN(d.getTime())) return isoOrDateStr; // fallback if not a valid date
+  return d.toLocaleString(undefined, {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit'
+  });
+};
+
 // Helper function to render customer location in orders table
 const renderCustomerLocationInOrder = (order: Order, customers: Customer[]) => {
   const customer = customers.find(c => c.id === order.customerId);
@@ -150,7 +161,7 @@ const OrderBill: React.FC<OrderBillProps> = ({ order, customer, products, curren
         <div className="text-right">
           <h2 className="text-2xl font-semibold uppercase text-gray-600">INVOICE</h2>
           <p className="text-sm"><strong>Order ID:</strong> {order.id}</p>
-          <p className="text-sm"><strong>Date:</strong> {order.date}</p>
+          <p className="text-sm"><strong>Date:</strong> {order.created_at ? formatDateTimeLocal(order.created_at) : order.date}</p>
         </div>
       </header>
       <section className="grid grid-cols-2 gap-8 my-6">
@@ -218,19 +229,19 @@ const OrderBill: React.FC<OrderBillProps> = ({ order, customer, products, curren
       )}
       <section className="mt-8">
         <div className="flex justify-between items-center">
-          <span className="text-sm">Total Items:</span>
-          <span className="font-semibold">{order.totalItems}</span>
+          <span className="text-sm text-gray-600">Total Items:</span>
+          <span className="font-semibold text-gray-900">{order.totalItems}</span>
         </div>
         <div className="flex justify-between items-center mt-2">
-          <span className="text-lg font-bold">Grand Total:</span>
-          <span className="text-xl font-bold text-gray-900">{formatCurrency(order.total, currency)}</span>
+          <span className="text-lg font-bold text-gray-700">Grand Total:</span>
+          <span className="text-xl font-bold text-black">{formatCurrency(order.total, currency)}</span>
         </div>
         <div className="flex justify-between items-center mt-2">
-          <span className="text-sm">Return Amount:</span>
+          <span className="text-sm text-gray-600">Return Amount:</span>
           <span className="text-lg font-bold text-blue-600">{formatCurrency(billReturnAmount, currency)}</span>
         </div>
         <div className="flex justify-between items-center mt-2">
-          <span className="text-sm">Amount Paid:</span>
+          <span className="text-sm text-gray-600">Amount Paid:</span>
           <span className="text-lg font-bold text-green-600">{formatCurrency(amountPaid, currency)}</span>
         </div>
         <div className="flex justify-between">
@@ -395,21 +406,19 @@ export const Orders: React.FC = () => {
     if (currentUser?.role !== UserRole.Driver) {
       return 0; // Non-drivers don't have allocated stock
     }
-    
-    const todayStr = new Date().toISOString().split('T')[0];
-    const driverAllocation = driverAllocations.find(
-      allocation => allocation.driverId === currentUser.id && allocation.date === todayStr
-    );
-    
-    if (!driverAllocation) {
-      return 0; // No allocation for today
-    }
-    
-    const allocatedItem = driverAllocation.allocatedItems.find(
-      item => item.productId === productId
-    );
-    
-    return allocatedItem ? allocatedItem.quantity : 0;
+
+    // Aggregate allocations across ALL dates for this driver
+    const allocationsForDriver = driverAllocations.filter(a => a.driverId === currentUser.id);
+    if (allocationsForDriver.length === 0) return 0;
+
+    const totalAllocated = allocationsForDriver.reduce((sum, alloc) => {
+      const item = alloc.allocatedItems.find(i => i.productId === productId);
+      if (!item) return sum;
+      const sold = typeof item.sold === 'number' ? item.sold : 0;
+      return sum + Math.max(0, (item.quantity || 0) - sold);
+    }, 0);
+
+    return totalAllocated;
   };
 
   // Helper function to get effective stock (driver allocation or warehouse stock)
@@ -508,49 +517,47 @@ export const Orders: React.FC = () => {
         );
     }
 
-    // Delivery date filter
+  // Delivery date filters - disabled for Driver role
+  if (currentUser?.role !== UserRole.Driver) {
+    // Specific date filter
     if (deliveryDateFilter) {
-        displayOrders = displayOrders.filter(order => {
-            const deliveryDate = order.expectedDeliveryDate || order.date;
-            if (!deliveryDate) return false;
-            
-            const orderDateStr = typeof deliveryDate === 'string' ? deliveryDate.slice(0, 10) : deliveryDate;
-            return orderDateStr === deliveryDateFilter;
-        });
+      displayOrders = displayOrders.filter(order => {
+        const deliveryDate = order.expectedDeliveryDate || order.date;
+        if (!deliveryDate) return false;
+        const orderDateStr = typeof deliveryDate === 'string' ? deliveryDate.slice(0, 10) : deliveryDate;
+        return orderDateStr === deliveryDateFilter;
+      });
     }
-
     // Date range filter
     if (dateRangeFilter !== 'all') {
-        const today = new Date();
-        const todayStr = today.toISOString().slice(0, 10); // YYYY-MM-DD format
-        
-        displayOrders = displayOrders.filter(order => {
-            const deliveryDate = order.expectedDeliveryDate || order.date;
-            if (!deliveryDate) return false;
-            
-            const orderDateStr = typeof deliveryDate === 'string' ? deliveryDate.slice(0, 10) : deliveryDate;
-            const orderDate = new Date(orderDateStr);
-            
-            switch (dateRangeFilter) {
-                case 'today':
-                    return orderDateStr === todayStr;
-                case 'this_week':
-                    const startOfWeek = new Date(today);
-                    startOfWeek.setDate(today.getDate() - today.getDay()); // Sunday
-                    startOfWeek.setHours(0, 0, 0, 0);
-                    const endOfWeek = new Date(startOfWeek);
-                    endOfWeek.setDate(startOfWeek.getDate() + 6); // Saturday
-                    endOfWeek.setHours(23, 59, 59, 999);
-                    return orderDate >= startOfWeek && orderDate <= endOfWeek;
-                case 'this_month':
-                    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-                    const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-                    return orderDate >= startOfMonth && orderDate <= endOfMonth;
-                default:
-                    return true;
-            }
-        });
+      const today = new Date();
+      const todayStr = today.toISOString().slice(0, 10); // YYYY-MM-DD format
+      displayOrders = displayOrders.filter(order => {
+        const deliveryDate = order.expectedDeliveryDate || order.date;
+        if (!deliveryDate) return false;
+        const orderDateStr = typeof deliveryDate === 'string' ? deliveryDate.slice(0, 10) : deliveryDate;
+        const orderDate = new Date(orderDateStr);
+        switch (dateRangeFilter) {
+          case 'today':
+            return orderDateStr === todayStr;
+          case 'this_week':
+            const startOfWeek = new Date(today);
+            startOfWeek.setDate(today.getDate() - today.getDay()); // Sunday
+            startOfWeek.setHours(0, 0, 0, 0);
+            const endOfWeek = new Date(startOfWeek);
+            endOfWeek.setDate(startOfWeek.getDate() + 6); // Saturday
+            endOfWeek.setHours(23, 59, 59, 999);
+            return orderDate >= startOfWeek && orderDate <= endOfWeek;
+          case 'this_month':
+            const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+            const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+            return orderDate >= startOfMonth && orderDate <= endOfMonth;
+          default:
+            return true;
+        }
+      });
     }
+  }
 
     // Sort orders: Pending first, then Delivered (for all users)
     return displayOrders.sort((a, b) => {
@@ -1267,49 +1274,104 @@ export const Orders: React.FC = () => {
     if (!orderToProcess) setOrderToFinalize(null);
     return false; // Abort the finalization
   }
-  // --- Update sold column in orders table ---
+  // --- Update order as Delivered, and set sold qty if the column exists ---
   const soldQty = targetOrder.orderItems.reduce((sum, i) => sum + i.quantity, 0);
-  await supabase.from('orders').update({ status: OrderStatus.Delivered, sold: soldQty }).eq('id', targetOrder.id);
+  try {
+    const { error } = await supabase
+      .from('orders')
+      .update({ status: OrderStatus.Delivered, sold: soldQty })
+      .eq('id', targetOrder.id);
+    if (error) {
+      const msg = String(error.message || '').toLowerCase();
+      const code = String((error as any).code || '').toLowerCase();
+      // Fallback when 'sold' column doesn't exist
+      if (msg.includes('sold') || code === '42703') {
+        await supabase.from('orders').update({ status: OrderStatus.Delivered }).eq('id', targetOrder.id);
+        console.warn('Orders: "sold" column not found, updated status only.');
+      } else {
+        console.error('Error updating Delivered status with sold:', error);
+      }
+    }
+  } catch (e) {
+    console.error('Unexpected error setting Delivered status:', e);
+  }
   // Refetch all data to sync UI everywhere
   await refetchData();
     // --- Sync allocation salesTotal and update allocatedItems after delivery ---
     if (currentUser?.role === UserRole.Driver && driverAllocations.length > 0) {
-      const todayStr = new Date().toISOString().slice(0, 10);
-      const allocation = driverAllocations.find((a: any) => a.driverId === currentUser.id && a.date === todayStr);
-      if (allocation) {
-        // Update salesTotal
-        const newSalesTotal = (allocation.salesTotal || 0) + soldQty;
-        // Reduce delivered product quantities from allocatedItems
-        const deliveredItems = targetOrder.orderItems;
-        let updatedAllocatedItems = allocation.allocatedItems.map((item: any) => {
-          const delivered = deliveredItems.find((di: any) => di.productId === item.productId);
-          if (delivered) {
-            const newQty = item.quantity - delivered.quantity;
-            return { ...item, quantity: newQty > 0 ? newQty : 0 };
+      // Distribute delivered items across ALL allocations for this driver (oldest first)
+      const allocationsForDriver = driverAllocations
+        .filter((a: any) => a.driverId === currentUser.id)
+        .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+      if (allocationsForDriver.length > 0) {
+        // Build remaining to deduct per product
+        const toDeduct: Record<string, number> = {};
+        for (const di of targetOrder.orderItems) {
+          toDeduct[di.productId] = (toDeduct[di.productId] || 0) + di.quantity;
+        }
+
+        const updatedAllocs: typeof allocationsForDriver = allocationsForDriver.map(a => ({ ...a, allocatedItems: a.allocatedItems.map(it => ({...it})) }));
+
+        for (const alloc of updatedAllocs) {
+          for (const item of alloc.allocatedItems) {
+            const need = toDeduct[item.productId] || 0;
+            if (need <= 0) continue;
+            const sold = typeof item.sold === 'number' ? item.sold : 0;
+            const available = Math.max(0, (item.quantity || 0) - sold);
+            if (available <= 0) continue;
+            const useQty = Math.min(available, need);
+            // Increase sold on this allocation
+            item.sold = sold + useQty;
+            toDeduct[item.productId] = need - useQty;
           }
-          return item;
-        }).filter((item: any) => item.quantity > 0); // Remove items with 0 qty
-        
-        // Update allocation in Supabase
-        await supabase.from('driver_allocations').update({ 
-          sales_total: newSalesTotal, 
-          allocated_items: JSON.stringify(updatedAllocatedItems) 
-        }).eq('id', allocation.id);
-        
-        // Immediately update local driver allocations state for real-time sync
-        setDriverAllocations(prevAllocations => 
-          prevAllocations.map(alloc => 
-            alloc.id === allocation.id 
-              ? { ...alloc, salesTotal: newSalesTotal, allocatedItems: updatedAllocatedItems }
-              : alloc
-          )
-        );
-        
-        console.log('Driver allocation updated in real-time:', {
-          allocationId: allocation.id,
-          newSalesTotal,
-          updatedItems: updatedAllocatedItems.length
-        });
+        }
+
+        // Persist updates for allocations that changed
+        for (const alloc of updatedAllocs) {
+          const original = allocationsForDriver.find(a => a.id === alloc.id);
+          // Compare sold values to detect change
+          const changed = (alloc.allocatedItems || []).some((it, idx) => {
+            const prev = original?.allocatedItems?.[idx];
+            // If product order differs, fall back to stringify compare
+            if (!prev || prev.productId !== it.productId) {
+              return JSON.stringify(original?.allocatedItems || []) !== JSON.stringify(alloc.allocatedItems || []);
+            }
+            return (prev.sold || 0) !== (it.sold || 0);
+          });
+          if (!changed) continue;
+
+          // Recompute sales_total based on sold * price for this allocation
+          let allocSalesTotal = 0;
+          for (const it of alloc.allocatedItems) {
+            const product = products.find(p => p.id === it.productId);
+            const sold = typeof it.sold === 'number' ? it.sold : 0;
+            if (product && sold > 0) {
+              allocSalesTotal += sold * (product.price || 0);
+            }
+          }
+
+          await supabase.from('driver_allocations')
+            .update({
+              allocated_items: JSON.stringify(alloc.allocatedItems),
+              sales_total: allocSalesTotal,
+              status: 'Delivered'
+            })
+            .eq('id', alloc.id);
+        }
+
+        // Update local state
+        setDriverAllocations(prev => prev.map(a => {
+          const updated = updatedAllocs.find(u => u.id === a.id);
+          if (!updated) return a;
+          let allocSalesTotal = 0;
+          for (const it of updated.allocatedItems) {
+            const product = products.find(p => p.id === it.productId);
+            const sold = typeof it.sold === 'number' ? it.sold : 0;
+            if (product && sold > 0) allocSalesTotal += sold * (product.price || 0);
+          }
+          return { ...a, allocatedItems: updated.allocatedItems, salesTotal: allocSalesTotal, status: 'Delivered' } as any;
+        }));
       }
     }
   // --- Deduct inventory in UI and Supabase ---
@@ -1338,6 +1400,37 @@ export const Orders: React.FC = () => {
   
   const [billLoading, setBillLoading] = useState(false);
 
+  // Helper: ensure we have the customer record for a given order.
+  // Tries in-memory first, then falls back to fetching from Supabase by id.
+  const ensureCustomerById = async (customerId: string): Promise<Customer | null> => {
+    let customer = customers.find(c => c.id === customerId);
+    if (customer) return customer;
+
+    try {
+      const { data, error } = await supabase
+        .from('customers')
+        .select('*')
+        .eq('id', customerId)
+        .maybeSingle();
+
+      if (error) {
+        console.error('Failed to fetch customer for bill:', error);
+        return null;
+      }
+
+      if (!data) {
+        // No row found for this customer id
+        return null;
+      }
+
+      // Optionally, we could push this into context cache, but keep it local to avoid side-effects
+      return (data as unknown) as Customer;
+    } catch (e) {
+      console.error('Unexpected error fetching customer for bill:', e);
+      return null;
+    }
+  };
+
   const handleDownloadBill = async () => {
     if (billLoading) return; // Prevent double click
     setBillLoading(true);
@@ -1345,11 +1438,22 @@ export const Orders: React.FC = () => {
       setBillLoading(false);
       return;
     }
-    const customer = customers.find(c => c.id === viewingOrder.customerId);
+    let customer = await ensureCustomerById(viewingOrder.customerId);
     if (!customer) {
-      alert('Customer data missing. Cannot download bill.');
-      setBillLoading(false);
-      return;
+      console.warn('Customer not found by id. Falling back to order.customerName for bill rendering.');
+      // Proceed with a minimal customer object so bill can still be printed
+      customer = {
+        id: viewingOrder.customerId,
+        name: viewingOrder.customerName || 'Unknown Customer',
+        email: '',
+        phone: '',
+        location: '',
+        route: 'Unassigned',
+        joinDate: '',
+        totalSpent: 0,
+        outstandingBalance: 0,
+        avatarUrl: ''
+      } as unknown as Customer;
     }
 
     // Only on first delivery (not already delivered)
@@ -1371,7 +1475,7 @@ export const Orders: React.FC = () => {
         setOrders(prev => prev.map(o => o.id === viewingOrder.id ? { ...o, status: OrderStatus.Delivered } : o));
         await refetchData();
         setTimeout(() => {
-          generateAndDownloadBill(viewingOrder.status);
+          generateAndDownloadBill(viewingOrder.status, customer);
           setBillLoading(false);
         }, 1000);
         return;
@@ -1382,25 +1486,26 @@ export const Orders: React.FC = () => {
       }
     } else {
       // Already delivered: just print, do not touch allocation/stock
-      generateAndDownloadBill(viewingOrder.status);
+      generateAndDownloadBill(viewingOrder.status, customer);
       setBillLoading(false);
     }
   };
 
 
-  const generateAndDownloadBill = (status) => {
+  const generateAndDownloadBill = (status, resolvedCustomer?: Customer) => {
     if (!viewingOrder) return;
-    const customer = customers.find(c => c.id === viewingOrder.customerId);
+    const customer = resolvedCustomer ?? customers.find(c => c.id === viewingOrder.customerId);
     if (!customer) return;
 
     // Generate the bill HTML as before
+    const displayDate = viewingOrder.created_at ? formatDateTimeLocal(viewingOrder.created_at) : viewingOrder.date;
     const billHTML = `
     <!DOCTYPE html>
     <html>
       <head>
         <meta charset="utf-8" />
         <title>Invoice - Order ${viewingOrder.id}</title>
-        <style>
+          <style>
           body {
             font-family: Arial, sans-serif;
             margin: 5px;
@@ -1457,6 +1562,9 @@ export const Orders: React.FC = () => {
             font-size: 12px;
             font-weight: bold;
           }
+          /* Make labels slightly muted and numeric totals darker for better print contrast */
+          .total-section div span:first-child { color: #444; }
+          .total-section div span:last-child { color: #000; font-weight: 700; }
           .total-section div {
             display: flex;
             justify-content: space-between;
@@ -1468,6 +1576,7 @@ export const Orders: React.FC = () => {
             border-top: 1px solid #000;
             margin-top: 5px;
             padding-top: 5px;
+            color: #000;
           }
           .thank-you {
             text-align: center;
@@ -1489,13 +1598,12 @@ export const Orders: React.FC = () => {
           </div>
           <div class="invoice-info">
             <p><strong>Order ID:</strong> ${viewingOrder.id}</p>
-            <p><strong>Date:</strong> ${viewingOrder.date}</p>
+            <p><strong>Date:</strong> ${displayDate}</p>
             <p><strong>Status:</strong> ${viewingOrder.status}</p>
           </div>
         </div>
 
-        <p class="billTo"><strong>Bill To:</strong> ${customer.name}</p>
-        <p class="billTo">${customer.location || ''}</p>
+  <p class="billTo"><strong>Bill To:</strong> ${customer.name}</p>
 
         <table>
           <thead>
@@ -1525,6 +1633,8 @@ export const Orders: React.FC = () => {
         <div class="total-section">
           <div><span>Invoice Total:</span><span>${formatCurrency(viewingOrder.total || 0, currency)}</span></div>
           <div><span>Total Items:</span><span>${viewingOrder.orderItems?.reduce((sum, item) => sum + item.quantity, 0) ?? 0}</span></div>
+          <!-- dotted full-width line for handwriting (no label) -->
+          <div style="margin:6px 0; border-bottom: 1px dotted #000; height:10px;"></div>
           <div><span>Return Amount:</span><span>${formatCurrency(viewingOrder.returnAmount || 0, currency)}</span></div>
           <div><span>Paid:</span><span>${formatCurrency(editableAmountPaid, currency)}</span></div>
           <div><span>Cheque:</span><span>${formatBalanceAmount(editableChequeBalance, currency)}</span></div>
@@ -1647,6 +1757,7 @@ export const Orders: React.FC = () => {
                       <option value={OrderStatus.Delivered}>Delivered</option>
                   </select>
                 </div>
+                {currentUser?.role !== UserRole.Driver && (
                 <div>
                   <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">Time Range</label>
                   <select
@@ -1663,40 +1774,43 @@ export const Orders: React.FC = () => {
                       <option value="this_month">This Month</option>
                   </select>
                 </div>
-              </div>
-            </div>
-            
-            <div className="pt-3 flex flex-col sm:flex-row gap-3 sm:gap-4 sm:items-end">
-              <div className="flex-1 max-w-xs">
-                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">Specific Date</label>
-                <input
-                    type="date"
-                    value={deliveryDateFilter}
-                    onChange={(e) => {
-                        setDeliveryDateFilter(e.target.value);
-                        setDateRangeFilter('all'); // Clear range when specific date is selected
-                    }}
-                    className="w-full px-3 sm:px-4 py-2.5 sm:py-2 text-sm sm:text-base border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    title="Filter by specific delivery date"
-                />
-              </div>
-              
-              <div className="flex gap-2 sm:gap-3">
-                {(deliveryDateFilter || dateRangeFilter !== 'all') && (
-                    <button
-                        onClick={() => {
-                            setDeliveryDateFilter('');
-                            setDateRangeFilter('all');
-                        }}
-                        className="px-3 sm:px-4 py-2.5 sm:py-2 text-sm font-medium bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50 rounded-lg transition-colors"
-                        title="Clear date filters"
-                    >
-                        <span className="hidden sm:inline">Clear Filters</span>
-                        <span className="sm:hidden">Clear</span>
-                    </button>
                 )}
               </div>
             </div>
+            
+            {currentUser?.role !== UserRole.Driver && (
+              <div className="pt-3 flex flex-col sm:flex-row gap-3 sm:gap-4 sm:items-end">
+                <div className="flex-1 max-w-xs">
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">Specific Date</label>
+                  <input
+                      type="date"
+                      value={deliveryDateFilter}
+                      onChange={(e) => {
+                          setDeliveryDateFilter(e.target.value);
+                          setDateRangeFilter('all'); // Clear range when specific date is selected
+                      }}
+                      className="w-full px-3 sm:px-4 py-2.5 sm:py-2 text-sm sm:text-base border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      title="Filter by specific delivery date"
+                  />
+                </div>
+                
+                <div className="flex gap-2 sm:gap-3">
+                  {(deliveryDateFilter || dateRangeFilter !== 'all') && (
+                      <button
+                          onClick={() => {
+                              setDeliveryDateFilter('');
+                              setDateRangeFilter('all');
+                          }}
+                          className="px-3 sm:px-4 py-2.5 sm:py-2 text-sm font-medium bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50 rounded-lg transition-colors"
+                          title="Clear date filters"
+                      >
+                          <span className="hidden sm:inline">Clear Filters</span>
+                          <span className="sm:hidden">Clear</span>
+                      </button>
+                  )}
+                </div>
+              </div>
+            )}
           </CardHeader>
           <CardContent>
             <div className="space-y-8">
@@ -1753,7 +1867,7 @@ export const Orders: React.FC = () => {
                             <CardContent className="p-3 relative z-10">
                               {/* Order Header */}
                               <div className="flex justify-between items-start mb-2">
-                                <div>
+                                <div className="flex-1 min-w-0">
                                   <h3 className={`font-bold text-sm ${cardStyle.text} drop-shadow-sm`}>{order.id}</h3>
                                   <p className={`text-xs flex items-center gap-1 mt-0.5 font-semibold ${cardStyle.text.replace('800', '700').replace('300', '400')}`}>
                                     <span className="font-bold truncate">{order.customerName}</span>
@@ -1787,7 +1901,7 @@ export const Orders: React.FC = () => {
                                     return null;
                                   })()}
                                 </div>
-                                <Badge variant={getStatusBadgeVariant(order.status)} className={`${cardStyle.badge} text-xs font-bold whitespace-nowrap drop-shadow-sm`}>
+                                <Badge variant={getStatusBadgeVariant(order.status)} className={`${cardStyle.badge} text-xs font-bold whitespace-nowrap drop-shadow-sm flex-shrink-0`}>
                                   {order.status}
                                 </Badge>
                               </div>

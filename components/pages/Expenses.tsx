@@ -7,6 +7,21 @@ import { UserRole } from '../../types';
 
 const categories = ['Fuel', 'Driver Salaries', 'Worker Salaries', 'Vehicle Rent', 'Common Expenses', 'Other'];
 
+// Color palette for categories and accents
+const CATEGORY_COLORS: Record<string, string> = {
+    'Fuel': '#FF7043',
+    'Driver Salaries': '#42A5F5',
+    'Worker Salaries': '#7E57C2',
+    'Vehicle Rent': '#26A69A',
+    'Common Expenses': '#FFCA28',
+    'Other': '#9E9E9E',
+};
+
+const colorForCategory = (cat?: string) => {
+    if (!cat) return '#9E9E9E';
+    return CATEGORY_COLORS[cat] || '#90A4AE';
+};
+
 const Expenses: React.FC = () => {
     const [date, setDate] = useState<string>(new Date().toISOString().split('T')[0]);
     const [amount, setAmount] = useState<string>('');
@@ -232,15 +247,15 @@ const Expenses: React.FC = () => {
                 </CardHeader>
                 <CardContent>
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                        <input id="expense-date" name="expense-date" type="date" value={date} onChange={e => setDate(e.target.value)} className="p-2 border rounded bg-slate-800 text-slate-100 placeholder-slate-400" />
-                        <input id="expense-amount" name="expense-amount" type="number" placeholder="Amount" value={amount} onChange={e => setAmount(e.target.value)} className="p-2 border rounded bg-slate-800 text-slate-100 placeholder-slate-400" />
-                        <select id="expense-category" name="expense-category" value={category} onChange={e => setCategory(e.target.value)} className="p-2 border rounded bg-slate-800 text-slate-100">
+                        <input id="expense-date" name="expense-date" type="date" value={date} onChange={e => setDate(e.target.value)} className="p-2 border rounded bg-slate-900 text-white placeholder-slate-400 focus:outline-none focus:ring-2" style={{borderColor: '#374151'}} />
+                        <input id="expense-amount" name="expense-amount" type="number" placeholder="Amount" value={amount} onChange={e => setAmount(e.target.value)} className="p-2 border rounded bg-slate-900 text-white placeholder-slate-400 focus:outline-none focus:ring-2" style={{borderColor: '#374151'}} />
+                        <select id="expense-category" name="expense-category" value={category} onChange={e => setCategory(e.target.value)} className="p-2 border rounded bg-slate-900 text-white focus:outline-none focus:ring-2" style={{borderColor: colorForCategory(category)}}>
                             {categories.map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
-                        <input id="expense-note" name="expense-note" placeholder="Note" value={note} onChange={e => setNote(e.target.value)} className="p-2 border rounded bg-slate-800 text-slate-100 placeholder-slate-400" />
+                        <input id="expense-note" name="expense-note" placeholder="Note" value={note} onChange={e => setNote(e.target.value)} className="p-2 border rounded bg-slate-900 text-white placeholder-slate-400 focus:outline-none focus:ring-2" style={{borderColor: '#374151'}} />
                     </div>
-                    <div className="mt-4">
-                        <button onClick={handleAdd} className="px-4 py-2 bg-blue-600 text-white rounded">Save Expense</button>
+                    <div className="mt-4 flex items-center gap-3">
+                        <button onClick={handleAdd} className="px-4 py-2 bg-gradient-to-r from-indigo-500 to-pink-500 text-white rounded shadow hover:from-indigo-600 hover:to-pink-600 transition-colors">Save Expense</button>
                         {fallbackMode && (
                             <button onClick={() => {
                                 const local = localStorage.getItem('app_expenses_v1');
@@ -252,8 +267,9 @@ const Expenses: React.FC = () => {
                                 const a = document.createElement('a');
                                 a.href = url; a.download = 'expenses_local_export.csv'; a.click();
                                 URL.revokeObjectURL(url);
-                            }} className="ml-3 px-3 py-2 bg-gray-700 text-white rounded">Export CSV</button>
+                            }} className="ml-3 px-3 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition-colors">Export CSV</button>
                         )}
+                        <div className="ml-auto text-sm text-slate-400">Pro tip: use categories to color-code expenses</div>
                     </div>
                 </CardContent>
             </Card>
@@ -265,14 +281,14 @@ const Expenses: React.FC = () => {
                 <CardContent>
                     <div className="mb-4 flex gap-3 items-center">
                         <label className="text-sm">Month:</label>
-                        <input id="filter-month" name="filter-month" type="month" value={monthFilter} onChange={e => setMonthFilter(e.target.value)} className="p-2 border rounded bg-slate-800 text-slate-100 placeholder-slate-400 appearance-none" />
+                        <input id="filter-month" name="filter-month" type="month" value={monthFilter} onChange={e => setMonthFilter(e.target.value)} className="p-2 border rounded bg-slate-900 text-white placeholder-slate-400 appearance-none focus:outline-none" style={{borderColor: '#374151'}} />
                         <label className="text-sm">Details:</label>
-                        <input id="filter-details" name="filter-details" placeholder="Search details" value={detailsFilter} onChange={e => setDetailsFilter(e.target.value)} className="p-2 border rounded bg-slate-800 text-slate-100 placeholder-slate-400" />
-                        <button onClick={() => { setMonthFilter(''); setDetailsFilter(''); }} className="ml-2 px-3 py-1 bg-slate-800 text-slate-100 border border-slate-700 rounded">Clear</button>
+                        <input id="filter-details" name="filter-details" placeholder="Search details" value={detailsFilter} onChange={e => setDetailsFilter(e.target.value)} className="p-2 border rounded bg-slate-900 text-white placeholder-slate-400 focus:outline-none" style={{borderColor: '#374151'}} />
+                        <button onClick={() => { setMonthFilter(''); setDetailsFilter(''); }} className="ml-2 px-3 py-1 bg-gray-700 text-white border border-slate-700 rounded hover:bg-gray-600 transition-colors">Clear</button>
                     </div>
                     {loading ? <p>Loading...</p> : (
                         <div className="mb-4 flex items-center justify-between">
-                            <div className="text-sm text-slate-500">Total: <span className="font-bold">{formatCurrency(totalFiltered)}</span></div>
+                            <div className="text-sm">Total: <span className="font-bold text-green-400">{formatCurrency(totalFiltered)}</span></div>
                             <div></div>
                         </div>
                     )}
@@ -281,21 +297,24 @@ const Expenses: React.FC = () => {
                             <table className="min-w-full text-sm">
                                 <thead className="text-left text-xs text-slate-400">
                                     <tr>
-                                        <th className="py-2 px-3">Date</th>
-                                        <th className="py-2 px-3">Details</th>
-                                        <th className="py-2 px-3 text-right">Expense</th>
-                                        <th className="py-2 px-3">Note</th>
-                                        <th className="py-2 px-3 text-center">Actions</th>
+                                        <th className="py-2 px-3 w-36">Date</th>
+                                        <th className="py-2 px-3 w-48">Details</th>
+                                        <th className="py-2 px-3 text-right w-36">Expense</th>
+                                        <th className="py-2 px-3 w-1/3">Note</th>
+                                        <th className="py-2 px-3 text-center w-28">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {filteredExpenses.map(exp => (
                                         <tr key={exp.id} className="border-t">
-                                            <td className="py-2 px-3">{new Date(exp.date).toISOString().split('T')[0]}</td>
-                                            <td className="py-2 px-3">{exp.category}</td>
-                                            <td className="py-2 px-3 text-right">{exp.amount}</td>
-                                            <td className="py-2 px-3">{exp.note}</td>
-                                            <td className="py-2 px-3 text-center">
+                                            <td className="py-2 px-3 w-36">{new Date(exp.date).toISOString().split('T')[0]}</td>
+                                            <td className="py-2 px-3 w-48 flex items-center gap-2">
+                                                <span className="w-3 h-3 rounded-full" style={{backgroundColor: colorForCategory(exp.category)}} />
+                                                <span className="truncate">{exp.category}</span>
+                                            </td>
+                                            <td className="py-2 px-3 text-right w-36"><span className="inline-block px-3 py-1 rounded-full font-medium text-white" style={{backgroundColor: '#16A34A'}}>{formatCurrency(parseFloat(exp.amount || 0))}</span></td>
+                                            <td className="py-2 px-3 w-1/3 truncate">{exp.note}</td>
+                                            <td className="py-2 px-3 text-center w-28">
                                                 {(currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Manager) && (
                                                     <button
                                                         onClick={async () => {

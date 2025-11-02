@@ -22,6 +22,7 @@ $loginCheck = supabase status 2>&1
 if ($LASTEXITCODE -ne 0) {
     Write-Host "❌ Please login to Supabase first:" -ForegroundColor Red
     Write-Host "supabase login" -ForegroundColor Cyan
+    Write-Host "Error details: $loginCheck" -ForegroundColor Gray
     exit 1
 }
 

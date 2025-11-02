@@ -1,8 +1,8 @@
 ﻿import React, { useState, useMemo, useEffect } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '../ui/Card';
+import { FilterField } from '../ui/FilterField';
 import { Badge } from '../ui/Badge';
 import { SalesChart } from '../charts/SalesChart';
-import { TopProductsChart } from '../charts/TopProductsChart';
 import { OrderStatus, Product, UserRole } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
@@ -349,14 +349,7 @@ export const Dashboard: React.FC = () => {
     // Admin/Manager Dashboard - Full detailed view (existing functionality)
     // Defensive fallback for products array
     const safeProducts = Array.isArray(products) ? products : [];
-    // Compute top products by stock from products
-    const topProducts = useMemo(() => {
-      return safeProducts
-        .slice()
-        .sort((a, b) => b.stock - a.stock)
-        .slice(0, 5)
-        .map(p => ({ name: p.name, stock: p.stock }));
-    }, [safeProducts]);
+    // (Top products chart removed — Financial Overview expanded)
 
     const [selectedSupplier, setSelectedSupplier] = useState<string>('all');
     const [selectedCustomer, setSelectedCustomer] = useState<string>('all');
@@ -716,35 +709,30 @@ export const Dashboard: React.FC = () => {
             <CardDescription>Refine the sales data shown on the dashboard.</CardDescription>
           </CardHeader>
           <CardContent className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-4 items-end">
-             <div>
-                <label htmlFor="supplier-filter" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Supplier</label>
-                <select id="supplier-filter" value={selectedSupplier} onChange={e => setSelectedSupplier(e.target.value)} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+             <FilterField label="Supplier" htmlFor="supplier-filter" variant="blue">
+               <select id="supplier-filter" value={selectedSupplier} onChange={e => setSelectedSupplier(e.target.value)}>
                     <option value="all">All Suppliers</option>
                     {availableSuppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
-                </select>
-             </div>
-             <div>
-        <label htmlFor="customer-filter" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Customer</label>
-        <select id="customer-filter" value={selectedCustomer} onChange={e => setSelectedCustomer(e.target.value)} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
-          <option value="all">All Customers</option>
-          {(customers || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
-             </div>
-             <div>
-                <label htmlFor="category-filter" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Category</label>
-                <select id="category-filter" value={selectedCategory} onChange={e => setSelectedCategory(e.target.value)} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    {categories.map(c => <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>)}
-                </select>
-             </div>
+               </select>
+             </FilterField>
+             <FilterField label="Customer" htmlFor="customer-filter" variant="slate">
+               <select id="customer-filter" value={selectedCustomer} onChange={e => setSelectedCustomer(e.target.value)}>
+                 <option value="all">All Customers</option>
+                 {(customers || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+               </select>
+             </FilterField>
+             <FilterField label="Category" htmlFor="category-filter" variant="purple">
+               <select id="category-filter" value={selectedCategory} onChange={e => setSelectedCategory(e.target.value)}>
+                 {categories.map(c => <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>)}
+               </select>
+             </FilterField>
              <div className="xl:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="sm:col-span-1">
-                    <label htmlFor="start-date" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Start Date</label>
-                    <input type="date" id="start-date" value={dateRange.start} onChange={e => setDateRange({...dateRange, start: e.target.value})} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"/>
-                </div>
-                <div className="sm:col-span-1">
-                    <label htmlFor="end-date" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">End Date</label>
-                    <input type="date" id="end-date" value={dateRange.end} onChange={e => setDateRange({...dateRange, end: e.target.value})} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"/>
-                </div>
+                <FilterField label="Start Date" htmlFor="start-date" variant="amber">
+                  <input type="date" id="start-date" value={dateRange.start} onChange={e => setDateRange({...dateRange, start: e.target.value})} />
+                </FilterField>
+                <FilterField label="End Date" htmlFor="end-date" variant="amber">
+                  <input type="date" id="end-date" value={dateRange.end} onChange={e => setDateRange({...dateRange, end: e.target.value})} />
+                </FilterField>
                 <div className="sm:col-span-1">
                     <label className="block text-sm font-medium text-transparent mb-1">Reset</label>
                     <button onClick={handleResetFilters} className="w-full px-3 py-2 text-sm font-medium text-slate-700 bg-slate-200 rounded-lg hover:bg-slate-300 dark:bg-slate-600 dark:text-slate-200 dark:hover:bg-slate-500 transition-colors">Reset</button>
@@ -1060,29 +1048,22 @@ export const Dashboard: React.FC = () => {
 
 
       {/* Charts */}
-      <div className="grid gap-6 sm:gap-8 lg:grid-cols-2">
+      <div className="grid gap-6 sm:gap-8 lg:grid-cols-1">
         <Card>
           <CardHeader>
             <CardTitle>Financial Overview</CardTitle>
             <CardDescription>Monthly performance of sales, costs, and profits</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="h-[520px]">
             {salesDataForChart.length > 0 ? (
-                <SalesChart data={salesDataForChart} />
+                <div className="h-full">
+                  <SalesChart data={salesDataForChart} />
+                </div>
             ) : (
-                <div className="h-[300px] flex items-center justify-center text-slate-500 dark:text-slate-400">
+                <div className="h-full flex items-center justify-center text-slate-500 dark:text-slate-400">
                     <p>No sales data for the selected filters.</p>
                 </div>
             )}
-          </CardContent>
-        </Card>
-         <Card>
-          <CardHeader>
-            <CardTitle>Top Products by Stock</CardTitle>
-            <CardDescription>Current inventory levels</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <TopProductsChart data={topProducts} />
           </CardContent>
         </Card>
       </div>

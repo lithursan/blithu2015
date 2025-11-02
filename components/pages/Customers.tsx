@@ -102,6 +102,21 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
     [currentUser]
   );
 
+  // Helper: detect missing created_by column reliably across Supabase/PostgREST variants
+  const isCreatedByMissingError = (err: any): boolean => {
+    try {
+      const code = String(err?.code || '').toLowerCase();
+      const message = String(err?.message || '').toLowerCase();
+      const details = String(err?.details || '').toLowerCase();
+      const hint = String(err?.hint || '').toLowerCase();
+      const blob = JSON.stringify(err || {}).toLowerCase();
+      // Common patterns
+      if (code === '42703' || code === 'pgrst257') return true; // undefined_column / schema cache
+      if (message.includes('created_by') || details.includes('created_by') || hint.includes('created_by')) return true;
+      if (blob.includes('created_by') && (blob.includes('column') || blob.includes('schema cache'))) return true;
+    } catch {}
+    return false;
+  };
 
 
 
@@ -187,6 +202,8 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
         if (modalMode === 'add') {
           // Generate unique ID using timestamp and random number
           const uniqueId = `CUST${Date.now().toString().slice(-6)}${Math.floor(Math.random() * 100).toString().padStart(2, '0')}`;
+          
+          // Create customer object with sales rep segregation support
           const newCustomer = {
             id: uniqueId,
             name: currentCustomer.name || '',
@@ -199,12 +216,45 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
             outstandingbalance: 0,
             avatarurl: currentCustomer.avatarUrl || `/lord-shiva-avatar.jpg`,
           };
-          
-          const { error } = await supabase.from('customers').insert([newCustomer]);
-          if (error) {
-            alert(`Error adding customer: ${error.message}`);
-            return;
+
+          // Try to add created_by field if the column exists in the database
+          try {
+            const customerWithCreatedBy = {
+              ...newCustomer,
+              created_by: currentUser?.id || 'system'
+            };
+            
+            // Force JSON insert and return the created row
+            const { error } = await supabase.from('customers').insert([customerWithCreatedBy]);
+            
+            if (error) {
+              // If error is about missing created_by column, try without it
+              if (error.message.includes('created_by') || error.message.includes('column')) {
+                console.warn('created_by column not found, inserting without sales rep segregation');
+                const { error: fallbackError } = await supabase.from('customers').insert([newCustomer]);
+                if (fallbackError) {
+                  alert(`Error adding customer: ${fallbackError.message}`);
+                  return;
+                }
+                alert('Customer added successfully! Note: Run database migration for sales rep segregation.');
+              } else {
+                alert(`Error adding customer: ${error.message}`);
+                return;
+              }
+            } else {
+              alert('Customer added successfully!');
+            }
+          } catch (err) {
+            console.error('Unexpected error:', err);
+            // Fallback to basic customer creation
+            const { error: basicError } = await supabase.from('customers').insert([newCustomer]);
+            if (basicError) {
+              alert(`Error adding customer: ${basicError.message}`);
+              return;
+            }
+            alert('Customer added successfully! (Basic mode - no sales rep segregation)');
           }
+          
           // Refresh customers data
           await refetchData();
         } else {
@@ -379,7 +429,7 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
       
       const nearestGPS = extractGPSCoordinates(nearestCustomer.location);
       if (nearestGPS) {
-        currentLocation = nearestGPS;
+        currentLocation = { ...nearestGPS, name: nearestCustomer.name };
       }
     }
 
@@ -429,7 +479,7 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
           currentLocation.lat, currentLocation.lng,
           customerGPS.lat, customerGPS.lng
         );
-        currentLocation = customerGPS;
+        currentLocation = { ...customerGPS, name: customer.name };
       }
     });
 
@@ -570,15 +620,7 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
 
   const filteredCustomers = useMemo(() => {
     let filtered = customers;
-
-    // Sales Rep filter - show only customers with orders assigned to them
-    if (currentUser?.role === UserRole.Sales) {
-      filtered = filtered.filter(customer => {
-        // Check if this customer has any orders assigned to the current sales rep
-        const customerOrders = orders.filter(o => o.customerId === customer.id && o.assignedUserId === currentUser.id);
-        return customerOrders.length > 0;
-      });
-    }
+    // New requirement: Sales reps should also see all customers; remove Sales-only filter
 
     // Search filter
     if (searchTerm) {
@@ -937,8 +979,9 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
             </div>
           )}
         </div>
+        </div>
       )}
-
+      
       {/* Route-specific info when viewing a specific route */}
       {propSelectedRoute && propSelectedRoute !== 'All Routes' && (
         <div className="bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 p-6">
@@ -1152,7 +1195,7 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
                 <div key={routeName}>
                   <div className="flex items-center space-x-3 mb-4">
                     <h2 className="text-xl font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-2">
-                      {routeName === 'Unassigned' ? '�' : '�🚛'} {routeName}
+                      {routeName === 'Unassigned' ? '📋' : '🚛'} {routeName}
                     </h2>
                     <Badge variant="default">{(routeCustomers as Customer[]).length} {(routeCustomers as Customer[]).length === 1 ? 'Customer' : 'Customers'}</Badge>
                     {routeName === 'Unassigned' && (
@@ -1186,6 +1229,8 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
                           const customerOrders = orders.filter(o => o.customerId === customer.id);
                           let primarySupplier = 'Unassigned';
                           let primaryCategory = 'N/A';
+                          // Precompute suggested route for Unassigned customers to simplify JSX
+                          const suggestedRouteInline = routeName === 'Unassigned' ? suggestRouteForCustomer(customer) : null;
                           
                           if (customerOrders.length > 0) {
                             // Calculate primary supplier based on spending
@@ -1240,18 +1285,17 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
                                           Visit #{index + 1}
                                         </span>
                                       )}
-                                      {routeName === 'Unassigned' && (() => {
-                                        const suggestedRoute = suggestRouteForCustomer(customer);
-                                        return suggestedRoute ? (
+                                      {routeName === 'Unassigned' && (
+                                        suggestedRouteInline ? (
                                           <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded dark:bg-orange-900 dark:text-orange-300">
-                                            Suggest: {suggestedRoute}
+                                            Suggest: {suggestedRouteInline}
                                           </span>
                                         ) : (
                                           <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded dark:bg-slate-700 dark:text-slate-400">
                                             No GPS
                                           </span>
-                                        );
-                                      })()}
+                                        )
+                                      )}
                                     </div>
                                     {renderLocationWithGPS(customer.location)}
                                     <div className="text-xs text-blue-600 dark:text-blue-400 truncate">{customer.phone}</div>
@@ -1274,33 +1318,30 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
                                         Edit
                                       </button>
                                     )}
-                                    {routeName === 'Unassigned' && canEdit && (() => {
-                                      const suggestedRoute = suggestRouteForCustomer(customer);
-                                      return suggestedRoute ? (
-                                        <button 
-                                          onClick={async () => {
-                                            if (confirm(`Assign ${customer.name} to ${suggestedRoute}?`)) {
-                                              try {
-                                                const { error } = await supabase.from('customers').update({
-                                                  route: suggestedRoute
-                                                }).eq('id', customer.id);
-                                                if (error) {
-                                                  alert(`Error: ${error.message}`);
-                                                } else {
-                                                  alert(`${customer.name} assigned to ${suggestedRoute}!`);
-                                                  await refetchData();
-                                                }
-                                              } catch (err) {
-                                                alert('Failed to update route assignment');
+                                    {routeName === 'Unassigned' && canEdit && suggestedRouteInline && (
+                                      <button 
+                                        onClick={async () => {
+                                          if (confirm(`Assign ${customer.name} to ${suggestedRouteInline}?`)) {
+                                            try {
+                                              const { error } = await supabase.from('customers').update({
+                                                route: suggestedRouteInline
+                                              }).eq('id', customer.id);
+                                              if (error) {
+                                                alert(`Error: ${error.message}`);
+                                              } else {
+                                                alert(`${customer.name} assigned to ${suggestedRouteInline}!`);
+                                                await refetchData();
                                               }
+                                            } catch (err) {
+                                              alert('Failed to update route assignment');
                                             }
-                                          }}
-                                          className="text-green-600 hover:text-green-800 dark:text-green-400 dark:hover:text-green-300 font-medium text-xs bg-green-50 dark:bg-green-900/20 px-2 py-1 rounded"
-                                        >
-                                          Assign to {suggestedRoute}
-                                        </button>
-                                      ) : null;
-                                    })()}
+                                          }
+                                        }}
+                                        className="text-green-600 hover:text-green-800 dark:text-green-400 dark:hover:text-green-300 font-medium text-xs bg-green-50 dark:bg-green-900/20 px-2 py-1 rounded"
+                                      >
+                                        Assign to {suggestedRouteInline}
+                                      </button>
+                                    )}
                                     {canDelete && (
                                       <button onClick={() => openDeleteConfirm(customer)} className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 font-medium text-xs bg-red-50 dark:bg-red-900/20 px-2 py-1 rounded">
                                         Delete
@@ -1478,9 +1519,9 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
 
         {/* Delete Confirmation Modal */}
         <Modal isOpen={!!customerToDelete} onClose={closeDeleteConfirm} title="Confirm Deletion">
-            <div className="p-6">
-                <p className="text-slate-600 dark:text-slate-300">Are you sure you want to delete the customer "{customerToDelete?.name}"?</p>
-            </div>
+      <div className="p-6">
+        <p className="text-slate-600 dark:text-slate-300">Are you sure you want to delete the customer &quot;{customerToDelete?.name}&quot;?</p>
+      </div>
             <div className="flex items-center justify-end p-6 space-x-2 border-t border-slate-200 rounded-b dark:border-slate-600">
                 <button onClick={closeDeleteConfirm} type="button" className="text-slate-500 bg-white hover:bg-slate-100 focus:ring-4 focus:outline-none focus:ring-blue-300 rounded-lg border border-slate-200 text-sm font-medium px-5 py-2.5 hover:text-slate-900 focus:z-10 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-500 dark:hover:text-white dark:hover:bg-slate-600">
                     Cancel
@@ -1490,7 +1531,8 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
                 </button>
             </div>
         </Modal>
-      </div>
     </div>
   );
 };
+
+export default Customers;

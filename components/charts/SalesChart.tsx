@@ -19,8 +19,12 @@ export const SalesChart: React.FC<SalesChartProps> = ({ data }) => {
     const gridColor = theme === 'dark' ? '#334155' : '#e2e8f0';
 
 
+  // Rotate x-axis labels when there are many points to keep them readable
+  const xLabelRotate = data.length > 6 ? -30 : 0;
+
   return (
-    <ResponsiveContainer width="100%" height={300}>
+    // Make the chart fill the parent's height so the dashboard can control sizing responsively
+    <ResponsiveContainer width="100%" height="100%">
       <LineChart
         data={data}
         margin={{
@@ -31,7 +35,12 @@ export const SalesChart: React.FC<SalesChartProps> = ({ data }) => {
         }}
       >
         <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
-        <XAxis dataKey="month" stroke={tickColor} />
+        <XAxis
+          dataKey="month"
+          stroke={tickColor}
+          tick={{ fill: tickColor, fontSize: 12, angle: xLabelRotate, textAnchor: xLabelRotate ? 'end' : 'middle' }}
+          interval={0}
+        />
         <YAxis stroke={tickColor} />
         <Tooltip 
             contentStyle={{ 

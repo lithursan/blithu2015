@@ -100,6 +100,8 @@ export interface Customer {
   avatarUrl: string;
   discounts?: Record<string, number>; // ProductID: discount percentage
   outstandingBalance: number;
+
+  created_by?: string; // ID of the sales rep/user who created this customer
 }
 
 export interface Supplier {

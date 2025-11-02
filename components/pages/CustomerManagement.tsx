@@ -139,7 +139,7 @@ const RouteCustomerList: React.FC<RouteCustomerListProps> = ({ selectedRoute, on
     customerOrderCountMap[order.customerId] = (customerOrderCountMap[order.customerId] || 0) + 1;
   });
 
-  // Filter customers by selected route and search term
+  // Filter customers by selected route and search term (show all customers for all roles)
   const filteredCustomers = customers.filter(customer => {
     const route = customer.route || 'Unassigned';
     const matchesRoute = selectedRoute === 'All Routes' || route === selectedRoute;
@@ -148,7 +148,10 @@ const RouteCustomerList: React.FC<RouteCustomerListProps> = ({ selectedRoute, on
       customer.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
       customer.location.toLowerCase().includes(searchTerm.toLowerCase());
     
-    return matchesRoute && matchesSearch;
+    // New requirement: All roles (including Sales) can view all customers route-wise
+    const matchesSalesRepAccess = true;
+    
+    return matchesRoute && matchesSearch && matchesSalesRepAccess;
   });
 
   const openModal = (mode: 'add' | 'edit', customer?: Customer) => {
@@ -357,7 +360,7 @@ const RouteCustomerList: React.FC<RouteCustomerListProps> = ({ selectedRoute, on
       // Check for phone number uniqueness
       const phoneToCheck = normalizePhoneNumber(currentCustomer.phone);
       
-      if (modalMode === 'add') {
+  if (modalMode === 'add') {
         // For new customers, check if phone number already exists
         const { data: existingCustomers, error: checkError } = await supabase
           .from('customers')
@@ -390,18 +393,43 @@ const RouteCustomerList: React.FC<RouteCustomerListProps> = ({ selectedRoute, on
           outstandingbalance: 0,
           avatarurl: currentCustomer.avatarUrl || `/lord-shiva-avatar.jpg`,
         };
-        
-        const { error } = await supabase.from('customers').insert([newCustomer]);
-        if (error) {
-          // Check if error is due to unique constraint violation
-          if (error.message.includes('duplicate') || error.message.includes('unique')) {
-            alert(`This phone number (${phoneToCheck}) is already registered. Please use a different phone number.`);
-          } else {
-            alert(`Error adding customer: ${error.message}`);
-          }
-          return;
+
+        // Try insert with created_by first; if column missing, retry without
+        let insertError: any = null;
+        const attemptWithCreatedBy = { ...newCustomer, created_by: currentUser?.id || 'system' } as any;
+        try {
+          const { error } = await supabase.from('customers').insert([attemptWithCreatedBy]);
+          insertError = error || null;
+        } catch (e) {
+          insertError = e;
         }
-        alert('Customer added successfully!');
+
+        if (insertError) {
+          const msg = String(insertError?.message || '').toLowerCase();
+          const code = String(insertError?.code || '').toLowerCase();
+          const details = String(insertError?.details || '').toLowerCase();
+          const missingCreatedBy = code === '42703' || code === 'pgrst257' || msg.includes('created_by') || details.includes('created_by');
+          const uniqueViolation = msg.includes('duplicate') || msg.includes('unique');
+
+          if (uniqueViolation) {
+            alert(`This phone number (${phoneToCheck}) is already registered. Please use a different phone number.`);
+            return;
+          }
+
+          if (missingCreatedBy) {
+            const { error: fallbackError } = await supabase.from('customers').insert([newCustomer]);
+            if (fallbackError) {
+              alert(`Error adding customer: ${fallbackError.message}`);
+              return;
+            }
+            alert('Customer added successfully! Note: Run migration to add created_by column for sales-rep segregation.');
+          } else {
+            alert(`Error adding customer: ${insertError.message || 'Unknown error'}`);
+            return;
+          }
+        } else {
+          alert('Customer added successfully!');
+        }
       } else {
         // For editing customers, check if phone number exists for other customers
         const originalCustomer = customers.find(c => c.id === currentCustomer.id);
@@ -570,6 +598,40 @@ const RouteCustomerList: React.FC<RouteCustomerListProps> = ({ selectedRoute, on
         </Card>
       </div>
 
+      {/* Sales Rep Access Information */}
+      {currentUser?.role === UserRole.Sales && (
+        <Card className="bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 dark:from-blue-900/20 dark:via-indigo-900/20 dark:to-purple-900/20 border-blue-200 dark:border-blue-800">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3">
+              <div className="text-2xl">👤</div>
+              <div>
+                <h3 className="font-semibold text-blue-800 dark:text-blue-300 text-sm">Sales Rep Access</h3>
+                <p className="text-xs text-blue-600 dark:text-blue-400">
+                  You can view all customers route-wise. Your own customers are marked with "My Customer" for easy tracking.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Admin/Manager View Information */}
+      {(currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Manager) && (
+        <Card className="bg-gradient-to-r from-green-50 via-emerald-50 to-teal-50 dark:from-green-900/20 dark:via-emerald-900/20 dark:to-teal-900/20 border-green-200 dark:border-green-800">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3">
+              <div className="text-2xl">👥</div>
+              <div>
+                <h3 className="font-semibold text-green-800 dark:text-green-300 text-sm">Administrative Access</h3>
+                <p className="text-xs text-green-600 dark:text-green-400">
+                  You can view all customers from all sales reps. Customer cards show ownership badges for tracking.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Search and Customer List */}
       <Card>
         <CardHeader className="pb-4">
@@ -616,7 +678,32 @@ const RouteCustomerList: React.FC<RouteCustomerListProps> = ({ selectedRoute, on
                       {/* Customer Header */}
                       <div className="flex items-start justify-between mb-3">
                         <div className="flex-1 min-w-0">
-                          <div className="font-semibold text-slate-900 dark:text-white text-sm sm:text-base truncate">{customer.name}</div>
+                          <div className="flex items-center gap-2 mb-1">
+                            <div className="font-semibold text-slate-900 dark:text-white text-sm sm:text-base truncate">{customer.name}</div>
+                            {/* Sales Rep Ownership Indicator */}
+                            {(() => {
+                              if (customer.created_by === currentUser?.id) {
+                                return (
+                                  <Badge variant="success" className="px-1.5 py-0.5 text-xs font-bold bg-green-100 text-green-800 border-green-300 dark:bg-green-900/30 dark:text-green-400 dark:border-green-600">
+                                    👤 My Customer
+                                  </Badge>
+                                );
+                              } else if (currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Manager) {
+                                // Show who created the customer (for admins/managers only)
+                                const creatorName = customer.created_by ? (() => {
+                                  // Try to find the creator's name from users (this would need users data)
+                                  // For now, show first few characters of ID
+                                  return customer.created_by.slice(0, 8) + '...';
+                                })() : 'System';
+                                return (
+                                  <Badge variant="secondary" className="px-1.5 py-0.5 text-xs bg-slate-100 text-slate-600 border-slate-300 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-600">
+                                    👥 {creatorName}
+                                  </Badge>
+                                );
+                              }
+                              return null;
+                            })()}
+                          </div>
                           <a 
                             href={`tel:${customer.phone}`}
                             className="inline-flex items-center gap-1 px-2 py-1 mt-1 text-xs font-medium text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/30 rounded transition-colors cursor-pointer"

@@ -9,6 +9,35 @@ import { exportSuppliers } from '../../utils/exportUtils';
 import { confirmSecureDelete } from '../../utils/passwordConfirmation';
 
 export const Suppliers: React.FC = () => {
+  // small deterministic color picker for suppliers (keeps colors consistent)
+  const COLORS = ['#FF8A80', '#FFD180', '#FFFF8D', '#CCFF90', '#A7FFEB', '#80D8FF', '#B388FF', '#FF80AB'];
+  const colorFor = (key: string | undefined) => {
+    if (!key) return COLORS[0];
+    let h = 0;
+    for (let i = 0; i < key.length; i++) {
+      h = (h << 5) - h + key.charCodeAt(i);
+      h |= 0;
+    }
+    const idx = Math.abs(h) % COLORS.length;
+    return COLORS[idx];
+  };
+
+  const initials = (name?: string) => {
+    if (!name) return '?';
+    const parts = name.trim().split(/\s+/);
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  };
+  // convert hex like #RRGGBB to rgba with given alpha for subtle tint
+  const hexToRgba = (hex: string, alpha = 0.06) => {
+    if (!hex) return `rgba(0,0,0,${alpha})`;
+    const h = hex.replace('#', '');
+    const bigint = parseInt(h, 16);
+    const r = (bigint >> 16) & 255;
+    const g = (bigint >> 8) & 255;
+    const b = bigint & 255;
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  };
   // Helper functions for Supabase CRUD
   // Toast for error feedback
   const showToast = (msg: string) => {
@@ -195,80 +224,79 @@ export const Suppliers: React.FC = () => {
   );
   
   return (
-    <div className="p-4 sm:p-6 lg:p-8 space-y-8">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-100">Suppliers</h1>
-        <div className="flex gap-2">
-          {/* Export Buttons */}
-          <button
-            onClick={() => exportSuppliers(filteredSuppliers, 'csv')}
-            className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
-            title="Export as CSV"
-          >
-            📊 CSV
-          </button>
-          <button
-            onClick={() => exportSuppliers(filteredSuppliers, 'xlsx')}
-            className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
-            title="Export as Excel"
-          >
-            📋 Excel
-          </button>
-          {canEdit && (
-            <button onClick={() => openModal('add')} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
-              Add Supplier
-            </button>
-          )}
-        </div>
-      </div>
-
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>Supplier List</CardTitle>
-          <CardDescription>View and manage your product suppliers.</CardDescription>
-          <div className="pt-4">
-            <input
-              type="text"
-              placeholder="Search by name, contact, or email..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full max-w-sm px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+          <div className="w-full flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">Suppliers</h1>
+              <CardDescription>View and manage your product suppliers.</CardDescription>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <input
+                type="text"
+                placeholder="Search by name, contact, or email..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-64 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => exportSuppliers(filteredSuppliers, 'csv')}
+                  className="px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors text-sm"
+                  title="Export as CSV"
+                >
+                  📊 CSV
+                </button>
+                <button
+                  onClick={() => exportSuppliers(filteredSuppliers, 'xlsx')}
+                  className="px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors text-sm"
+                  title="Export as Excel"
+                >
+                  📋 Excel
+                </button>
+                {canEdit && (
+                  <button onClick={() => openModal('add')} className="px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm">
+                    + Add
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left text-slate-500 dark:text-slate-400">
-              <thead className="text-xs text-slate-700 uppercase bg-slate-50 dark:bg-slate-700 dark:text-slate-400">
-                <tr>
-                  <th scope="col" className="px-6 py-3">Supplier Name</th>
-                  <th scope="col" className="px-6 py-3">Contact Person</th>
-                  <th scope="col" className="px-6 py-3">Contact Info</th>
-                  <th scope="col" className="px-6 py-3">Join Date</th>
-                  <th scope="col" className="px-6 py-3">Order Count</th>
-                  {canEdit && <th scope="col" className="px-6 py-3">Actions</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {filteredSuppliers.map((supplier) => (
-                  <tr key={supplier.id} className="bg-white border-b dark:bg-slate-800 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600">
-                    <td className="px-6 py-4 font-medium text-slate-900 dark:text-white">
-                      <div>
-                        {supplier.name}
-                        <p className="text-xs text-slate-500">{supplier.address}</p>
+          <div className="grid gap-6 grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3">
+            {filteredSuppliers.map((supplier) => {
+              const color = colorFor(supplier.name);
+              const bgStyle: React.CSSProperties = { borderLeft: `4px solid ${color}` };
+              const avatarBg: React.CSSProperties = { backgroundColor: color };
+              return (
+                // apply a soft background tint matching the supplier color
+                <div key={supplier.id} style={{ ...bgStyle, backgroundColor: hexToRgba(color, 0.06) }} className="border border-slate-100 dark:border-slate-700 rounded-lg p-5 shadow-sm hover:shadow-md transition-transform transform hover:-translate-y-0.5 min-h-[180px]">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div style={avatarBg} className="w-12 h-12 rounded-full flex items-center justify-center text-white font-semibold text-base flex-shrink-0">
+                        {initials(supplier.name)}
                       </div>
-                    </td>
-                    <td className="px-6 py-4">{supplier.contactPerson}</td>
-                    <td className="px-6 py-4">
-                      <div>{supplier.email}</div>
-                      <div className="text-xs text-slate-500">{supplier.phone}</div>
-                    </td>
-                    <td className="px-6 py-4">{supplier.joinDate}</td>
-                    <td className="px-6 py-4">
-                      {/* Count orders for this supplier by checking each order's products */}
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-slate-900 dark:text-white truncate">{supplier.name}</div>
+                        <p className="text-xs text-slate-500 truncate mt-1">{supplier.address}</p>
+                      </div>
+                    </div>
+                    <div className="text-xs text-slate-400">{supplier.joinDate}</div>
+                  </div>
+
+                  <div className="mt-3 text-sm text-slate-700 dark:text-slate-300">
+                    <div className="truncate">{supplier.email}</div>
+                    <div className="text-xs text-slate-500">{supplier.phone}</div>
+                  </div>
+
+                  <div className="mt-3 flex items-center justify-between">
+                    <div className="text-sm text-slate-600 dark:text-slate-400">Orders: <span className="font-medium text-slate-900 dark:text-white">
                       {
                         orders.filter(order => {
-                          // Find if any orderItem in this order belongs to this supplier
                           if (!order.orderItems || order.orderItems.length === 0) return false;
                           return order.orderItems.some(item => {
                             const product = products.find(p => p.id === item.productId);
@@ -276,19 +304,21 @@ export const Suppliers: React.FC = () => {
                           });
                         }).length
                       }
-                    </td>
-                    {canEdit && (
-                      <td className="px-6 py-4 flex items-center space-x-2">
-                        <button onClick={() => openModal('edit', supplier)} className="font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">Edit</button>
-                        <button onClick={() => openDeleteConfirm(supplier)} className="font-medium text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300">Delete</button>
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </span></div>
+
+                    {canEdit ? (
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => openModal('edit', supplier)} className="text-sm px-3 py-1 rounded-md font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">Edit</button>
+                        <button onClick={() => openDeleteConfirm(supplier)} className="text-sm px-3 py-1 rounded-md font-medium text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300">Delete</button>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
+
             {filteredSuppliers.length === 0 && (
-              <div className="text-center py-10">
+              <div className="col-span-full text-center py-10">
                 <p className="text-slate-500 dark:text-slate-400">No suppliers found matching your criteria.</p>
               </div>
             )}

@@ -64,24 +64,28 @@ export const Products: React.FC = () => {
 
   const displayedProducts = useMemo(() => {
     if (isDriver && currentUser) {
+      // Show cumulative allocated quantities up to today (inclusive). This lets drivers see
+      // the combined allocations from previous days that are still active (not reconciled).
       const today = new Date().toISOString().split('T')[0];
-      const allocation = driverAllocations.find(
-        (alloc) => alloc.driverId === currentUser.id && alloc.date === today
-      );
+      const allocationsForDriver = (driverAllocations || []).filter(a => a.driverId === currentUser.id && new Date(a.date) <= new Date(today) && (a.status ?? 'Allocated') !== 'Reconciled');
 
-      if (allocation) {
-        const allocatedQuantities = new Map(
-          allocation.allocatedItems.map((item) => [item.productId, item.quantity])
-        );
+      if (allocationsForDriver.length > 0) {
+        const allocatedQuantities = new Map<string, number>();
+        allocationsForDriver.forEach(alloc => {
+          (alloc.allocatedItems || []).forEach((item: any) => {
+            const prev = allocatedQuantities.get(item.productId) || 0;
+            allocatedQuantities.set(item.productId, prev + (item.quantity || 0));
+          });
+        });
 
         return allProducts
           .filter((product) => allocatedQuantities.has(product.id))
           .map((product) => ({
             ...product,
-            stock: allocatedQuantities.get(product.id) || 0, // Override stock with allocated quantity
+            stock: allocatedQuantities.get(product.id) || 0, // Override stock with cumulative allocated quantity
           }));
       }
-      return []; // Driver with no allocation for today sees no products.
+      return []; // Driver with no allocations up to today sees no products.
     }
     return allProducts;
   }, [isDriver, currentUser, driverAllocations, allProducts]);
@@ -286,7 +290,7 @@ export const Products: React.FC = () => {
           {/* Export Buttons */}
           <button
             onClick={() => exportProducts(filteredProducts, 'csv')}
-            className="px-3 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm min-h-[40px] flex items-center justify-center"
+            className="px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-xl hover:from-emerald-600 hover:to-emerald-700 transition-all duration-300 text-xs sm:text-sm min-h-[42px] flex items-center justify-center shadow-md hover:shadow-lg transform hover:-translate-y-0.5 font-semibold"
             title="Export as CSV"
           >
             <span className="hidden xs:inline">📊 CSV</span>
@@ -294,16 +298,19 @@ export const Products: React.FC = () => {
           </button>
           <button
             onClick={() => exportProducts(filteredProducts, 'xlsx')}
-            className="px-3 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm min-h-[40px] flex items-center justify-center"
+            className="px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-xl hover:from-emerald-600 hover:to-emerald-700 transition-all duration-300 text-xs sm:text-sm min-h-[42px] flex items-center justify-center shadow-md hover:shadow-lg transform hover:-translate-y-0.5 font-semibold"
             title="Export as Excel"
           >
-            <span className="hidden xs:inline">📋 Excel</span>
+            <span className="hidden xs:inline">📋 XLS</span>
             <span className="xs:hidden">XLS</span>
           </button>
           {canEdit && (
-              <button onClick={() => openModal('add')} className="px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm min-h-[40px] flex-1 sm:flex-none">
-              <span className="hidden sm:inline">Add Product</span>
-              <span className="sm:hidden">+ Add</span>
+              <button 
+                onClick={() => openModal('add')} 
+                className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all duration-300 text-sm min-h-[42px] flex-1 sm:flex-none shadow-md hover:shadow-lg transform hover:-translate-y-0.5 font-semibold"
+              >
+                <span className="hidden sm:inline">✨ Add Product</span>
+                <span className="sm:hidden">+ Add</span>
               </button>
           )}
         </div>
@@ -319,27 +326,55 @@ export const Products: React.FC = () => {
             </CardDescription>
           <div className="pt-4 space-y-4">
             <div className="flex flex-wrap items-center gap-2">
-              {categories.map(category => (
-                <button
-                  key={category}
-                  onClick={() => setCategoryFilter(category)}
-                  className={`px-3 py-2 text-xs sm:text-sm font-medium rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-slate-800 focus:ring-blue-500 min-h-[36px] ${
-                    categoryFilter === category
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-slate-200 text-slate-700 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600'
-                  }`}
-                >
-                  {category.charAt(0).toUpperCase() + category.slice(1)}
-                </button>
-              ))}
+              {categories.map((category, index) => {
+                const colors = [
+                  'bg-gradient-to-r from-blue-500 to-blue-600 text-white', // All
+                  'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white', // CAR WASH
+                  'bg-gradient-to-r from-purple-500 to-purple-600 text-white', // TILE CLEANER - HD
+                  'bg-gradient-to-r from-orange-500 to-orange-600 text-white', // CLOROMAX
+                  'bg-gradient-to-r from-teal-500 to-teal-600 text-white', // FABRIC SOFTNER -MIX
+                  'bg-gradient-to-r from-pink-500 to-pink-600 text-white', // GLASS CLEANER
+                  'bg-gradient-to-r from-indigo-500 to-indigo-600 text-white', // HAND WASH - ACT/LIME
+                  'bg-gradient-to-r from-cyan-500 to-cyan-600 text-white', // LAUNDRY LIQUID
+                  'bg-gradient-to-r from-red-500 to-red-600 text-white', // TOILET CLEANER
+                  'bg-gradient-to-r from-yellow-500 to-yellow-600 text-white', // PREMEX
+                  'bg-gradient-to-r from-green-500 to-green-600 text-white', // SHALIGHT
+                  'bg-gradient-to-r from-amber-500 to-amber-600 text-white', // DISH WASH
+                  'bg-gradient-to-r from-violet-500 to-violet-600 text-white', // CALCIUM REMOVER
+                  'bg-gradient-to-r from-lime-500 to-lime-600 text-white', // PENOL
+                  'bg-gradient-to-r from-rose-500 to-rose-600 text-white', // AF-MIX
+                ];
+                
+                const activeColor = colors[index % colors.length];
+                const inactiveColor = 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600 border border-slate-200 dark:border-slate-600';
+                
+                return (
+                  <button
+                    key={category}
+                    onClick={() => setCategoryFilter(category)}
+                    className={`px-4 py-2.5 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-300 focus:outline-none focus:ring-3 focus:ring-offset-2 dark:focus:ring-offset-slate-800 focus:ring-blue-300 min-h-[40px] shadow-sm hover:shadow-md transform hover:-translate-y-0.5 ${
+                      categoryFilter === category ? activeColor : inactiveColor
+                    }`}
+                  >
+                    {category.charAt(0).toUpperCase() + category.slice(1)}
+                  </button>
+                );
+              })}
             </div>
-            <input
-              type="text"
-              placeholder={isDriver ? "Search your allocated products..." : "Search by name, category, SKU, or supplier..."}
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full px-3 sm:px-4 py-2.5 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm sm:text-base min-h-[44px]"
-            />
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </div>
+              <input
+                type="text"
+                placeholder={isDriver ? "Search your allocated products..." : "Search by name, category, SKU, or supplier..."}
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-12 pr-4 py-3 border border-slate-300 dark:border-slate-600 rounded-xl bg-gradient-to-r from-white to-slate-50 dark:from-slate-700 dark:to-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-3 focus:ring-blue-300 focus:border-blue-500 text-sm sm:text-base min-h-[48px] shadow-sm transition-all duration-300"
+              />
+            </div>
           </div>
         </CardHeader>
         <CardContent>
@@ -438,15 +473,31 @@ export const Products: React.FC = () => {
                   const productsArr = supplierProducts as Product[];
                   return (
                     <div key={supplierName}>
-                      <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 mb-4">
-                        <h2 className="text-lg sm:text-xl font-semibold text-slate-700 dark:text-slate-300">{supplierName}</h2>
-                        <Badge variant="default" className="self-start sm:self-auto">{productsArr.length} {productsArr.length === 1 ? 'Product' : 'Products'}</Badge>
+                      <div className="bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-800 dark:to-slate-700 rounded-xl p-4 mb-6 border-l-4 border-blue-500 shadow-sm">
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center text-white font-bold text-lg shadow-md">
+                              {supplierName.charAt(0)}
+                            </div>
+                            <div>
+                              <h2 className="text-xl sm:text-2xl font-bold bg-gradient-to-r from-slate-800 to-slate-600 dark:from-slate-100 dark:to-slate-300 bg-clip-text text-transparent">
+                                {supplierName}
+                              </h2>
+                              <p className="text-sm text-slate-600 dark:text-slate-400 font-medium">
+                                Product Collection
+                              </p>
+                            </div>
+                          </div>
+                          <Badge variant="success" className="self-start sm:self-auto bg-gradient-to-r from-emerald-500 to-emerald-600 text-white px-3 py-1 rounded-full font-semibold shadow-md">
+                            {productsArr.length} {productsArr.length === 1 ? 'Product' : 'Products'}
+                          </Badge>
+                        </div>
                       </div>
 
                       {/* Desktop Table View */}
-                      <div className="hidden xl:block overflow-x-auto border dark:border-slate-700 rounded-lg">
-                        <table className="w-full text-sm text-left text-slate-500 dark:text-slate-400">
-                          <thead className="text-xs text-slate-700 uppercase bg-slate-50 dark:bg-slate-700 dark:text-slate-400">
+                      <div className="hidden xl:block overflow-x-auto border border-slate-200 dark:border-slate-600 rounded-xl shadow-lg">
+                        <table className="w-full text-sm text-left text-slate-600 dark:text-slate-300">
+                          <thead className="text-xs text-slate-800 uppercase bg-gradient-to-r from-slate-100 to-slate-200 dark:from-slate-700 dark:to-slate-800 dark:text-slate-200 font-bold">
                             <tr>
                               <th scope="col" className="px-6 py-3">Product</th>
                               <th scope="col" className="px-6 py-3">Category</th>
@@ -459,8 +510,8 @@ export const Products: React.FC = () => {
                           </thead>
                           <tbody>
                             {productsArr.map((product) => (
-                              <tr key={product.id} className="bg-white border-b dark:bg-slate-800 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600">
-                                <td className="px-6 py-4 font-medium text-slate-900 dark:text-white">
+                              <tr key={product.id} className="bg-white border-b border-slate-100 dark:bg-slate-800 dark:border-slate-600 hover:bg-gradient-to-r hover:from-blue-50 hover:to-indigo-50 dark:hover:from-slate-700 dark:hover:to-slate-600 transition-all duration-300">
+                                <td className="px-6 py-4 font-semibold text-slate-800 dark:text-white">
                                   <div className="flex items-center space-x-3">
                                     {product.imageUrl ? (
                                       <img src={product.imageUrl} alt={product.name} className="w-10 h-10 rounded-full" />
@@ -480,9 +531,21 @@ export const Products: React.FC = () => {
                                 </td>
                                 <td className="px-6 py-4">{product.sku}</td>
                                 {canEdit && (
-                                  <td className="px-6 py-4 flex items-center space-x-2">
-                                    <button onClick={() => openModal('edit', product)} className="font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">Edit</button>
-                                    <button onClick={() => openDeleteConfirm(product)} className="font-medium text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300">Delete</button>
+                                  <td className="px-6 py-4">
+                                    <div className="flex items-center space-x-3">
+                                      <button 
+                                        onClick={() => openModal('edit', product)} 
+                                        className="px-3 py-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white text-xs font-semibold rounded-lg hover:from-blue-600 hover:to-blue-700 transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
+                                      >
+                                        Edit
+                                      </button>
+                                      <button 
+                                        onClick={() => openDeleteConfirm(product)} 
+                                        className="px-3 py-2 bg-gradient-to-r from-red-500 to-red-600 text-white text-xs font-semibold rounded-lg hover:from-red-600 hover:to-red-700 transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
+                                      >
+                                        Delete
+                                      </button>
+                                    </div>
                                   </td>
                                 )}
                               </tr>
@@ -494,8 +557,8 @@ export const Products: React.FC = () => {
                       {/* Mobile Card View */}
                       <div className="xl:hidden space-y-3">
                         {productsArr.map((product) => (
-                          <div key={product.id} className="bg-slate-50 dark:bg-slate-800 rounded-lg p-4 border border-slate-200 dark:border-slate-700">
-                            <div className="flex items-start justify-between mb-3">
+                          <div key={product.id} className="bg-gradient-to-br from-white to-slate-50 dark:from-slate-800 dark:to-slate-900 rounded-xl p-5 border border-slate-200 dark:border-slate-600 shadow-md hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1">
+                            <div className="flex items-start justify-between mb-4">
                               <div className="flex items-center space-x-3 flex-1">
                                 {product.imageUrl ? (
                                   <img src={product.imageUrl} alt={product.name} className="w-12 h-12 rounded-full flex-shrink-0" />
@@ -528,11 +591,17 @@ export const Products: React.FC = () => {
                               </div>
                               
                               {canEdit && (
-                                <div className="flex gap-2">
-                                  <button onClick={() => openModal('edit', product)} className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 font-medium text-xs bg-blue-50 dark:bg-blue-900/20 px-3 py-2 rounded min-h-[36px]">
+                                <div className="flex gap-3">
+                                  <button 
+                                    onClick={() => openModal('edit', product)} 
+                                    className="bg-gradient-to-r from-blue-500 to-blue-600 text-white font-semibold text-xs px-4 py-2 rounded-lg hover:from-blue-600 hover:to-blue-700 transition-all duration-300 shadow-md hover:shadow-lg transform hover:-translate-y-0.5 min-h-[36px]"
+                                  >
                                     Edit
                                   </button>
-                                  <button onClick={() => openDeleteConfirm(product)} className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 font-medium text-xs bg-red-50 dark:bg-red-900/20 px-3 py-2 rounded min-h-[36px]">
+                                  <button 
+                                    onClick={() => openDeleteConfirm(product)} 
+                                    className="bg-gradient-to-r from-red-500 to-red-600 text-white font-semibold text-xs px-4 py-2 rounded-lg hover:from-red-600 hover:to-red-700 transition-all duration-300 shadow-md hover:shadow-lg transform hover:-translate-y-0.5 min-h-[36px]"
+                                  >
                                     Delete
                                   </button>
                                 </div>
