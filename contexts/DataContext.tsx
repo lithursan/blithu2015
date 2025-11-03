@@ -123,7 +123,24 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                         returnAmount: row.returnamount == null || isNaN(Number(row.returnamount)) ? 0 : Number(row.returnamount),
                     } as Order;
                 });
-                setOrders(mappedOrders);
+                // Deduplicate orders by id (prefer) to avoid UI duplicates
+                const dedupedOrders = (() => {
+                    const byKey = new Map<string, Order>();
+                    for (const o of mappedOrders) {
+                        const key = (o.id || '').toString().trim();
+                        if (!key) continue;
+                        if (!byKey.has(key)) {
+                            byKey.set(key, o);
+                        } else {
+                            const existing = byKey.get(key)!;
+                            const existingTime = existing.created_at ? new Date(existing.created_at).getTime() : 0;
+                            const newTime = o.created_at ? new Date(o.created_at).getTime() : 0;
+                            if (newTime > existingTime) byKey.set(key, o);
+                        }
+                    }
+                    return Array.from(byKey.values()).sort((a, b) => new Date(b.date as string).getTime() - new Date(a.date as string).getTime());
+                })();
+                setOrders(dedupedOrders);
             }
             // Products table fetch mapping
             await window.refreshProducts();

@@ -992,7 +992,14 @@ export const Orders: React.FC = () => {
       }
       
       const freshOrders = await fetchOrders();
-      if (freshOrders) setOrders(freshOrders);
+      if (freshOrders) {
+        setOrders(prev => {
+          const byId = new Map<string, Order>();
+          prev.forEach(o => byId.set(o.id, o));
+          freshOrders.forEach(o => byId.set(o.id, o));
+          return Array.from(byId.values()).sort((a, b) => new Date((b.date as string) || '').getTime() - new Date((a.date as string) || '').getTime());
+        });
+      }
       
       // Send email notification to assigned user if enabled
       const createdOrder = freshOrders?.find(o => o.id === newOrder.id);
@@ -1011,7 +1018,8 @@ export const Orders: React.FC = () => {
       const updatedOrder = {
         customerid: customer.id,
         customername: customer.name,
-        assigneduserid: currentOrder.assigneduserid ?? '',
+        // Ensure the editor (current logged-in rep) becomes the assigned user when editing
+        assigneduserid: currentUser?.id ?? currentOrder.assigneduserid ?? '',
         orderitems: JSON.stringify(newOrderItems),
         backordereditems: JSON.stringify(newBackorderedItems),
         method: '',
@@ -1071,7 +1079,14 @@ export const Orders: React.FC = () => {
       }
       
       const freshOrders = await fetchOrders();
-      if (freshOrders) setOrders(freshOrders);
+      if (freshOrders) {
+        setOrders(prev => {
+          const byId = new Map<string, Order>();
+          prev.forEach(o => byId.set(o.id, o));
+          freshOrders.forEach(o => byId.set(o.id, o));
+          return Array.from(byId.values()).sort((a, b) => new Date((b.date as string) || '').getTime() - new Date((a.date as string) || '').getTime());
+        });
+      }
       alert('Order updated successfully!');
     } catch (error) {
       console.error('Unexpected error updating order:', error);
@@ -1108,7 +1123,14 @@ export const Orders: React.FC = () => {
       }
       
       const freshOrders = await fetchOrders();
-      if (freshOrders) setOrders(freshOrders);
+      if (freshOrders) {
+        setOrders(prev => {
+          const byId = new Map<string, Order>();
+          prev.forEach(o => byId.set(o.id, o));
+          freshOrders.forEach(o => byId.set(o.id, o));
+          return Array.from(byId.values()).sort((a, b) => new Date((b.date as string) || '').getTime() - new Date((a.date as string) || '').getTime());
+        });
+      }
       alert('Order deleted successfully!');
       closeDeleteModal();
     } catch (error) {
@@ -1244,7 +1266,12 @@ export const Orders: React.FC = () => {
             returnAmount: row.returnamount == null || isNaN(Number(row.returnamount)) ? 0 : Number(row.returnamount),
             amountPaid: row.amountpaid == null || isNaN(Number(row.amountpaid)) ? 0 : Number(row.amountpaid),
           }));
-          setOrders(mappedOrders);
+          setOrders(prev => {
+            const byId = new Map<string, Order>();
+            prev.forEach(o => byId.set(o.id, o));
+            mappedOrders.forEach((o: Order) => byId.set(o.id, o));
+            return Array.from(byId.values()).sort((a, b) => new Date((b.date as string) || '').getTime() - new Date((a.date as string) || '').getTime());
+          });
           setViewingOrder(updatedOrder);
           alert('Balances updated and saved!');
         } else {

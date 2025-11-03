@@ -60,7 +60,8 @@ export const Deliveries: React.FC = () => {
             map.set(item.productId, prev + (item.quantity || 0));
           });
         });
-        perDate[selDate] = Array.from(map.entries()).map(([productId, qty]) => ({ productId, qty }));
+        const key = String(selDate);
+        perDate[key] = Array.from(map.entries()).map(([productId, qty]) => ({ productId, qty }));
       });
     }
     setDeliveryAggregatedProducts(prev => ({ ...prev, ...perDate }));
