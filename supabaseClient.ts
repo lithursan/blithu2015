@@ -78,3 +78,75 @@ export const fetchSuppliers = async () => {
     joinDate: row.joindate,
   }));
 };
+
+// Route management functions
+export const fetchRoutes = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('routes')
+      .select('*')
+      .eq('is_active', true)
+      .order('name');
+
+    if (error) {
+      if (error.message.includes('relation "routes" does not exist')) {
+        // Return default routes if table doesn't exist
+        return ['Route 1', 'Route 2', 'Route 3', 'Unassigned'];
+      }
+      throw error;
+    }
+
+    const routeNames = data?.map(route => route.name) || [];
+    // Always ensure 'Unassigned' exists
+    return routeNames.includes('Unassigned') 
+      ? routeNames 
+      : [...routeNames, 'Unassigned'];
+  } catch (error) {
+    console.warn('Could not fetch routes from database:', error);
+    return ['Route 1', 'Route 2', 'Route 3', 'Unassigned'];
+  }
+};
+
+export const addRoute = async (routeName: string, userId?: string) => {
+  try {
+    const { data, error } = await supabase
+      .from('routes')
+      .insert([
+        {
+          name: routeName,
+          description: `Delivery route: ${routeName}`,
+          created_by: userId,
+          is_active: true
+        }
+      ])
+      .select();
+
+    return { data, error };
+  } catch (error) {
+    return { data: null, error };
+  }
+};
+
+export const deleteRoute = async (routeName: string) => {
+  try {
+    // First update all customers using this route to 'Unassigned'
+    const { error: updateError } = await supabase
+      .from('customers')
+      .update({ route: 'Unassigned' })
+      .eq('route', routeName);
+
+    if (updateError) {
+      return { error: updateError };
+    }
+
+    // Then delete the route
+    const { error: deleteError } = await supabase
+      .from('routes')
+      .delete()
+      .eq('name', routeName);
+
+    return { error: deleteError };
+  } catch (error) {
+    return { error };
+  }
+};

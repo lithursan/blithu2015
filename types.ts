@@ -150,3 +150,13 @@ export interface DriverSale {
   paymentReference?: string; // For Cheque No or Transaction ID
   notes?: string;
 }
+
+export interface Route {
+  id: string;
+  name: string;
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
+  createdBy?: string;
+  isActive: boolean;
+}

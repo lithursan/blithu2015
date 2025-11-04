@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
 import { Customer, UserRole } from '../../types';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/Card';
@@ -77,6 +77,7 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
   const [selectedRoute, setSelectedRoute] = useState<string>(propSelectedRoute || 'All Routes');
   const [isAddingRoute, setIsAddingRoute] = useState(false);
   const [newRouteName, setNewRouteName] = useState('');
+  const [routesLoaded, setRoutesLoaded] = useState(false);
   
   // Store location (your distribution center)
   const STORE_LOCATION = { lat: 9.384489, lng: 80.408737, name: 'Distribution Center' };
@@ -101,6 +102,26 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
     currentUser?.role === UserRole.Admin,
     [currentUser]
   );
+
+  // Load routes from database on component mount
+  const loadRoutesFromDatabase = async () => {
+    try {
+      // Import the fetchRoutes function from supabaseClient
+      const { fetchRoutes } = await import('../../supabaseClient');
+      const routeNames = await fetchRoutes();
+      setRoutes(routeNames);
+      setRoutesLoaded(true);
+    } catch (error) {
+      console.warn('Could not load routes from database:', error);
+      // Keep default routes on error
+      setRoutesLoaded(true);
+    }
+  };
+
+  // Load routes when component mounts
+  useEffect(() => {
+    loadRoutesFromDatabase();
+  }, []);
 
   // Helper: detect missing created_by column reliably across Supabase/PostgREST variants
   const isCreatedByMissingError = (err: any): boolean => {
@@ -499,34 +520,85 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
   };
 
   // Route management functions
-  const handleAddRoute = () => {
-    if (newRouteName.trim() && !routes.includes(newRouteName.trim())) {
-      setRoutes(prev => [...prev, newRouteName.trim()]);
+  const handleAddRoute = async () => {
+    const trimmedRouteName = newRouteName.trim();
+    
+    if (!trimmedRouteName) {
+      alert('Route name cannot be empty!');
+      return;
+    }
+    
+    if (routes.includes(trimmedRouteName)) {
+      alert('Route name already exists!');
+      return;
+    }
+
+    try {
+      // Import the addRoute function from supabaseClient
+      const { addRoute } = await import('../../supabaseClient');
+      const { data, error } = await addRoute(trimmedRouteName, currentUser?.id);
+
+      if (error) {
+        if (error.message?.includes('relation "routes" does not exist')) {
+          console.warn('Routes table does not exist. Using local state only.');
+          // Fall back to local state
+          setRoutes(prev => [...prev, trimmedRouteName]);
+          setNewRouteName('');
+          setIsAddingRoute(false);
+          alert('Route added successfully! (Note: Database table needs to be created. Please run the migration.)');
+        } else {
+          throw error;
+        }
+      } else {
+        // Successfully saved to database
+        setRoutes(prev => [...prev, trimmedRouteName]);
+        setNewRouteName('');
+        setIsAddingRoute(false);
+        alert('Route added successfully and saved to database!');
+      }
+    } catch (error) {
+      console.error('Error adding route:', error);
+      // Fall back to local state
+      setRoutes(prev => [...prev, trimmedRouteName]);
       setNewRouteName('');
       setIsAddingRoute(false);
-      alert('Route added successfully!');
-    } else {
-      alert('Route name already exists or is empty!');
+      alert('Route added successfully! (Note: Saved locally only due to database error)');
     }
   };
 
-  const handleDeleteRoute = (routeName: string) => {
+  const handleDeleteRoute = async (routeName: string) => {
     if (routeName === 'Unassigned') {
       alert('Cannot delete the Unassigned route');
       return;
     }
     
-    // Move all customers from this route to Unassigned
-    const updatedCustomers = customers.map(customer => 
-      customer.route === routeName ? { ...customer, route: 'Unassigned' } : customer
-    );
-    
-    if (confirm(`Are you sure you want to delete "${routeName}"? All customers will be moved to Unassigned.`)) {
+    if (!confirm(`Are you sure you want to delete "${routeName}"? All customers will be moved to Unassigned.`)) {
+      return;
+    }
+
+    try {
+      // Import the deleteRoute function from supabaseClient
+      const { deleteRoute } = await import('../../supabaseClient');
+      const { error } = await deleteRoute(routeName);
+
+      if (error && !error.message?.includes('relation "routes" does not exist')) {
+        alert(`Error deleting route: ${error.message}`);
+        return;
+      }
+
+      // Update local state
       setRoutes(prev => prev.filter(route => route !== routeName));
       if (selectedRoute === routeName) {
         setSelectedRoute('All Routes');
       }
+
+      // Refresh customer data to show updated routes
+      await refetchData();
+      
       alert('Route deleted successfully!');
+    } catch (error) {
+      console.error('Error deleting route:', error);
+      alert('Error deleting route. Please try again.');
     }
   };
 
