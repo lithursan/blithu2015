@@ -432,6 +432,24 @@ export const Orders: React.FC = () => {
     return product.stock; // For non-drivers, show warehouse stock
   };
 
+  // Build pending quantities map used across the order creation UI so we can show (stock - pending)
+  const pendingMap = useMemo(() => {
+    const map = new Map<string, number>();
+    try {
+      if (!orders || orders.length === 0) return map;
+      const pendingOrders = orders.filter(o => (o.status || '') === OrderStatus.Pending && !(modalState === 'edit' && currentOrder && o.id === currentOrder.id));
+      for (const po of pendingOrders) {
+        (po.orderItems || []).forEach((it: any) => {
+          if (!it || !it.productId) return;
+          map.set(it.productId, (map.get(it.productId) || 0) + (Number(it.quantity) || 0));
+        });
+      }
+    } catch (err) {
+      console.error('Error building pendingMap for product display:', err);
+    }
+    return map;
+  }, [orders, modalState, currentOrder]);
+
   useEffect(() => {
     if (modalState === 'create') {
         const customer = customers.find(c => c.id === selectedCustomer);
@@ -562,25 +580,31 @@ export const Orders: React.FC = () => {
     }
   }
 
-    // Sort orders: Pending first, then Delivered (for all users)
+    // Sort orders with custom priority:
+    // 1) Pending (yellow cards) at the top
+    // 2) Delivered with outstanding > 0 (red cards) next
+    // 3) Delivered with outstanding === 0 (green cards) next
+    // 4) Other statuses after that
+    // Within the same priority group, newest orders appear first
     return displayOrders.sort((a, b) => {
-      // Priority order: Pending = 1, Delivered = 2, Other statuses = 3
-      const getStatusPriority = (order: any) => {
-        if (order.status === 'Pending') return 1; // Pending - Top priority
-        if (order.status === 'Delivered') return 2; // Delivered - Second priority
-        return 3; // Other statuses (Shipped, Cancelled)
+      const getPriority = (order: any) => {
+        const status = order.status;
+        const cheque = (typeof order.chequeBalance === 'number' && !isNaN(order.chequeBalance)) ? order.chequeBalance : (order.chequeBalance ?? 0) || (order.chequebalance ?? 0) || 0;
+        const credit = (typeof order.creditBalance === 'number' && !isNaN(order.creditBalance)) ? order.creditBalance : (order.creditBalance ?? 0) || (order.creditbalance ?? 0) || 0;
+        const outstanding = (Number(cheque) || 0) + (Number(credit) || 0);
+
+        if (status === 'Pending') return 1; // yellow
+        if (status === 'Delivered' && outstanding > 0) return 2; // red
+        if (status === 'Delivered' && outstanding === 0) return 3; // green
+        return 4; // other statuses
       };
-      
-      const priorityA = getStatusPriority(a);
-      const priorityB = getStatusPriority(b);
-      
-      // If same status priority, sort by date (newest first)
-      if (priorityA === priorityB) {
+
+      const pa = getPriority(a);
+      const pb = getPriority(b);
+      if (pa === pb) {
         return new Date(b.date).getTime() - new Date(a.date).getTime();
       }
-      
-      // Otherwise sort by status priority
-      return priorityA - priorityB;
+      return pa - pb;
     });
   }, [orders, products, statusFilter, searchTerm, currentUser, deliveryDateFilter, dateRangeFilter]);
     
@@ -874,6 +898,41 @@ export const Orders: React.FC = () => {
         return sum + (cp * (item.quantity || 0));
       }, 0);
 
+      // --- New validation: ensure (stock - pending) >= requested qty for each product ---
+      // Build pending map from existing orders (exclude currentOrder when editing)
+      const pendingMap = new Map<string, number>();
+      try {
+        const pendingOrders = orders.filter(o => (o.status || '') === OrderStatus.Pending);
+        for (const po of pendingOrders) {
+          // If editing, exclude the current order's items from pending totals
+          if (modalState === 'edit' && currentOrder && po.id === currentOrder.id) continue;
+          (po.orderItems || []).forEach((it: any) => {
+            if (!it || !it.productId) return;
+            pendingMap.set(it.productId, (pendingMap.get(it.productId) || 0) + (Number(it.quantity) || 0));
+          });
+        }
+      } catch (err) {
+        console.error('Error building pendingMap for order validation:', err);
+      }
+
+      const insufficient: { productId: string; name?: string; available: number; requested: number }[] = [];
+      for (const it of newOrderItems) {
+        const prod = products.find(p => p.id === it.productId);
+        if (!prod) continue;
+        const pendingQty = pendingMap.get(it.productId) || 0;
+        // For drivers, effective stock is driver's allocated stock; otherwise use warehouse stock
+        const baseStock = currentUser?.role === UserRole.Driver ? getEffectiveStock(prod) : (prod.stock || 0);
+        const available = (baseStock || 0) - pendingQty;
+        if (available < it.quantity) {
+          insufficient.push({ productId: it.productId, name: prod.name, available, requested: it.quantity });
+        }
+      }
+      if (insufficient.length > 0) {
+        const msg = insufficient.map(i => `${i.name || i.productId}: available ${i.available}, requested ${i.requested}`).join('\n');
+        alert('Cannot create order because some products would exceed available stock considering pending orders:\n' + msg);
+        return;
+      }
+
       const newOrder = {
         id: newOrderId,
         customerid: customer.id,
@@ -1038,9 +1097,57 @@ export const Orders: React.FC = () => {
         chequebalance: currentOrder.chequeBalance || 0,
         creditbalance: currentOrder.creditBalance || 0,
       };
+      // --- Validation for edit: ensure (stock - pending) >= requested qty for each product ---
+      try {
+        const pendingMapEdit = new Map<string, number>();
+        const pendingOrders = orders.filter(o => (o.status || '') === OrderStatus.Pending);
+        for (const po of pendingOrders) {
+          if (currentOrder && po.id === currentOrder.id) continue; // exclude current order
+          (po.orderItems || []).forEach((it: any) => {
+            if (!it || !it.productId) return;
+            pendingMapEdit.set(it.productId, (pendingMapEdit.get(it.productId) || 0) + (Number(it.quantity) || 0));
+          });
+        }
+
+        const insufficientEdit: { productId: string; name?: string; available: number; requested: number }[] = [];
+        for (const it of newOrderItems) {
+          const prod = products.find(p => p.id === it.productId);
+          if (!prod) continue;
+          const pendingQty = pendingMapEdit.get(it.productId) || 0;
+          const baseStock = currentUser?.role === UserRole.Driver ? getEffectiveStock(prod) : (prod.stock || 0);
+          const available = (baseStock || 0) - pendingQty;
+          if (available < it.quantity) {
+            insufficientEdit.push({ productId: it.productId, name: prod.name, available, requested: it.quantity });
+          }
+        }
+        if (insufficientEdit.length > 0) {
+          const msg = insufficientEdit.map(i => `${i.name || i.productId}: available ${i.available}, requested ${i.requested}`).join('\n');
+          alert('Cannot update order because some products would exceed available stock considering pending orders:\n' + msg);
+          return;
+        }
+      } catch (err) {
+        console.error('Unexpected validation error before order update:', err);
+      }
       
       try {
-        const { error } = await supabase.from('orders').update(updatedOrder).eq('id', currentOrder.id);
+        // Sanitize payload: remove undefined or NaN values and ensure JSON/string types for JSON columns
+        const sanitizedPayload: any = {};
+        Object.entries(updatedOrder).forEach(([k, v]) => {
+          if (v === undefined) return;
+          if (typeof v === 'number' && isNaN(v)) return;
+          // Keep nulls explicitly
+          sanitizedPayload[k] = v;
+        });
+        // Ensure JSON fields are strings where expected by DB (orderitems/backordereditems)
+        if (sanitizedPayload.orderitems && typeof sanitizedPayload.orderitems !== 'string') {
+          try { sanitizedPayload.orderitems = JSON.stringify(sanitizedPayload.orderitems); } catch {};
+        }
+        if (sanitizedPayload.backordereditems && typeof sanitizedPayload.backordereditems !== 'string') {
+          try { sanitizedPayload.backordereditems = JSON.stringify(sanitizedPayload.backordereditems); } catch {};
+        }
+
+        console.log('PATCH payload for orders.update:', sanitizedPayload);
+        const { error } = await supabase.from('orders').update(sanitizedPayload).eq('id', currentOrder.id);
         if (error) {
           const msg = (error.message || '').toLowerCase();
           if (msg.includes("could not find the 'costamount' column") || msg.includes('costamount')) {
@@ -2305,22 +2412,27 @@ export const Orders: React.FC = () => {
                         // First priority: Show products with quantity > 0 first (at top)
                         const aHasQuantity = (orderItems[a.id] || 0) > 0;
                         const bHasQuantity = (orderItems[b.id] || 0) > 0;
-                        
                         if (aHasQuantity && !bHasQuantity) return -1;
                         if (!aHasQuantity && bHasQuantity) return 1;
-                        
+
                         // Second priority: Show in-stock products before out-of-stock products
-                        const aIsOutOfStock = getEffectiveStock(a) === 0;
-                        const bIsOutOfStock = getEffectiveStock(b) === 0;
-                        
+                        const aBase = currentUser?.role === UserRole.Driver ? getEffectiveStock(a) : (a.stock || 0);
+                        const bBase = currentUser?.role === UserRole.Driver ? getEffectiveStock(b) : (b.stock || 0);
+                        const aAvail = (aBase || 0) - (pendingMap.get(a.id) || 0);
+                        const bAvail = (bBase || 0) - (pendingMap.get(b.id) || 0);
+                        const aIsOutOfStock = aAvail <= 0;
+                        const bIsOutOfStock = bAvail <= 0;
                         if (!aIsOutOfStock && bIsOutOfStock) return -1;
                         if (aIsOutOfStock && !bIsOutOfStock) return 1;
-                        
+
                         // Within each group, sort by name
                         return a.name.localeCompare(b.name);
                       })
                       .map(product => {
-                    const isOutOfStock = getEffectiveStock(product) === 0;
+                    const baseStock = currentUser?.role === UserRole.Driver ? getEffectiveStock(product) : (product.stock || 0);
+                    const pendingQty = pendingMap.get(product.id) || 0;
+                    const available = (baseStock || 0) - pendingQty;
+                    const isOutOfStock = available <= 0;
                     const isHeld = heldItems.has(product.id);
                     const isUnavailable = isHeld || isOutOfStock;
                     const hasQuantity = (orderItems[product.id] || 0) > 0;
@@ -2341,11 +2453,9 @@ export const Orders: React.FC = () => {
                           <div className="flex-1 min-w-0 mr-0.5">
                             <h4 className="font-medium text-xs text-slate-800 dark:text-white truncate leading-none">{product.name}</h4>
                             <p className="text-xs text-slate-500 dark:text-slate-400 leading-none">
-                              {isOutOfStock ? (
-                                <span className="text-red-600 text-xs">OOS</span>
-                              ) : (
-                                <span className="text-green-600 text-xs">{getEffectiveStock(product)}</span>
-                              )}
+                              <span className={`text-green-600 dark:text-green-300 text-xs font-medium`}>{baseStock}</span>
+                              <span className="mx-2 text-purple-500 dark:text-purple-300 text-xs">({pendingQty})</span>
+                              <span className={`text-yellow-500 dark:text-yellow-300 text-xs font-semibold ml-1`}>{available}</span>
                             </p>
                           </div>
                           
@@ -2369,11 +2479,11 @@ export const Orders: React.FC = () => {
                               />
                             </div>
 
-                            <div className="w-8">
+                                <div className="w-8">
                               <input
                                 type="number"
                                 min="0"
-                                max={isUnavailable ? undefined : getEffectiveStock(product)}
+                                max={isUnavailable ? undefined : Math.max(0, available)}
                                 value={orderItems[product.id] || ''}
                                 placeholder="0"
                                 onChange={(e) => handleQuantityChange(product.id, parseInt(e.target.value, 10) || 0)}

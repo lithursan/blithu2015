@@ -32,17 +32,35 @@ export const Deliveries: React.FC = () => {
   // Aggregate products for all selected dates combined
   const aggregatedProducts = useMemo(() => {
     if (!selectedDates || selectedDates.size === 0) return [];
+    console.log('🔍 AGGREGATION DEBUG - Selected dates:', Array.from(selectedDates));
+    console.log('🔍 AGGREGATION DEBUG - ordersByDate:', ordersByDate);
+    
     const map = new Map<string, number>();
     Array.from(selectedDates).forEach(selDate => {
       const dateOrders = ordersByDate[selDate] || [];
-      dateOrders.forEach(order => {
+      console.log(`🔍 Orders for date ${selDate}:`, dateOrders.length, dateOrders);
+      
+      // Check for duplicate orders
+      const orderIds = dateOrders.map(o => o.id);
+      const uniqueOrderIds = [...new Set(orderIds)];
+      if (orderIds.length !== uniqueOrderIds.length) {
+        console.warn(`⚠️ DUPLICATE ORDERS found for date ${selDate}:`, orderIds.length, 'total,', uniqueOrderIds.length, 'unique');
+      }
+      
+      dateOrders.forEach((order, orderIndex) => {
+        console.log(`🔍 Processing order ${orderIndex + 1}/${dateOrders.length} (ID: ${order.id}):`, order.orderItems);
         (order.orderItems || []).forEach((item: any) => {
           const prev = map.get(item.productId) || 0;
-          map.set(item.productId, prev + (item.quantity || 0));
+          const newTotal = prev + (item.quantity || 0);
+          console.log(`📦 Product ${item.productId}: adding ${item.quantity}, total becomes ${newTotal}`);
+          map.set(item.productId, newTotal);
         });
       });
     });
-    return Array.from(map.entries()).map(([productId, qty]) => ({ productId, qty }));
+    
+    const result = Array.from(map.entries()).map(([productId, qty]) => ({ productId, qty }));
+    console.log('🔍 Final aggregated products:', result);
+    return result;
   }, [ordersByDate, selectedDates]);
 
   // Publish per-date aggregated products into DataContext so other pages (Drivers) can consume
@@ -98,7 +116,7 @@ export const Deliveries: React.FC = () => {
       console.warn('Failed to check existing allocations:', err);
     }
 
-    // Build allocation record for driver
+    // Build allocation record for driver - clean version
     const items = aggregatedProducts.map(p => ({ productId: p.productId, quantity: p.qty }));
     setLoading(true);
     // Insert into Supabase driver_allocations table
@@ -119,7 +137,41 @@ export const Deliveries: React.FC = () => {
         alert('All selected dates were already allocated. Nothing to do.');
         return;
       }
-      const { data, error } = await supabase.from('driver_allocations').insert(payload).select();
+      // Check if allocation already exists before inserting.
+      // Fetch existing allocations for this driver and normalize dates to YYYY-MM-DD to avoid format mismatches.
+      const { data: existing } = await supabase
+        .from('driver_allocations')
+        .select('id,date,driver_id')
+        .eq('driver_id', driverId);
+
+      const existingDateSet = new Set<string>();
+      if (existing && Array.isArray(existing)) {
+        existing.forEach((row: any) => {
+          if (!row || !row.date) return;
+          const d = typeof row.date === 'string' ? row.date.slice(0,10) : new Date(row.date).toISOString().slice(0,10);
+          existingDateSet.add(d);
+        });
+      }
+
+  const datesToActuallyInsert = Array.from(selectedDates).filter((d: any) => !existingDateSet.has(String(d)));
+      if (datesToActuallyInsert.length === 0) {
+        setLoading(false);
+        alert('Allocation already exists for this driver and date(s). Please unallocate first.');
+        return;
+      }
+
+      // Build payload using the filtered dates
+      const payloadToInsert = datesToActuallyInsert.map(d => ({
+        driver_id: driverId,
+        driver_name: driverName,
+        date: d,
+        allocated_items: JSON.stringify(items),
+        returned_items: null,
+        sales_total: 0,
+        status: 'Allocated',
+      }));
+
+      const { data, error } = await supabase.from('driver_allocations').insert(payloadToInsert).select();
       setLoading(false);
       if (error) {
         alert('Failed to allocate to driver: ' + error.message);
@@ -402,7 +454,7 @@ export const Deliveries: React.FC = () => {
                           <tr 
                             key={row.productId} 
                             className={`border-b border-slate-200 dark:border-slate-600 hover:bg-slate-50/50 dark:hover:bg-slate-700/50 transition-colors ${
-                              index % 2 === 0 ? 'bg-slate-50/30 dark:bg-slate-800/30' : 'bg-white/30 dark:bg-slate-700/30'
+                              index % 4 === 0 ? 'bg-slate-50/30 dark:bg-slate-800/30' : 'bg-white/30 dark:bg-slate-700/30'
                             }`}
                           >
                             <td className="p-3 font-medium text-slate-700 dark:text-slate-300">{prod?.name || row.productId}</td>

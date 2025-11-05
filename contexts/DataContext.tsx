@@ -304,21 +304,22 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                             salesTotal: row.sales_total ?? row.salestotal ?? 0,
                             status: row.status ?? 'Allocated',
                         }));
-                        console.log('Debug - Mapped driver allocations:', mappedAllocations);
-                        // Deduplicate allocations by id (prefer) or driverId+date as fallback
-                        const deduped = (() => {
-                            const byId = new Map<string | number, any>();
-                            const byKey = new Map<string, any>();
-                            for (const a of mappedAllocations) {
-                                if (a.id) {
-                                    byId.set(String(a.id), a);
-                                } else {
-                                    const key = `${a.driverId}::${a.date}`;
-                                    if (!byKey.has(key)) byKey.set(key, a);
-                                }
+                        // Deduplicate allocations by driverId + date (keep the latest by id when duplicates exist)
+                        const uniqueByDriverDate = new Map<string, any>();
+                        mappedAllocations.forEach(alloc => {
+                            const key = `${alloc.driverId}::${alloc.date}`;
+                            if (!uniqueByDriverDate.has(key)) {
+                                uniqueByDriverDate.set(key, alloc);
+                                return;
                             }
-                            return [...Array.from(byId.values()), ...Array.from(byKey.values())];
-                        })();
+                            const existing = uniqueByDriverDate.get(key);
+                            // Prefer the allocation with a larger id string when duplicates exist
+                            if (alloc.id && existing.id) {
+                                if (String(alloc.id) > String(existing.id)) uniqueByDriverDate.set(key, alloc);
+                            }
+                        });
+                        const deduped = Array.from(uniqueByDriverDate.values());
+                        console.log(`Allocations: ${mappedAllocations.length} -> ${deduped.length} after deduplication`);
                         setter(deduped);
                     } else if (name === 'users') {
                         const mappedUsers = data.map((row: any) => ({
@@ -533,20 +534,21 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                         salesTotal: row.sales_total ?? row.salestotal ?? 0,
                         status: row.status ?? 'Allocated',
                     }));
-                    // Deduplicate allocations by id or driverId+date to avoid duplicates from DB or transient merges
-                    const deduped = (() => {
-                        const byId = new Map<string | number, any>();
-                        const byKey = new Map<string, any>();
-                        for (const a of mappedAllocations) {
-                            if (a.id) {
-                                byId.set(String(a.id), a);
-                            } else {
-                                const key = `${a.driverId}::${a.date}`;
-                                if (!byKey.has(key)) byKey.set(key, a);
-                            }
+                    // Deduplicate allocations by driverId + date (prefer latest created_at or greater id)
+                    const uniqueByDriverDate = new Map<string, any>();
+                    mappedAllocations.forEach(a => {
+                        const key = `${a.driverId}::${a.date}`;
+                        if (!uniqueByDriverDate.has(key)) {
+                            uniqueByDriverDate.set(key, a);
+                            return;
                         }
-                        return [...Array.from(byId.values()), ...Array.from(byKey.values())];
-                    })();
+                        const existing = uniqueByDriverDate.get(key);
+                        // Prefer the allocation with a larger id string when duplicates exist
+                        if (a.id && existing.id) {
+                            if (String(a.id) > String(existing.id)) uniqueByDriverDate.set(key, a);
+                        }
+                    });
+                    const deduped = Array.from(uniqueByDriverDate.values());
                     setDriverAllocations(deduped);
                 }
             } catch (err) {

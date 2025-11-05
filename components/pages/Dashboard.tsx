@@ -645,23 +645,38 @@ export const Dashboard: React.FC = () => {
     };
     
     // Financial stats for current filtered period
-    const currentChequeBalance = filteredOrders.reduce((sum, order) => sum + (order.chequeBalance || 0), 0);
-    const currentCreditBalance = filteredOrders.reduce((sum, order) => sum + (order.creditBalance || 0), 0);
-    const currentPaid = totalSales - currentCreditBalance;
+  // Sum of cheque and credit for the current filtered orders
+  const currentChequeBalance = filteredOrders.reduce((sum, order) => sum + (order.chequeBalance || 0), 0);
+  const currentCreditBalance = filteredOrders.reduce((sum, order) => sum + (order.creditBalance || 0), 0);
+  // Sum of return amounts for filtered orders
+  const currentReturnAmount = filteredOrders.reduce((sum, order) => sum + (order.returnAmount || 0), 0);
+  // Total paid calculated from components per requirement:
+  // totalPaid = totalSales - totalCheque - totalCredit - totalReturn
+  // Use the filtered period's totalSales (delivered orders) for current period
+  const currentPaid = totalSales - currentChequeBalance - currentCreditBalance - currentReturnAmount;
+  // Reconciled total sales computed from components: paid + cheque + credit + returns
+  const reconciledTotalSales = currentPaid + currentChequeBalance + currentCreditBalance + currentReturnAmount;
     
     // Financial stats for previous period
-    const prevChequeBalance = previousPeriodOrders.reduce((sum, order) => sum + (order.chequeBalance || 0), 0);
-    const prevCreditBalance = previousPeriodOrders.reduce((sum, order) => sum + (order.creditBalance || 0), 0);
-    const prevPaid = prevTotalSales - prevCreditBalance;
+  const prevChequeBalance = previousPeriodOrders.reduce((sum, order) => sum + (order.chequeBalance || 0), 0);
+  const prevCreditBalance = previousPeriodOrders.reduce((sum, order) => sum + (order.creditBalance || 0), 0);
+  const prevReturnAmount = previousPeriodOrders.reduce((sum, order) => sum + (order.returnAmount || 0), 0);
+  const prevPaid = prevTotalSales - prevChequeBalance - prevCreditBalance - prevReturnAmount;
+  const reconciledPrevTotalSales = prevPaid + prevChequeBalance + prevCreditBalance + prevReturnAmount;
     
-    // Calculate changes
-    const chequeChange = calculateChange(currentChequeBalance, prevChequeBalance);
-    const creditChange = calculateChange(currentCreditBalance, prevCreditBalance);
-    const paidChange = calculateChange(currentPaid, prevPaid);    // Financial stats calculations (overall totals)
-    const totalChequeBalance = orders.reduce((sum, order) => sum + (order.chequeBalance || 0), 0);
-    const totalCreditBalance = orders.reduce((sum, order) => sum + (order.creditBalance || 0), 0);
-    const overallTotalSales = orders.reduce((sum, order) => order.status === 'Delivered' ? sum + order.total : sum, 0);
-    const totalPaid = overallTotalSales - totalCreditBalance;
+  // Calculate changes
+  const chequeChange = calculateChange(currentChequeBalance, prevChequeBalance);
+  const creditChange = calculateChange(currentCreditBalance, prevCreditBalance);
+  const paidChange = calculateChange(currentPaid, prevPaid);
+  const returnChange = calculateChange(currentReturnAmount, prevReturnAmount);
+    // Financial stats calculations (overall totals)
+  const totalChequeBalance = orders.reduce((sum, order) => sum + (order.chequeBalance || 0), 0);
+  const totalCreditBalance = orders.reduce((sum, order) => sum + (order.creditBalance || 0), 0);
+  const totalReturnAmount = orders.reduce((sum, order) => sum + (order.returnAmount || 0), 0);
+  const overallTotalSales = orders.reduce((sum, order) => order.status === 'Delivered' ? sum + order.total : sum, 0);
+  // Overall paid derived from components across all orders (delivered totals used for overallTotalSales)
+  const totalPaid = overallTotalSales - totalChequeBalance - totalCreditBalance - totalReturnAmount;
+  const reconciledOverallTotalSales = totalPaid + totalChequeBalance + totalCreditBalance + totalReturnAmount;
     
     // Stats that are now filtered based on selected criteria
     const totalProducts = filteredProducts.length;
@@ -762,6 +777,20 @@ export const Dashboard: React.FC = () => {
             <div className="flex justify-between items-start">
               <div className="flex-1">
                 <p className={`${getFontSizeClass(formatCurrency(totalSales, currency))} font-bold text-blue-600 dark:text-blue-400`}>{formatCurrency(totalSales, currency)}</p>
+                {/* Reconciliation: Total Paid + Cheque + Credit + Returns */}
+                <div className="mt-2 text-sm text-slate-600 dark:text-slate-400">
+                  <div>Reconciled: <span className="font-semibold">{formatCurrency(reconciledTotalSales, currency)}</span></div>
+                  {Math.abs(totalSales - reconciledTotalSales) > 0.005 && (
+                    <div className="mt-1 text-sm">
+                      <span className="inline-block px-2 py-1 rounded text-xs font-medium bg-red-100 dark:bg-red-900/30 text-red-700">Difference: {formatCurrency(totalSales - reconciledTotalSales, currency)}</span>
+                    </div>
+                  )}
+                  {Math.abs(totalSales - reconciledTotalSales) <= 0.005 && (
+                    <div className="mt-1 text-sm">
+                      <span className="inline-block px-2 py-1 rounded text-xs font-medium bg-green-100 dark:bg-green-900/20 text-green-700">Reconciled ✓</span>
+                    </div>
+                  )}
+                </div>
                 {/* Percentage Calculator */}
                 {showPercentageCalculator && isAdmin && (
                   <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
@@ -977,6 +1006,25 @@ export const Dashboard: React.FC = () => {
             </div>
           </CardContent>
         </Card>
+
+        {/* Total Returns - Admin/Manager only */}
+        {(isAdmin || isManager) && (
+          <Card className="bg-gradient-to-br from-sky-50 to-sky-100 dark:from-sky-950 dark:to-sky-900 border-sky-200 dark:border-sky-800 min-h-[180px] flex flex-col">
+            <CardHeader className="flex-shrink-0">
+              <CardTitle className="text-sky-700 dark:text-sky-300">Total Returns</CardTitle>
+            </CardHeader>
+            <CardContent className="flex-1 flex flex-col justify-between">
+              <div className="flex justify-between items-start">
+                <div>
+                  <p className={`${getFontSizeClass(formatCurrency(totalReturnAmount, currency))} font-bold text-sky-600 dark:text-sky-400`}>{formatCurrency(totalReturnAmount, currency)}</p>
+                </div>
+              </div>
+              <div className="flex justify-end mt-4">
+                <ChangeIndicator change={returnChange} />
+              </div>
+            </CardContent>
+          </Card>
+        )}
         <Card className="bg-gradient-to-br from-red-50 to-red-100 dark:from-red-950 dark:to-red-900 border-red-200 dark:border-red-800 min-h-[180px] flex flex-col">
           <CardHeader className="flex-shrink-0">
             <CardTitle className="text-red-700 dark:text-red-300">Total Credit Balance</CardTitle>
@@ -1380,25 +1428,52 @@ const SalesRepDashboard: React.FC<{
         );
     }, [orders, products, accessibleSuppliers]);
 
-    // This month's performance
-    const thisMonth = new Date().getMonth();
-    const thisYear = new Date().getFullYear();
-    const monthlyOrders = myOrders.filter(order => {
-        const orderDate = new Date(order.date);
-        return orderDate.getMonth() === thisMonth && orderDate.getFullYear() === thisYear;
+  // Local date filter for Sales Rep view
+  const [dateRange, setDateRange] = useState<{ start: string; end: string }>({ start: '', end: '' });
+
+  // Apply date range to myOrders to produce filteredMyOrders used by cards and lists
+  const filteredMyOrders = useMemo(() => {
+    if ((!dateRange.start && !dateRange.end) || !Array.isArray(myOrders)) return myOrders;
+    return myOrders.filter(order => {
+      try {
+        const d = new Date(order.date);
+        if (dateRange.start && d < new Date(dateRange.start)) return false;
+        if (dateRange.end) {
+          const end = new Date(dateRange.end);
+          end.setDate(end.getDate() + 1); // inclusive
+          if (d >= end) return false;
+        }
+        return true;
+      } catch {
+        return false;
+      }
     });
+  }, [myOrders, dateRange]);
+
+  // Orders filtered for this sales rep's assigned suppliers are in `myOrders`.
+  // Compute totals used by dashboard cards.
+  const thisMonth = new Date().getMonth();
+  const thisYear = new Date().getFullYear();
+  const monthlyOrders = myOrders.filter(order => {
+    const orderDate = new Date(order.date);
+    return orderDate.getMonth() === thisMonth && orderDate.getFullYear() === thisYear;
+  });
+
+  // Monthly delivered revenue (kept for reference but not shown for sales rep as Monthly Revenue)
+  const monthlyRevenue = monthlyOrders
+    .filter(order => order.status === OrderStatus.Delivered)
+    .reduce((sum, order) => sum + order.total, 0);
+
+  // Total order amount across all orders that belong to the sales rep's assigned suppliers
+  const totalOrdersAmount = filteredMyOrders.reduce((sum, order) => sum + (order.total || 0), 0);
     
-    const monthlyRevenue = monthlyOrders
-        .filter(order => order.status === OrderStatus.Delivered)
-        .reduce((sum, order) => sum + order.total, 0);
-    
-    const pendingOrders = myOrders.filter(order => 
+  const pendingOrders = filteredMyOrders.filter(order => 
         order.status === OrderStatus.Pending || order.status === OrderStatus.Shipped
     );
 
-    const myCustomers = customers.filter(customer => 
-        myOrders.some(order => order.customerId === customer.id)
-    );
+  const myCustomers = customers.filter(customer => 
+    filteredMyOrders.some(order => order.customerId === customer.id)
+  );
 
     return (
         <div className="p-4 sm:p-6 lg:p-8 space-y-8">
@@ -1412,18 +1487,38 @@ const SalesRepDashboard: React.FC<{
                 </a>
             </div>
             
+            {/* Sales Rep Filters */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Filters</CardTitle>
+                <CardDescription>Scope orders for the date range below</CardDescription>
+              </CardHeader>
+              <CardContent className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+                <FilterField label="Start Date" htmlFor="sr-start-date" variant="amber">
+                  <input id="sr-start-date" type="date" value={dateRange.start} onChange={e => setDateRange({ ...dateRange, start: e.target.value })} />
+                </FilterField>
+                <FilterField label="End Date" htmlFor="sr-end-date" variant="amber">
+                  <input id="sr-end-date" type="date" value={dateRange.end} onChange={e => setDateRange({ ...dateRange, end: e.target.value })} />
+                </FilterField>
+                <div>
+                  <label className="block text-sm font-medium text-transparent mb-1">Reset</label>
+                  <button className="w-full px-3 py-2 text-sm font-medium text-slate-700 bg-slate-200 rounded-lg hover:bg-slate-300 dark:bg-slate-600 dark:text-slate-200 dark:hover:bg-slate-500 transition-colors" onClick={() => setDateRange({ start: '', end: '' })}>Reset</button>
+                </div>
+              </CardContent>
+            </Card>
+
             {/* Sales Rep Stats */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Monthly Revenue</CardTitle>
-                        <CardDescription>This month's sales performance</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        <p className="text-3xl font-bold text-green-600">{formatCurrency(monthlyRevenue, currency)}</p>
-                        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">From {monthlyOrders.length} orders</p>
-                    </CardContent>
-                </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Total Orders Amount</CardTitle>
+            <CardDescription>Total value of orders for your assigned suppliers</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <p className="text-3xl font-bold text-green-600">{formatCurrency(totalOrdersAmount, currency)}</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">From {filteredMyOrders.length} orders</p>
+          </CardContent>
+        </Card>
                 <Card>
                     <CardHeader>
                         <CardTitle>Pending Orders</CardTitle>
@@ -1463,7 +1558,7 @@ const SalesRepDashboard: React.FC<{
                     <CardDescription>Your recent customer orders</CardDescription>
                 </CardHeader>
                 <CardContent>
-                    {myOrders.length > 0 ? (
+          {filteredMyOrders.length > 0 ? (
                         <div className="overflow-x-auto">
                             <table className="w-full text-sm text-left text-slate-500 dark:text-slate-400">
                                 <thead className="text-xs text-slate-700 uppercase bg-slate-50 dark:bg-slate-700 dark:text-slate-400">
@@ -1476,7 +1571,7 @@ const SalesRepDashboard: React.FC<{
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {myOrders.slice(0, 8).map((order) => (
+                                    {filteredMyOrders.slice(0, 8).map((order) => (
                                         <tr key={order.id} className="bg-white border-b dark:bg-slate-800 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600">
                                             <td className="px-6 py-4 font-medium text-slate-900 dark:text-white">{order.id}</td>
                                             <td className="px-6 py-4">{order.customerName}</td>

@@ -30,7 +30,39 @@ const formatCurrency = (amount: number, currency: string) => {
 };
 
 export const Products: React.FC = () => {
-  const { products, setProducts, suppliers, driverAllocations, refetchData } = useData();
+  const { products, setProducts, suppliers, driverAllocations, refetchData, deliveryAggregatedProducts, orders } = useData();
+  const todayStr = new Date().toISOString().slice(0,10);
+  const deliveryQtyMap = useMemo(() => {
+    const map = new Map<string, number>();
+    try {
+      const arr = deliveryAggregatedProducts?.[todayStr] || [];
+      for (const item of arr) {
+        if (!item || !item.productId) continue;
+        map.set(item.productId, (map.get(item.productId) || 0) + (Number(item.qty) || 0));
+      }
+    } catch (err) {
+      // defensive: if structure is unexpected, return empty map
+      console.error('Error building deliveryQtyMap:', err);
+    }
+    return map;
+  }, [deliveryAggregatedProducts, todayStr]);
+
+  const pendingQtyMap = useMemo(() => {
+    const map = new Map<string, number>();
+    try {
+      if (!orders || orders.length === 0) return map;
+      const pendingOrders = orders.filter(o => (o.status || '').toString() === 'Pending');
+      for (const ord of pendingOrders) {
+        (ord.orderItems || []).forEach((it: any) => {
+          if (!it || !it.productId) return;
+          map.set(it.productId, (map.get(it.productId) || 0) + (Number(it.quantity) || 0));
+        });
+      }
+    } catch (err) {
+      console.error('Error building pendingQtyMap:', err);
+    }
+    return map;
+  }, [orders]);
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -391,8 +423,10 @@ export const Products: React.FC = () => {
                                       <th scope="col" className="px-6 py-3">Product</th>
                                       <th scope="col" className="px-6 py-3">Category</th>
                                       <th scope="col" className="px-6 py-3">Price</th>
-                                      <th scope="col" className="px-6 py-3">Allocated Stock</th>
-                                      <th scope="col" className="px-6 py-3">SKU</th>
+                        <th scope="col" className="px-6 py-3">Allocated Stock</th>
+                    <th scope="col" className="px-6 py-3">Qty</th>
+                    <th scope="col" className="px-6 py-3">Pending</th>
+                            <th scope="col" className="px-6 py-3">SKU</th>
                                   </tr>
                               </thead>
                               <tbody>
@@ -415,6 +449,12 @@ export const Products: React.FC = () => {
                                           <td className="px-6 py-4">
                                               <Badge variant={getDriverStockBadgeVariant(product.stock)}>{product.stock}</Badge>
                                           </td>
+                      <td className="px-6 py-4 text-right">
+                        <span className="font-mono text-sm text-slate-700 dark:text-slate-200">{deliveryQtyMap.get(product.id) || 0}</span>
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <span className="font-mono text-sm text-rose-500 dark:text-rose-400">{pendingQtyMap.get(product.id) || 0}</span>
+                      </td>
                                           <td className="px-6 py-4">{product.sku}</td>
                                       </tr>
                                   ))}
@@ -447,9 +487,15 @@ export const Products: React.FC = () => {
                                       <div className="text-sm sm:text-base font-semibold text-slate-900 dark:text-white">
                                           {formatCurrency(product.price, currency)}
                                       </div>
-                                      <Badge variant={getDriverStockBadgeVariant(product.stock)} className="text-xs">
-                                          Stock: {product.stock}
-                                      </Badge>
+                                  <div className="flex items-center gap-3">
+                                  <Badge variant={getDriverStockBadgeVariant(product.stock)} className="text-xs">
+                                    Stock: {product.stock}
+                                  </Badge>
+                                  <div className="flex flex-col text-xs text-slate-400 dark:text-slate-300 font-mono">
+                                    <span>Qty: {deliveryQtyMap.get(product.id) || 0}</span>
+                                    <span className="text-rose-500">Pending: {pendingQtyMap.get(product.id) || 0}</span>
+                                  </div>
+                                  </div>
                                   </div>
                               </div>
                           ))}
@@ -503,6 +549,8 @@ export const Products: React.FC = () => {
                               <th scope="col" className="px-6 py-3">Category</th>
                               <th scope="col" className="px-6 py-3">Price</th>
                               {canEdit && <th scope="col" className="px-6 py-3">Cost Price</th>}
+                              <th scope="col" className="px-6 py-3">Pending</th>
+                              <th scope="col" className="px-6 py-3">Qty</th>
                               <th scope="col" className="px-6 py-3">Stock</th>
                               <th scope="col" className="px-6 py-3">SKU</th>
                               {canEdit && <th scope="col" className="px-6 py-3">Actions</th>}
@@ -526,6 +574,12 @@ export const Products: React.FC = () => {
                                 <td className="px-6 py-4">{product.category}</td>
                                 <td className="px-6 py-4">{formatCurrency(product.price, currency)}</td>
                                 {canEdit && <td className="px-6 py-4">{formatCurrency(product.costPrice || 0, currency)}</td>}
+                                <td className="px-6 py-4 text-right">
+                                  <span className="font-mono text-sm text-rose-600 dark:text-rose-400">{pendingQtyMap.get(product.id) || 0}</span>
+                                </td>
+                                <td className="px-6 py-4 text-right">
+                         <span className="font-mono text-sm text-slate-700 dark:text-slate-200">{deliveryQtyMap.get(product.id) || 0}</span>
+                                </td>
                                 <td className="px-6 py-4">
                                   <Badge variant={getStockBadgeVariant(product.stock)}>{product.stock}</Badge>
                                 </td>
@@ -558,7 +612,7 @@ export const Products: React.FC = () => {
                       <div className="xl:hidden space-y-3">
                         {productsArr.map((product) => (
                           <div key={product.id} className="bg-gradient-to-br from-white to-slate-50 dark:from-slate-800 dark:to-slate-900 rounded-xl p-5 border border-slate-200 dark:border-slate-600 shadow-md hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1">
-                            <div className="flex items-start justify-between mb-4">
+                              <div className="flex items-start justify-between mb-4">
                               <div className="flex items-center space-x-3 flex-1">
                                 {product.imageUrl ? (
                                   <img src={product.imageUrl} alt={product.name} className="w-12 h-12 rounded-full flex-shrink-0" />
@@ -573,9 +627,13 @@ export const Products: React.FC = () => {
                                   <div className="text-xs sm:text-sm text-slate-500 dark:text-slate-500">SKU: {product.sku}</div>
                                 </div>
                               </div>
-                              <Badge variant={getStockBadgeVariant(product.stock)} className="ml-2 flex-shrink-0 text-xs">
-                                {product.stock}
-                              </Badge>
+                              <div className="flex flex-col items-end gap-1">
+                                <Badge variant={getStockBadgeVariant(product.stock)} className="ml-2 flex-shrink-0 text-xs">
+                                  {product.stock}
+                                </Badge>
+                                <div className="text-xs text-slate-500 dark:text-slate-300 font-mono">Qty: {deliveryQtyMap.get(product.id) || 0}</div>
+                                <div className="text-xs text-rose-500 font-mono">Pending: {pendingQtyMap.get(product.id) || 0}</div>
+                              </div>
                             </div>
                             
                             <div className="flex items-center justify-between">

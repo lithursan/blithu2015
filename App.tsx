@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Sidebar } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
@@ -37,21 +37,47 @@ const MainLayout = () => {
     const toggleSidebar = () => setSidebarOpen(!isSidebarOpen);
     const closeSidebar = () => setSidebarOpen(false);
 
+    // Close sidebar when Escape is pressed
+    useEffect(() => {
+      const onKey = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') closeSidebar();
+      };
+      window.addEventListener('keydown', onKey);
+      return () => window.removeEventListener('keydown', onKey);
+    }, []);
+
+    // Ensure sidebar state stays consistent on resize: when moving to large screens close mobile overlay
+    useEffect(() => {
+      const onResize = () => {
+        try {
+          if (window.innerWidth >= 1024) {
+            // close mobile-only overlay state
+            setSidebarOpen(false);
+          }
+        } catch (e) {}
+      };
+      window.addEventListener('resize', onResize);
+      return () => window.removeEventListener('resize', onResize);
+    }, []);
+
     return (
-        <div className="relative flex h-screen bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-200 overflow-hidden">
+    <div className="relative flex min-h-screen bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-200">
             {/* Mobile overlay */}
             {isSidebarOpen && (
                 <div 
-                    className="fixed inset-0 bg-black bg-opacity-50 z-20 lg:hidden"
-                    onClick={closeSidebar}
+          className="fixed inset-0 bg-black bg-opacity-50 z-20 lg:hidden"
+          onClick={closeSidebar}
+          role="button"
+          aria-label="Close sidebar"
+          tabIndex={0}
                 />
             )}
             
             <Sidebar isSidebarOpen={isSidebarOpen} closeSidebar={closeSidebar} />
             
-            <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-                <Header toggleSidebar={toggleSidebar} />
-                <main className="flex-1 overflow-y-auto px-2 sm:px-4 lg:px-6 py-4 sm:py-6">
+      <div className="flex flex-col flex-1 min-w-0">
+        <Header toggleSidebar={toggleSidebar} />
+        <main className="flex-1 overflow-y-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-6 max-w-full">
                     <Routes>
                         <Route path="/" element={<Dashboard />} />
                         <Route path="/products" element={<Products />} />

@@ -109,16 +109,18 @@ export const fetchRoutes = async () => {
 
 export const addRoute = async (routeName: string, userId?: string) => {
   try {
+    // Build payload defensively: only include created_by when it's a UUID
+    const payload: any = {
+      name: routeName,
+      description: `Delivery route: ${routeName}`,
+      is_active: true,
+    };
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (userId && uuidRegex.test(userId)) payload.created_by = userId;
+
     const { data, error } = await supabase
       .from('routes')
-      .insert([
-        {
-          name: routeName,
-          description: `Delivery route: ${routeName}`,
-          created_by: userId,
-          is_active: true
-        }
-      ])
+      .insert([payload])
       .select();
 
     return { data, error };
@@ -148,5 +150,29 @@ export const deleteRoute = async (routeName: string) => {
     return { error: deleteError };
   } catch (error) {
     return { error };
+  }
+};
+
+// Rename a route and migrate customer assignments from oldName -> newName
+export const renameRoute = async (oldName: string, newName: string) => {
+  try {
+    // Update customers first so they point to the new route name
+    const { error: custError } = await supabase
+      .from('customers')
+      .update({ route: newName })
+      .eq('route', oldName);
+
+    if (custError) return { data: null, error: custError };
+
+    // Then update the route row itself
+    const { data, error } = await supabase
+      .from('routes')
+      .update({ name: newName, updated_at: new Date().toISOString() })
+      .eq('name', oldName)
+      .select();
+
+    return { data, error };
+  } catch (error) {
+    return { data: null, error };
   }
 };

@@ -550,8 +550,9 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
           throw error;
         }
       } else {
-        // Successfully saved to database
-        setRoutes(prev => [...prev, trimmedRouteName]);
+        // Successfully saved to database - refresh from DB to ensure canonical state
+        console.log('Route add response (data):', data);
+        await loadRoutesFromDatabase();
         setNewRouteName('');
         setIsAddingRoute(false);
         alert('Route added successfully and saved to database!');

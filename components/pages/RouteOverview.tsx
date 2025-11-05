@@ -1,7 +1,8 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Customer, UserRole } from '../../types';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/Card';
 import { Badge } from '../ui/Badge';
+import { Modal } from '../ui/Modal';
 import { useData } from '../../contexts/DataContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { confirmSecureDelete } from '../../utils/passwordConfirmation';
@@ -15,14 +16,17 @@ interface RouteOverviewProps {
 }
 
 export const RouteOverview: React.FC<RouteOverviewProps> = ({ onRouteSelect }) => {
-  const { customers, orders, products } = useData();
+  const { customers, orders, products, refetchData } = useData();
   const { currentUser } = useAuth();
   const currency = currentUser?.settings.currency || 'LKR';
 
-  // Route management states
-  const [routes, setRoutes] = useState<string[]>(['Route 1', 'Route 2', 'Route 3', 'Unassigned']);
+  // Route management states (load from DB)
+  const [routes, setRoutes] = useState<string[]>([]);
+  const [routesLoaded, setRoutesLoaded] = useState(false);
   const [isAddingRoute, setIsAddingRoute] = useState(false);
   const [newRouteName, setNewRouteName] = useState('');
+  const [editingRoute, setEditingRoute] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState<string>('');
 
   const canEdit = useMemo(() => 
     currentUser?.role === UserRole.Admin,
@@ -95,15 +99,55 @@ export const RouteOverview: React.FC<RouteOverviewProps> = ({ onRouteSelect }) =
     return metrics;
   }, [customers, routes, customerOutstandingMap, customerTotalSpentMap]);
 
-  // Route management functions
-  const handleAddRoute = () => {
-    if (newRouteName.trim() && !routes.includes(newRouteName.trim())) {
-      setRoutes(prev => [...prev, newRouteName.trim()]);
+  // Route management functions (DB-backed)
+  const loadRoutesFromDatabase = async () => {
+    try {
+      const { fetchRoutes } = await import('../../supabaseClient');
+      const routeNames = await fetchRoutes();
+      setRoutes(routeNames.length ? routeNames : ['Unassigned']);
+      setRoutesLoaded(true);
+    } catch (error) {
+      console.warn('Could not load routes from database:', error);
+      setRoutes(['Route 1', 'Route 2', 'Route 3', 'Unassigned']);
+      setRoutesLoaded(true);
+    }
+  };
+
+  const handleAddRoute = async () => {
+    const trimmed = newRouteName.trim();
+    if (!trimmed) return alert('Route name cannot be empty!');
+    if (routes.includes(trimmed)) return alert('Route name already exists!');
+
+    try {
+      const { addRoute } = await import('../../supabaseClient');
+      const { data, error } = await addRoute(trimmed, currentUser?.id);
+      if (error) {
+        if (error.message?.includes('relation "routes" does not exist')) {
+          setRoutes(prev => [...prev, trimmed]);
+          setNewRouteName('');
+          setIsAddingRoute(false);
+          alert('Route added locally (DB missing). Run migration to persist.');
+          return;
+        }
+        if (error.message?.toLowerCase().includes('row-level security') || error.code === '42501') {
+          setRoutes(prev => [...prev, trimmed]);
+          setNewRouteName('');
+          setIsAddingRoute(false);
+          alert('Route added locally, but DB rejected it due to Row-Level Security. Sign in using Supabase Auth or update RLS policies to allow this operation.');
+          return;
+        }
+        throw error;
+      }
+      await loadRoutesFromDatabase();
       setNewRouteName('');
       setIsAddingRoute(false);
-      alert('Route added successfully!');
-    } else {
-      alert('Route name already exists or is empty!');
+      alert('Route added successfully and saved to database!');
+    } catch (err) {
+      console.error('Error adding route:', err);
+      setRoutes(prev => [...prev, trimmed]);
+      setNewRouteName('');
+      setIsAddingRoute(false);
+      alert('Route added locally (DB error).');
     }
   };
 
@@ -123,8 +167,60 @@ export const RouteOverview: React.FC<RouteOverviewProps> = ({ onRouteSelect }) =
     );
     
     if (confirmed) {
-      setRoutes(prev => prev.filter(route => route !== routeName));
-      alert('Route deleted successfully!');
+      try {
+        const { deleteRoute } = await import('../../supabaseClient');
+        const { error } = await deleteRoute(routeName);
+        if (error && !error.message?.includes('relation "routes" does not exist')) {
+          alert(`Error deleting route: ${error.message}`);
+          return;
+        }
+        await loadRoutesFromDatabase();
+        await refetchData?.();
+        alert('Route deleted successfully!');
+      } catch (err) {
+        console.error('Error deleting route:', err);
+        setRoutes(prev => prev.filter(route => route !== routeName));
+        alert('Route deleted locally (DB error)');
+      }
+    }
+  };
+
+  const startRename = (routeName: string) => {
+    setEditingRoute(routeName);
+    setEditingName(routeName);
+  };
+
+  const cancelRename = () => {
+    setEditingRoute(null);
+    setEditingName('');
+  };
+
+  const saveRename = async (oldName: string) => {
+    const trimmed = editingName.trim();
+    if (!trimmed) return alert('New route name cannot be empty');
+    if (trimmed === oldName) return cancelRename();
+    if (routes.includes(trimmed)) return alert('A route with that name already exists');
+
+    try {
+      const { renameRoute } = await import('../../supabaseClient');
+      const { data, error } = await renameRoute(oldName, trimmed);
+      if (error) {
+        if (error.message?.includes('relation "routes" does not exist')) {
+          setRoutes(prev => prev.map(r => r === oldName ? trimmed : r));
+          cancelRename();
+          alert('Route renamed locally (DB missing). Run migration to persist.');
+          return;
+        }
+        throw error;
+      }
+      await loadRoutesFromDatabase();
+      cancelRename();
+      alert('Route renamed successfully');
+    } catch (err) {
+      console.error('Error renaming route:', err);
+      setRoutes(prev => prev.map(r => r === oldName ? trimmed : r));
+      cancelRename();
+      alert('Route renamed locally (DB error)');
     }
   };
 
@@ -132,6 +228,10 @@ export const RouteOverview: React.FC<RouteOverviewProps> = ({ onRouteSelect }) =
   const totalCustomers = (Object.values(routeMetrics) as RouteMetric[]).reduce((sum, route) => sum + route.customerCount, 0);
   const totalOutstanding = (Object.values(routeMetrics) as RouteMetric[]).reduce((sum, route) => sum + route.totalOutstanding, 0);
   const totalSpent = (Object.values(routeMetrics) as RouteMetric[]).reduce((sum, route) => sum + route.totalSpent, 0);
+
+  useEffect(() => {
+    loadRoutesFromDatabase();
+  }, []);
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-8">
@@ -273,16 +373,28 @@ export const RouteOverview: React.FC<RouteOverviewProps> = ({ onRouteSelect }) =
                       {metrics.customerCount} customers
                     </Badge>
                     {canEdit && routeName !== 'Unassigned' && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteRoute(routeName);
-                        }}
-                        className="text-red-500 hover:text-red-700 text-sm p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20"
-                        title="Delete route"
-                      >
-                        🗑️
-                      </button>
+                      <>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startRename(routeName);
+                          }}
+                          className="text-slate-700 hover:text-slate-900 text-sm p-1 rounded hover:bg-slate-50 dark:hover:bg-slate-900/10"
+                          title="Rename route"
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteRoute(routeName);
+                          }}
+                          className="text-red-500 hover:text-red-700 text-sm p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20"
+                          title="Delete route"
+                        >
+                          🗑️
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>
@@ -407,6 +519,22 @@ export const RouteOverview: React.FC<RouteOverviewProps> = ({ onRouteSelect }) =
           </button>
         </div>
       </div>
+      {/* Rename Modal */}
+      <Modal isOpen={!!editingRoute} onClose={cancelRename} title={`Rename route: ${editingRoute || ''}`}>
+        <div className="space-y-4">
+          <input
+            type="text"
+            value={editingName}
+            onChange={(e) => setEditingName(e.target.value)}
+            className="w-full px-3 py-2 border border-slate-300 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100"
+            onKeyPress={(e) => e.key === 'Enter' && editingRoute && saveRename(editingRoute)}
+          />
+          <div className="flex justify-end gap-2">
+            <button onClick={cancelRename} className="px-4 py-2 bg-slate-400 text-white rounded">Cancel</button>
+            <button onClick={() => editingRoute && saveRename(editingRoute)} className="px-4 py-2 bg-green-600 text-white rounded">Save</button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };

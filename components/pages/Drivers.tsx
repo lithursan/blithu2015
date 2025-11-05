@@ -54,6 +54,21 @@ export const Drivers: React.FC = () => {
         });
     }, [driverAllocations, selectedDate]);
 
+    // Helper: return the single "latest" allocation for a driver from a list (prefer created_at, fallback to id)
+    const getLatestAllocationForDriverFromList = (list: any[], drv: User | { id?: string; name?: string }) => {
+        if (!Array.isArray(list) || !drv) return undefined;
+        const matches = list.filter(a => matchAllocationToDriver(a, drv));
+        if (!matches || matches.length === 0) return undefined;
+        // Prefer created_at/createdAt when available; fall back to id string ordering
+        const pickKey = (x: any) => (x?.created_at ?? x?.createdAt ?? x?.id ?? '').toString();
+        return matches.reduce((best, cur) => {
+            const bestKey = pickKey(best);
+            const curKey = pickKey(cur);
+            // simple lexicographic compare is OK as a fallback for UUIDs; created_at if present will be a sortable ISO string
+            return curKey > bestKey ? cur : best;
+        }, matches[0]);
+    };
+
     // Helper: robust driver-allocation matcher (compare trimmed ids and fallback to name)
     const matchAllocationToDriver = (alloc: any, driver: User | { id?: string; name?: string }) => {
         if (!alloc) return false;
@@ -95,24 +110,16 @@ export const Drivers: React.FC = () => {
 
     const handleOpenAllocateModal = (driver: User) => {
         setSelectedDriver(driver);
-        // If there are aggregated delivery products for the currently selectedDate, prefill quantities
-        if (!isEditMode && deliveryAggregatedProducts && deliveryAggregatedProducts[selectedDate]) {
-            const list = deliveryAggregatedProducts[selectedDate];
-            const initialQuantities = list.reduce((acc, it) => {
-                acc[it.productId] = it.qty;
-                return acc;
-            }, {} as Record<string, number>);
-            setAllocationQuantities(initialQuantities);
-        } else {
-            setAllocationQuantities({});
-        }
+        // Don't use deliveryAggregatedProducts - let user manually enter quantities
+        // This avoids the multiplication issue completely
+        setAllocationQuantities({});
         setIsEditMode(false);
         setAllocationSupplier(availableSuppliers.length > 0 ? availableSuppliers[0].name : '');
         setModal('allocate');
     };
     
     const handleOpenEditAllocateModal = (driver: User) => {
-        const allocation = todayAllocations.find(a => matchAllocationToDriver(a, driver));
+        const allocation = getLatestAllocationForDriverFromList(todayAllocations, driver);
         if (!allocation) {
             console.warn('No allocation found for driver:', driver.id, driver.name, todayAllocations);
             alert('No allocation found for this driver today. Please allocate first.');
@@ -153,6 +160,9 @@ export const Drivers: React.FC = () => {
         const newAllocatedItems = Object.entries(allocationQuantities)
             .filter(([, qty]) => typeof qty === 'number' && qty > 0)
             .map(([productId, quantity]) => ({ productId, quantity: Number(quantity) }));
+            
+        console.log('🔍 ALLOCATION QUANTITIES from form:', allocationQuantities);
+        console.log('🔍 NEW ALLOCATED ITEMS processed:', newAllocatedItems);
 
         if (newAllocatedItems.length === 0 && !isEditMode) {
             alert("Please allocate at least one item.");
@@ -160,15 +170,28 @@ export const Drivers: React.FC = () => {
         }
 
         const saveAllocationToDB = async (allocation: DriverAllocation) => {
+            console.log('💾 Saving allocation to database:', allocation);
+            console.log('💾 Allocated items being saved:', allocation.allocatedItems);
+            
+            // First, check if there are existing allocations for this driver and date
+            const { data: existingAllocations } = await supabase
+                .from('driver_allocations')
+                .select('*')
+                .or(`driver_id.eq.${allocation.driverId},driverid.eq.${allocation.driverId}`)
+                .eq('date', allocation.date);
+                
+            if (existingAllocations && existingAllocations.length > 0) {
+                console.warn('⚠️ EXISTING ALLOCATIONS found for this driver and date:', existingAllocations.length);
+                console.warn('⚠️ Existing allocations:', existingAllocations);
+            }
+            
             const { error } = await supabase
                 .from('driver_allocations')
                 .upsert([
                     {
                         id: allocation.id,
-                        driverid: allocation.driverId,
-                        driver_id: allocation.driverId,
-                        drivername: allocation.driverName,
-                        driver_name: allocation.driverName,
+                        driver_id: allocation.driverId, // Only use driver_id, not both
+                        driver_name: allocation.driverName, // Only use driver_name, not both
                         date: allocation.date,
                         allocated_items: JSON.stringify(allocation.allocatedItems),
                         returneditems: allocation.returnedItems ? JSON.stringify(allocation.returnedItems) : null,
@@ -194,6 +217,16 @@ export const Drivers: React.FC = () => {
                 return;
             }
             if (data) {
+                console.log('📥 RAW DATABASE ALLOCATIONS:', data);
+                console.log('📥 Total allocations in database:', data.length);
+                
+                // Check for duplicates in database
+                const driverDateCombos = data.map(row => `${row.driver_id || row.driverid}-${row.date}`);
+                const uniqueCombos = [...new Set(driverDateCombos)];
+                if (driverDateCombos.length !== uniqueCombos.length) {
+                    console.warn('⚠️ DUPLICATE DRIVER-DATE COMBINATIONS in database!');
+                    console.warn('Total combinations:', driverDateCombos.length, 'Unique:', uniqueCombos.length);
+                }
                 const mapped = data.map((row: any) => ({
                     id: row.id,
                     driverId: row.driver_id ?? row.driverid,
@@ -274,6 +307,11 @@ export const Drivers: React.FC = () => {
                     salesTotal: 0,
                     status: 'Allocated',
                 };
+                
+                console.log('🆕 Creating new allocation:', newAllocation);
+                console.log('🆕 New allocated items:', newAllocatedItems);
+                console.log('🆕 Allocation quantities from UI:', allocationQuantities);
+                
                 await saveAllocationToDB(newAllocation);
             }
             // Always fetch fresh allocations after save
@@ -330,7 +368,7 @@ export const Drivers: React.FC = () => {
     const productsToShowInModal = useMemo(() => {
         // In edit mode, find the IDs of products that are already part of the allocation.
         const originallyAllocatedProductIds = isEditMode
-            ? todayAllocations.find(a => selectedDriver ? matchAllocationToDriver(a, selectedDriver) : false)?.allocatedItems.map(i => i.productId) ?? []
+            ? getLatestAllocationForDriverFromList(todayAllocations, selectedDriver)?.allocatedItems.map((i: any) => i.productId) ?? []
             : [];
 
         // Filter the main product list.
@@ -393,7 +431,7 @@ export const Drivers: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
                 {drivers.map(driver => {
                     const { status, badge } = getDriverStatus(driver.id);
-                    const allocation = todayAllocations.find(a => matchAllocationToDriver(a, driver));
+                    const allocation = getLatestAllocationForDriverFromList(todayAllocations, driver);
                     const isAllocated = !!allocation;
 
                     return (
@@ -504,6 +542,166 @@ export const Drivers: React.FC = () => {
                     currency={currency}
                 />
             )}
+            
+            {/* Debug buttons for checking database and delivery data */}
+            <div className="fixed bottom-4 right-4 z-50 space-y-2">
+                <button
+                    onClick={async () => {
+                        if (confirm('Clear ALL allocations for today? This cannot be undone.')) {
+                            const { error } = await supabase
+                                .from('driver_allocations')
+                                .delete()
+                                .eq('date', selectedDate);
+                            
+                            if (error) {
+                                alert('Failed to clear allocations: ' + error.message);
+                            } else {
+                                alert('All allocations cleared for today.');
+                                window.location.reload();
+                            }
+                        }
+                    }}
+                    className="block px-3 py-2 bg-red-600 text-white rounded text-xs hover:bg-red-700"
+                >
+                    Clear Today
+                </button>
+                <button
+                    onClick={async () => {
+                        console.log('🔍 DELIVERY DATA CHECK');
+                        console.log('deliveryAggregatedProducts:', deliveryAggregatedProducts);
+                        
+                        // First, let's check the orders table structure
+                        console.log('📋 Checking orders table structure...');
+                        const { data: sampleOrders } = await supabase.from('orders').select('*').limit(3);
+                        if (sampleOrders && sampleOrders.length > 0) {
+                            console.log('📋 Sample order structure:', Object.keys(sampleOrders[0]));
+                            console.log('📋 First order:', sampleOrders[0]);
+                        }
+                        
+                        // Get raw orders data - try different date columns
+                        console.log('Trying to fetch orders for date:', selectedDate);
+                        
+                        // Try different possible date column names
+                        let orders = null;
+                        let dateColumn = '';
+                        
+                        try {
+                            const { data, error } = await supabase.from('orders').select('*').eq('date', selectedDate);
+                            if (!error) {
+                                orders = data;
+                                dateColumn = 'date';
+                            } else {
+                                console.warn('Failed with date column:', error.message);
+                            }
+                        } catch (e) {
+                            console.warn('Date column failed, trying order_date');
+                        }
+                        
+                        if (!orders) {
+                            try {
+                                const { data, error } = await supabase.from('orders').select('*').eq('order_date', selectedDate);
+                                if (!error) {
+                                    orders = data;
+                                    dateColumn = 'order_date';
+                                } else {
+                                    console.warn('Failed with order_date column:', error.message);
+                                }
+                            } catch (e) {
+                                console.warn('order_date column failed, trying created_at');
+                            }
+                        }
+                        
+                        if (!orders) {
+                            try {
+                                // Try with created_at and date range
+                                const { data, error } = await supabase.from('orders').select('*')
+                                    .gte('created_at', selectedDate + 'T00:00:00')
+                                    .lte('created_at', selectedDate + 'T23:59:59');
+                                if (!error) {
+                                    orders = data;
+                                    dateColumn = 'created_at (range)';
+                                } else {
+                                    console.warn('Failed with created_at range:', error.message);
+                                }
+                            } catch (e) {
+                                console.warn('created_at range failed');
+                            }
+                        }
+                        
+                        if (!orders) {
+                            // Last resort - get all orders and filter manually
+                            const { data } = await supabase.from('orders').select('*');
+                            orders = data;
+                            dateColumn = 'all orders (manual filter needed)';
+                        }
+                        
+                        console.log(`Raw orders using ${dateColumn} for`, selectedDate, ':', orders);
+                        
+                        if (orders) {
+                            const productTotals = new Map();
+                            orders.forEach((order: any) => {
+                                console.log(`Order ${order.id}:`, order.order_items || order.orderItems);
+                                const items = order.order_items || order.orderItems;
+                                if (Array.isArray(items)) {
+                                    items.forEach((item: any) => {
+                                        const current = productTotals.get(item.productId) || 0;
+                                        productTotals.set(item.productId, current + (item.quantity || 0));
+                                        console.log(`Adding ${item.quantity} of ${item.productId}, total: ${current + (item.quantity || 0)}`);
+                                    });
+                                } else if (typeof items === 'string') {
+                                    try {
+                                        const parsed = JSON.parse(items);
+                                        parsed.forEach((item: any) => {
+                                            const current = productTotals.get(item.productId) || 0;
+                                            productTotals.set(item.productId, current + (item.quantity || 0));
+                                        });
+                                    } catch (e) {
+                                        console.error('Failed to parse items:', items);
+                                    }
+                                }
+                            });
+                            console.log('Manual calculation totals:', Array.from(productTotals.entries()));
+                        }
+                    }}
+                    className="block px-3 py-2 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
+                >
+                    Debug Delivery
+                </button>
+                <button
+                    onClick={async () => {
+                        console.log('🔍 MANUAL DATABASE CHECK');
+                        const { data } = await supabase.from('driver_allocations').select('*');
+                        console.log('All allocations:', data);
+                        
+                        if (data) {
+                            // Group by driver and date
+                            const grouped = data.reduce((acc, alloc) => {
+                                const key = `${alloc.driver_id || alloc.driverid}-${alloc.date}`;
+                                if (!acc[key]) acc[key] = [];
+                                acc[key].push(alloc);
+                                return acc;
+                            }, {} as Record<string, any[]>);
+                            
+                            console.log('Grouped by driver-date:', grouped);
+                            
+                            Object.entries(grouped).forEach(([key, allocs]) => {
+                                if (Array.isArray(allocs) && allocs.length > 1) {
+                                    console.warn(`⚠️ DUPLICATE FOUND: ${key} has ${allocs.length} allocations`);
+                                    allocs.forEach((alloc: any, i: number) => {
+                                        const items = typeof alloc.allocated_items === 'string' 
+                                            ? JSON.parse(alloc.allocated_items) 
+                                            : alloc.allocated_items;
+                                        console.log(`   Allocation ${i + 1}:`, { id: alloc.id, items });
+                                    });
+                                }
+                            });
+                        }
+                    }}
+                    className="block px-3 py-2 bg-purple-600 text-white rounded text-xs hover:bg-purple-700"
+                >
+                    Debug DB
+                </button>
+            </div>
         </div>
     );
 };
@@ -522,6 +720,9 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
     const [isSaleModalOpen, setIsSaleModalOpen] = useState(false);
     const [viewingSaleInvoice, setViewingSaleInvoice] = useState<DriverSale | null>(null);
     
+    // Get today's date string
+    const todayStr = new Date().toISOString().slice(0, 10);
+    
     // State for new sale form
     const [saleQuantities, setSaleQuantities] = useState<Record<string, number>>({});
     const [saleCustomer, setSaleCustomer] = useState<{id?: string, name: string}>({name: ''});
@@ -538,21 +739,45 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
         refetchData();
     }, [driver.id, refetchData]);
     
-            // Use all active (non-reconciled) allocations up to today for this driver (cumulative view)
-            const activeAllocations = useMemo(() =>
-                    (driverAllocations || [])
-                        .filter(a => {
-                            if (!a || !a.date) return false;
-                            const aid = (a.driverId || a.driver_id || '').toString().trim();
-                            const did = (driver.id || '').toString().trim();
-                            const dateOk = new Date(a.date) <= new Date(todayStr);
-                            if (!aid || !did) return false;
-                            const idMatch = aid === did || aid.includes(did) || did.includes(aid);
-                            return idMatch && dateOk && ((a.status ?? 'Allocated') !== 'Reconciled');
-                        })
-                        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()),
-                    [driverAllocations, driver.id]
-            );
+            // Use only TODAY'S allocation for this driver (not cumulative)
+            const activeAllocations = useMemo(() => {
+                console.log('🔍 All driver allocations from database:', driverAllocations);
+
+                // Find all today's allocations that match this driver
+                const matches = (driverAllocations || []).filter(a => {
+                    if (!a || !a.date) return false;
+                    const aid = (a.driverId || a.driver_id || '').toString().trim();
+                    const did = (driver.id || '').toString().trim();
+
+                    // Only TODAY'S date - not <= today
+                    const allocationDate = a.date && a.date.slice ? a.date.slice(0, 10) : a.date;
+                    const isToday = allocationDate === todayStr;
+
+                    if (!aid || !did) return false;
+                    const idMatch = aid === did || aid.includes(did) || did.includes(aid);
+                    const statusOk = ((a.status ?? 'Allocated') !== 'Reconciled');
+
+                    console.log(`🔍 Checking allocation ${a.id}: date=${allocationDate}, isToday=${isToday}, idMatch=${idMatch}, statusOk=${statusOk}`);
+
+                    return idMatch && isToday && statusOk;
+                });
+
+                if (!matches || matches.length === 0) {
+                    console.log('✅ No allocations for today for driver', driver.name);
+                    return [];
+                }
+
+                // If there are multiple matches, pick the single "latest" one by created_at (if present) or by id as fallback
+                const pickKey = (x: any) => (x?.created_at ?? x?.createdAt ?? x?.id ?? '').toString();
+                const latest = matches.reduce((best, cur) => {
+                    const bestKey = pickKey(best);
+                    const curKey = pickKey(cur);
+                    return curKey > bestKey ? cur : best;
+                }, matches[0]);
+
+                console.log('✅ Today\'s (latest) allocation for driver', driver.name, ':', latest);
+                return [latest];
+            }, [driverAllocations, driver.id, todayStr]);
     const latestActiveAllocation = useMemo(() => activeAllocations[activeAllocations.length - 1], [activeAllocations]);
 
     const salesForDriver = useMemo(() => 
@@ -562,30 +787,65 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
 
     // Show only undelivered products in driver product page
     const stockSummary = useMemo(() => {
-        if (!activeAllocations || activeAllocations.length === 0) return {};
+        // Use only the latest active allocation for this driver to avoid multiplication
+        if (!activeAllocations || activeAllocations.length === 0) {
+            console.log('📋 No active allocations found for driver', driver.name);
+            return {};
+        }
+        
+        // Use only the most recent allocation to avoid summing multiple allocations
+        const latestAllocation = activeAllocations[activeAllocations.length - 1];
+        console.log('📋 Using latest allocation for driver', driver.name, ':', latestAllocation);
+        
         const summary: Record<string, { allocated: number; sold: number; remaining: number }> = {};
-        activeAllocations.forEach(alloc => {
-            (alloc.allocatedItems || []).forEach(({ productId, quantity, sold }) => {
-                const prev = summary[productId] || { allocated: 0, sold: 0, remaining: 0 };
-                const soldQty = sold || 0;
-                const qty = quantity || 0;
-                const nextAllocated = prev.allocated + qty;
-                const nextSold = prev.sold + soldQty;
-                summary[productId] = { allocated: nextAllocated, sold: nextSold, remaining: nextAllocated - nextSold };
-            });
+        
+        // Group products by ID to handle duplicates within the same allocation
+        const productTotals: Record<string, { allocated: number; sold: number }> = {};
+        
+        console.log('🔍 RAW allocated items from database:', latestAllocation.allocatedItems);
+        
+        (latestAllocation.allocatedItems || []).forEach(({ productId, quantity, sold }) => {
+            const soldQty = sold || 0;
+            const qty = quantity || 0;
+            
+            console.log(`🔍 Processing item: productId=${productId}, quantity=${qty}, sold=${soldQty}`);
+            
+            // If product already exists, add to existing totals (handle duplicates)
+            if (productTotals[productId]) {
+                productTotals[productId].allocated += qty;
+                productTotals[productId].sold += soldQty;
+                console.warn(`⚠️ DUPLICATE PRODUCT ${productId} in allocation - combining quantities`);
+            } else {
+                productTotals[productId] = { allocated: qty, sold: soldQty };
+            }
+        });
+        
+        // Convert to final summary format
+        Object.entries(productTotals).forEach(([productId, totals]) => {
+            console.log(`📦 Product ${productId}: allocated=${totals.allocated}, sold=${totals.sold}, remaining=${totals.allocated - totals.sold}`);
+            summary[productId] = { 
+                allocated: totals.allocated, 
+                sold: totals.sold, 
+                remaining: totals.allocated - totals.sold 
+            };
         });
         // Fallback: add sold from driver sales if allocations lack sold fields
-        salesForDriver.forEach(sale => {
-            sale.soldItems.forEach(({ productId, quantity }) => {
-                const rec = summary[productId];
-                if (!rec) return;
-                const hasSoldField = activeAllocations.some(a => (a.allocatedItems || []).some(i => i.productId === productId && typeof i.sold === 'number'));
-                if (!hasSoldField) {
-                    rec.sold += quantity;
-                    rec.remaining = rec.allocated - rec.sold;
-                }
-            });
-        });
+        // Only consider sales from the latest allocation to prevent duplication
+        if (latestAllocation) {
+            salesForDriver
+                .filter(sale => sale.allocationId === latestAllocation.id)
+                .forEach(sale => {
+                    sale.soldItems.forEach(({ productId, quantity }) => {
+                        const rec = summary[productId];
+                        if (!rec) return;
+                        const hasSoldField = latestAllocation.allocatedItems.some(i => i.productId === productId && typeof i.sold === 'number');
+                        if (!hasSoldField) {
+                            rec.sold += quantity;
+                            rec.remaining = rec.allocated - rec.sold;
+                        }
+                    });
+                });
+        }
         Object.keys(summary).forEach(pid => {
             if (summary[pid].remaining <= 0) delete summary[pid];
         });
@@ -1050,6 +1310,10 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
                                 {Object.entries(stockSummary).map(([productId, summary]) => {
                                     const product = products.find(p => p.id === productId)!;
                                     const s = summary as { allocated: number; sold: number; remaining: number };
+                                    
+                                    console.log(`📋 Reconciliation table - Product ${product?.name || productId}: allocated=${s.allocated}, sold=${s.sold}, remaining=${s.remaining}`);
+                                    console.log(`🔍 RAW ALLOCATION DATA for ${product?.name}:`, latestActiveAllocation?.allocatedItems?.filter(item => item.productId === productId));
+                                    
                                     const discrepancy = (returnedQuantities[productId] ?? 0) !== s.remaining;
                                     return (
                                         <tr key={productId}>
@@ -1095,6 +1359,11 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
                         {Object.keys(stockSummary).map((productId) => {
                             const product = products.find(p => p.id === productId)!;
                             const remaining = stockSummary[productId]?.remaining || 0;
+                            const allocated = stockSummary[productId]?.allocated || 0;
+                            const sold = stockSummary[productId]?.sold || 0;
+                            
+                            console.log(`🛍️ Product ${product?.name || productId} in sale modal: allocated=${allocated}, sold=${sold}, remaining=${remaining}`);
+                            
                             if (remaining === 0 && !saleQuantities[productId]) return null;
                             return (
                                 <div key={productId} className="flex justify-between items-center bg-slate-50 dark:bg-slate-700/50 p-2 rounded-lg">

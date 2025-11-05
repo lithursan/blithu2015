@@ -38,6 +38,7 @@ CREATE POLICY "Users can delete routes" ON routes
 -- Insert default routes
 INSERT INTO routes (name, description, is_active) VALUES
   ('Route 1', 'Default delivery route 1', true),
+  ('Route 4', 'Default delivery route 4', true),
   ('Route 2', 'Default delivery route 2', true),
   ('Route 3', 'Default delivery route 3', true),
   ('Unassigned', 'Default route for unassigned customers', true)
