@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { RouteOverview } from './RouteOverview';
 
 // Import a simplified customer list component
-import { Customer, UserRole } from '../../types';
+import { Customer, UserRole, OrderStatus } from '../../types';
 
 // Extend Window interface for phone validation timeout and Google Maps
 declare global {
@@ -96,6 +96,8 @@ const RouteCustomerList: React.FC<RouteCustomerListProps> = ({ selectedRoute, on
   const currency = currentUser?.settings.currency || 'LKR';
   
   const [searchTerm, setSearchTerm] = useState('');
+  const [orderStateFilter, setOrderStateFilter] = useState<'all' | 'delivered' | 'pending' | 'no-orders'>('all');
+  const [outstandingFilter, setOutstandingFilter] = useState<'all' | 'withOutstanding' | 'noOutstanding'>('all');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'add' | 'edit'>('add');
   const [currentCustomer, setCurrentCustomer] = useState<Partial<Customer>>({});
@@ -150,8 +152,40 @@ const RouteCustomerList: React.FC<RouteCustomerListProps> = ({ selectedRoute, on
     
     // New requirement: All roles (including Sales) can view all customers route-wise
     const matchesSalesRepAccess = true;
-    
-    return matchesRoute && matchesSearch && matchesSalesRepAccess;
+
+    if (!(matchesRoute && matchesSearch && matchesSalesRepAccess)) return false;
+
+    // Apply order-state filter
+    const custOrders = orders.filter(o => o.customerId === customer.id);
+    const hasPending = custOrders.some(o => o.status && o.status !== OrderStatus.Delivered);
+    const hasDelivered = custOrders.some(o => o.status === OrderStatus.Delivered);
+    const noOrders = custOrders.length === 0;
+
+    if (orderStateFilter === 'pending' && !hasPending) return false;
+    if (orderStateFilter === 'delivered' && !hasDelivered) return false;
+    if (orderStateFilter === 'no-orders' && !noOrders) return false;
+
+    // Apply outstanding filter
+    const outstanding = customerOutstandingMap[customer.id] || 0;
+    if (outstandingFilter === 'withOutstanding' && outstanding <= 0) return false;
+    if (outstandingFilter === 'noOutstanding' && outstanding > 0) return false;
+
+    return true;
+  });
+
+  // Build a quick map of which customers have pending orders so we can sort
+  const customerHasPendingMap: Record<string, boolean> = {};
+  filteredCustomers.forEach(customer => {
+    const custOrders = orders.filter(o => o.customerId === customer.id);
+    customerHasPendingMap[customer.id] = custOrders.some(o => o.status && o.status !== OrderStatus.Delivered);
+  });
+
+  // Sort customers so delivered/no-orders (green) appear first, pending (yellow) appear after.
+  const sortedCustomers = filteredCustomers.slice().sort((a, b) => {
+    const aPending = customerHasPendingMap[a.id] || false;
+    const bPending = customerHasPendingMap[b.id] || false;
+    if (aPending === bPending) return (a.name || '').localeCompare(b.name || '');
+    return aPending ? 1 : -1; // put pending (true) after non-pending (false)
   });
 
   const openModal = (mode: 'add' | 'edit', customer?: Customer) => {
@@ -519,6 +553,24 @@ const RouteCustomerList: React.FC<RouteCustomerListProps> = ({ selectedRoute, on
     sum + (customerOutstandingMap[customer.id] || 0), 0
   );
 
+  // Gradient patterns and route->gradient mapping (so all customers on same route share color)
+  const gradientPatterns = [
+    'bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 dark:from-blue-900/30 dark:via-indigo-900/30 dark:to-purple-900/30 border-l-4 border-blue-500 shadow-blue-100',
+    'bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 dark:from-emerald-900/30 dark:via-teal-900/30 dark:to-cyan-900/30 border-l-4 border-emerald-500 shadow-emerald-100',
+    'bg-gradient-to-br from-orange-50 via-amber-50 to-yellow-50 dark:from-orange-900/30 dark:via-amber-900/30 dark:to-yellow-900/30 border-l-4 border-orange-500 shadow-orange-100',
+    'bg-gradient-to-br from-rose-50 via-pink-50 to-fuchsia-50 dark:from-rose-900/30 dark:via-pink-900/30 dark:to-fuchsia-900/30 border-l-4 border-rose-500 shadow-rose-100',
+    'bg-gradient-to-br from-violet-50 via-purple-50 to-indigo-50 dark:from-violet-900/30 dark:via-purple-900/30 dark:to-indigo-900/30 border-l-4 border-violet-500 shadow-violet-100',
+    'bg-gradient-to-br from-cyan-50 via-sky-50 to-blue-50 dark:from-cyan-900/30 dark:via-sky-900/30 dark:to-blue-900/30 border-l-4 border-cyan-500 shadow-cyan-100',
+    'bg-gradient-to-br from-lime-50 via-green-50 to-emerald-50 dark:from-lime-900/30 dark:via-green-900/30 dark:to-emerald-900/30 border-l-4 border-lime-500 shadow-lime-100',
+    'bg-gradient-to-br from-red-50 via-orange-50 to-amber-50 dark:from-red-900/30 dark:via-orange-900/30 dark:to-amber-900/30 border-l-4 border-red-500 shadow-red-100'
+  ];
+
+  const distinctRoutes = Array.from(new Set(customers.map(c => c.route || 'Unassigned'))) as string[];
+  const routeGradientMap: Record<string, string> = {};
+  distinctRoutes.forEach((r, i) => {
+    routeGradientMap[(r || 'Unassigned') as string] = gradientPatterns[i % gradientPatterns.length];
+  });
+
   return (
     <div className="p-3 sm:p-4 lg:p-6 space-y-6 sm:space-y-8">
       {/* Header with back button */}
@@ -656,65 +708,119 @@ const RouteCustomerList: React.FC<RouteCustomerListProps> = ({ selectedRoute, on
           {filteredCustomers.length > 0 ? (
             <>
               {/* Unified Card View */}
+              <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <label className="text-sm text-slate-600 dark:text-slate-400">Order State:</label>
+                  <select
+                    value={orderStateFilter}
+                    onChange={(e) => setOrderStateFilter(e.target.value as any)}
+                    className="text-sm p-2 rounded bg-slate-50 dark:bg-slate-700 border border-slate-300 dark:border-slate-600"
+                  >
+                    <option value="all">All</option>
+                    <option value="pending">Pending</option>
+                    <option value="delivered">Delivered</option>
+                    <option value="no-orders">No Orders</option>
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <label className="text-sm text-slate-600 dark:text-slate-400">Outstanding:</label>
+                  <select
+                    value={outstandingFilter}
+                    onChange={(e) => setOutstandingFilter(e.target.value as any)}
+                    className="text-sm p-2 rounded bg-slate-50 dark:bg-slate-700 border border-slate-300 dark:border-slate-600"
+                  >
+                    <option value="all">All</option>
+                    <option value="withOutstanding">With Outstanding</option>
+                    <option value="noOutstanding">No Outstanding</option>
+                  </select>
+                </div>
+              </div>
+
               <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-                {filteredCustomers.map((customer, index) => {
-                  // Create vibrant gradient patterns for each customer card
-                  const gradientPatterns = [
-                    'bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 dark:from-blue-900/30 dark:via-indigo-900/30 dark:to-purple-900/30 border-l-4 border-blue-500 shadow-blue-100',
-                    'bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 dark:from-emerald-900/30 dark:via-teal-900/30 dark:to-cyan-900/30 border-l-4 border-emerald-500 shadow-emerald-100',
-                    'bg-gradient-to-br from-orange-50 via-amber-50 to-yellow-50 dark:from-orange-900/30 dark:via-amber-900/30 dark:to-yellow-900/30 border-l-4 border-orange-500 shadow-orange-100',
-                    'bg-gradient-to-br from-rose-50 via-pink-50 to-fuchsia-50 dark:from-rose-900/30 dark:via-pink-900/30 dark:to-fuchsia-900/30 border-l-4 border-rose-500 shadow-rose-100',
-                    'bg-gradient-to-br from-violet-50 via-purple-50 to-indigo-50 dark:from-violet-900/30 dark:via-purple-900/30 dark:to-indigo-900/30 border-l-4 border-violet-500 shadow-violet-100',
-                    'bg-gradient-to-br from-cyan-50 via-sky-50 to-blue-50 dark:from-cyan-900/30 dark:via-sky-900/30 dark:to-blue-900/30 border-l-4 border-cyan-500 shadow-cyan-100',
-                    'bg-gradient-to-br from-lime-50 via-green-50 to-emerald-50 dark:from-lime-900/30 dark:via-green-900/30 dark:to-emerald-900/30 border-l-4 border-lime-500 shadow-lime-100',
-                    'bg-gradient-to-br from-red-50 via-orange-50 to-amber-50 dark:from-red-900/30 dark:via-orange-900/30 dark:to-amber-900/30 border-l-4 border-red-500 shadow-red-100'
-                  ];
-                  
-                  const cardGradient = gradientPatterns[index % gradientPatterns.length];
-                  
-                  return (
+                {sortedCustomers.map((customer, index) => {
+                    // Determine order state for this customer: pending if any non-Delivered exists, delivered if at least one delivered and no pending
+                    const custOrders = orders.filter(o => o.customerId === customer.id);
+                    const hasPending = custOrders.some(o => o.status && o.status !== OrderStatus.Delivered);
+                    const hasDelivered = custOrders.some(o => o.status === OrderStatus.Delivered);
+
+                    // Gradients for pending (yellow) and delivered/no-orders (green)
+                    const pendingGradient = 'bg-gradient-to-br from-yellow-50 via-amber-50 to-orange-50 dark:from-yellow-900/30 dark:via-amber-900/30 dark:to-orange-900/30 border-l-4 border-yellow-500 shadow-yellow-100';
+                    const deliveredGradient = 'bg-gradient-to-br from-emerald-50 via-green-50 to-lime-50 dark:from-emerald-900/30 dark:via-green-900/30 dark:to-lime-900/30 border-l-4 border-emerald-500 shadow-emerald-100';
+
+                    // Default route gradient (kept when no override is needed)
+                    let cardGradient = routeGradientMap[customer.route || 'Unassigned'] || gradientPatterns[index % gradientPatterns.length];
+
+                    // Apply overrides per requirement: pending -> yellow; delivered or no orders -> green
+                    if (hasPending) {
+                      cardGradient = pendingGradient;
+                    } else {
+                      // delivered or no orders -> green
+                      cardGradient = deliveredGradient;
+                    }
+
+                    return (
                     <Card key={customer.id} className={`${cardGradient} border-0 hover:shadow-xl hover:scale-[1.02] transition-all duration-300 cursor-pointer`}>
                     <CardContent className="p-4">
-                      {/* Customer Header */}
-                      <div className="flex items-start justify-between mb-3">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
-                            <div className="font-semibold text-slate-900 dark:text-white text-sm sm:text-base truncate">{customer.name}</div>
-                            {/* Sales Rep Ownership Indicator */}
-                            {(() => {
-                              if (customer.created_by === currentUser?.id) {
-                                return (
-                                  <Badge variant="success" className="px-1.5 py-0.5 text-xs font-bold bg-green-100 text-green-800 border-green-300 dark:bg-green-900/30 dark:text-green-400 dark:border-green-600">
-                                    👤 My Customer
-                                  </Badge>
-                                );
-                              } else if (currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Manager) {
-                                // Show who created the customer (for admins/managers only)
-                                const creatorName = customer.created_by ? (() => {
-                                  // Try to find the creator's name from users (this would need users data)
-                                  // For now, show first few characters of ID
-                                  return customer.created_by.slice(0, 8) + '...';
-                                })() : 'System';
-                                return (
-                                  <Badge variant="secondary" className="px-1.5 py-0.5 text-xs bg-slate-100 text-slate-600 border-slate-300 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-600">
-                                    👥 {creatorName}
-                                  </Badge>
-                                );
-                              }
-                              return null;
-                            })()}
+                      {/* Customer Header: name on its own line; badges moved slightly lower to avoid truncation */}
+                      <div className="mb-2">
+                        <div className="font-semibold text-slate-900 dark:text-white text-sm sm:text-base truncate">{customer.name}</div>
+                        <div className="flex items-center justify-between mt-2">
+                          <div className="flex flex-col">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                {/* Sales Rep Ownership Indicator */}
+                                {(() => {
+                                  if (customer.created_by === currentUser?.id) {
+                                    return (
+                                      <Badge variant="success" className="px-1.5 py-0.5 text-xs font-bold bg-green-100 text-green-800 border-green-300 dark:bg-green-900/30 dark:text-green-400 dark:border-green-600">
+                                        👤 My Customer
+                                      </Badge>
+                                    );
+                                  } else if (currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Manager) {
+                                    const creatorName = customer.created_by ? customer.created_by.slice(0, 8) + '...' : 'System';
+                                    return (
+                                      <Badge variant="secondary" className="px-1.5 py-0.5 text-xs bg-slate-100 text-slate-600 border-slate-300 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-600">
+                                        👥 {creatorName}
+                                      </Badge>
+                                    );
+                                  }
+                                  return null;
+                                })()}
+
+                                {/* Order state indicator: Pending (yellow) takes precedence over Delivered (green) */}
+                                {(() => {
+                                  if (!custOrders || custOrders.length === 0) {
+                                    return <Badge variant="default" className="px-1.5 py-0.5 text-xs bg-slate-100 text-slate-600 border-slate-300 dark:bg-slate-800 dark:text-slate-400">No Orders</Badge>;
+                                  }
+                                  if (hasPending) {
+                                    return <Badge className="px-1.5 py-0.5 text-xs bg-yellow-100 text-yellow-800 border-yellow-300 dark:bg-yellow-900/30 dark:text-yellow-400">Pending</Badge>;
+                                  }
+                                  if (hasDelivered) {
+                                    return <Badge className="px-1.5 py-0.5 text-xs bg-green-100 text-green-800 border-green-300 dark:bg-green-900/30 dark:text-green-400">Delivered</Badge>;
+                                  }
+                                  return null;
+                                })()}
+                              </div>
+
+                              <div className="flex-shrink-0 ml-2">
+                                <Badge variant="default" className="text-xs">
+                                  {customer.route === 'Unassigned' ? '📋' : '🚛'} {customer.route || 'Unassigned'}
+                                </Badge>
+                              </div>
+                            </div>
+
+                            <div className="mt-2">
+                              <a 
+                                href={`tel:${customer.phone}`}
+                                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/30 rounded transition-colors cursor-pointer"
+                                title={`Call ${customer.name}`}
+                              >
+                                📞 {formatPhoneNumber(customer.phone)}
+                              </a>
+                            </div>
                           </div>
-                          <a 
-                            href={`tel:${customer.phone}`}
-                            className="inline-flex items-center gap-1 px-2 py-1 mt-1 text-xs font-medium text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/30 rounded transition-colors cursor-pointer"
-                            title={`Call ${customer.name}`}
-                          >
-                            📞 {formatPhoneNumber(customer.phone)}
-                          </a>
                         </div>
-                        <Badge variant="default" className="ml-2 flex-shrink-0 text-xs">
-                          {customer.route === 'Unassigned' ? '📋' : '🚛'} {customer.route || 'Unassigned'}
-                        </Badge>
                       </div>
                       
                       {/* Location */}

@@ -1194,6 +1194,12 @@ export const Orders: React.FC = () => {
           return Array.from(byId.values()).sort((a, b) => new Date((b.date as string) || '').getTime() - new Date((a.date as string) || '').getTime());
         });
       }
+      // Ensure all pages and context pick up the latest DB state (deliveries, allocations, etc.)
+      try {
+        await refetchData();
+      } catch (e) {
+        console.warn('Failed to refetch global data after order update:', e);
+      }
       alert('Order updated successfully!');
     } catch (error) {
       console.error('Unexpected error updating order:', error);
@@ -1380,6 +1386,12 @@ export const Orders: React.FC = () => {
             return Array.from(byId.values()).sort((a, b) => new Date((b.date as string) || '').getTime() - new Date((a.date as string) || '').getTime());
           });
           setViewingOrder(updatedOrder);
+          // Also refetch global data so admin deliveries and driver allocations reflect the change
+          try {
+            await refetchData();
+          } catch (e) {
+            console.warn('Failed to refetch global data after saving balances:', e);
+          }
           alert('Balances updated and saved!');
         } else {
           alert('Balances saved, but failed to refresh orders.');

@@ -75,7 +75,7 @@ const MainLayout = () => {
             
             <Sidebar isSidebarOpen={isSidebarOpen} closeSidebar={closeSidebar} />
             
-      <div className="flex flex-col flex-1 min-w-0">
+      <div className="flex flex-col flex-1 min-w-0 lg:pl-64">
         <Header toggleSidebar={toggleSidebar} />
         <main className="flex-1 overflow-y-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-6 max-w-full">
                     <Routes>

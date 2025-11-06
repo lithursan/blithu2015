@@ -36,7 +36,7 @@ export const Collections: React.FC = () => {
     // Format data for export
     const formatted = filteredCollections.map(c => ({
       'Order ID': c.order_id,
-      'Customer': c.customer_id,
+      'Customer': customerMap[c.customer_id] || c.customer_id,
       'Type': c.collection_type,
       'Amount': c.amount,
       'Collected By': c.collected_by,
@@ -47,7 +47,7 @@ export const Collections: React.FC = () => {
     const timestamp = new Date().toISOString().split('T')[0];
     exportData(formatted, `collections_${timestamp}`, format, 'Collections');
   };
-  const { refetchData } = useData();
+  const { refetchData, customers } = useData();
   const { currentUser } = useAuth();
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'complete'>('all');
@@ -116,6 +116,15 @@ export const Collections: React.FC = () => {
       return new Date(dateB).getTime() - new Date(dateA).getTime();
     });
   }, [collections, statusFilter, typeFilter, dateFrom, dateTo]);
+
+  // Map customer id -> name for quick lookup
+  const customerMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    (customers || []).forEach(c => {
+      if (c.id) map[c.id] = c.name || c.customerName || '';
+    });
+    return map;
+  }, [customers]);
 
   // Always use the full collections array for stats, not filteredCollections
   const totalStats = useMemo(() => {
@@ -356,7 +365,7 @@ export const Collections: React.FC = () => {
                     <td className="px-6 py-4 font-medium text-slate-900 dark:text-white">
                       {collection.order_id}
                     </td>
-                    <td className="px-6 py-4">{collection.customer_id}</td>
+                    <td className="px-6 py-4">{customerMap[collection.customer_id] || collection.customer_id}</td>
                     <td className="px-6 py-4">
                       <Badge variant={collection.collection_type === 'credit' ? 'info' : 'warning'}>
                         {collection.collection_type === 'credit' ? '💰 Credit' : '🏦 Cheque'}
@@ -409,73 +418,73 @@ export const Collections: React.FC = () => {
         }}
         title="Verify Collection"
       >
-        {selectedCollection && (
-          <div className="p-6 space-y-4">
-            <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-lg space-y-2">
-              <h3 className="font-semibold text-slate-800 dark:text-slate-200">Collection Details</h3>
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <span className="text-slate-600 dark:text-slate-400">Order ID:</span>
-                  <p className="font-medium">{selectedCollection.orderId}</p>
-                </div>
-                <div>
-                  <span className="text-slate-600 dark:text-slate-400">Customer:</span>
-                  <p className="font-medium">{selectedCollection.customerName}</p>
-                </div>
-                <div>
-                  <span className="text-slate-600 dark:text-slate-400">Type:</span>
-                  <p className="font-medium capitalize">{selectedCollection.collectionType}</p>
-                </div>
-                <div>
-                  <span className="text-slate-600 dark:text-slate-400">Amount:</span>
-                  <p className="font-bold text-green-600">{formatCurrency(selectedCollection.amount)}</p>
-                </div>
-                <div>
-                  <span className="text-slate-600 dark:text-slate-400">Collected By:</span>
-                  <p className="font-medium">{selectedCollection.collectedBy}</p>
-                </div>
-                <div>
-                  <span className="text-slate-600 dark:text-slate-400">Date:</span>
-                  <p className="font-medium">{new Date(selectedCollection.collectedAt).toLocaleDateString('en-GB')}</p>
-                </div>
-              </div>
-            </div>
-            
-            <div>
-              <label htmlFor="verificationNotes" className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">
-                Verification Notes (Optional)
-              </label>
-              <textarea
-                id="verificationNotes"
-                value={verificationNotes}
-                onChange={(e) => setVerificationNotes(e.target.value)}
-                rows={3}
-                className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:placeholder-slate-400 dark:text-white"
-                placeholder="Enter any verification notes or comments..."
-              />
-            </div>
-            
-            <div className="flex items-center justify-end space-x-3 pt-4 border-t border-slate-200 dark:border-slate-600">
-              <button
-                onClick={() => {
-                  setSelectedCollection(null);
-                  setVerificationNotes('');
-                }}
-                type="button"
-                className="text-slate-500 bg-white hover:bg-slate-100 focus:ring-4 focus:outline-none focus:ring-blue-300 rounded-lg border border-slate-200 text-sm font-medium px-5 py-2.5 hover:text-slate-900 focus:z-10 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-500 dark:hover:text-white dark:hover:bg-slate-600"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleRecognizeCollection}
-                type="button"
-                className="text-white bg-green-600 hover:bg-green-700 focus:ring-4 focus:outline-none focus:ring-green-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-green-600 dark:hover:bg-green-700"
-              >
-                ✅ Recognize Collection
-              </button>
-            </div>
-          </div>
-        )}
+                {selectedCollection && (
+                  <div className="p-6 space-y-4">
+                    <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-lg space-y-2">
+                      <h3 className="font-semibold text-slate-800 dark:text-slate-200">Collection Details</h3>
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <span className="text-slate-600 dark:text-slate-400">Order ID:</span>
+                          <p className="font-medium">{selectedCollection.order_id}</p>
+                        </div>
+                        <div>
+                          <span className="text-slate-600 dark:text-slate-400">Customer:</span>
+                          <p className="font-medium">{customerMap[selectedCollection.customer_id] || selectedCollection.customer_id}</p>
+                        </div>
+                        <div>
+                          <span className="text-slate-600 dark:text-slate-400">Type:</span>
+                          <p className="font-medium capitalize">{selectedCollection.collection_type}</p>
+                        </div>
+                        <div>
+                          <span className="text-slate-600 dark:text-slate-400">Amount:</span>
+                          <p className="font-bold text-green-600">{formatCurrency(selectedCollection.amount)}</p>
+                        </div>
+                        <div>
+                          <span className="text-slate-600 dark:text-slate-400">Collected By:</span>
+                          <p className="font-medium">{selectedCollection.collected_by || '-'}</p>
+                        </div>
+                        <div>
+                          <span className="text-slate-600 dark:text-slate-400">Date:</span>
+                          <p className="font-medium">{new Date(selectedCollection.collected_at || selectedCollection.created_at || '').toLocaleDateString('en-GB')}</p>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div>
+                      <label htmlFor="verificationNotes" className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">
+                        Verification Notes (Optional)
+                      </label>
+                      <textarea
+                        id="verificationNotes"
+                        value={verificationNotes}
+                        onChange={(e) => setVerificationNotes(e.target.value)}
+                        rows={3}
+                        className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:placeholder-slate-400 dark:text-white"
+                        placeholder="Enter any verification notes or comments..."
+                      />
+                    </div>
+                    
+                    <div className="flex items-center justify-end space-x-3 pt-4 border-t border-slate-200 dark:border-slate-600">
+                      <button
+                        onClick={() => {
+                          setSelectedCollection(null);
+                          setVerificationNotes('');
+                        }}
+                        type="button"
+                        className="text-slate-500 bg-white hover:bg-slate-100 focus:ring-4 focus:outline-none focus:ring-blue-300 rounded-lg border border-slate-200 text-sm font-medium px-5 py-2.5 hover:text-slate-900 focus:z-10 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-500 dark:hover:text-white dark:hover:bg-slate-600"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleRecognizeCollection}
+                        type="button"
+                        className="text-white bg-green-600 hover:bg-green-700 focus:ring-4 focus:outline-none focus:ring-green-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-green-600 dark:hover:bg-green-700"
+                      >
+                        ✅ Recognize Collection
+                      </button>
+                    </div>
+                  </div>
+                )}
       </Modal>
     </div>
   );
