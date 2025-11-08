@@ -1491,6 +1491,18 @@ const SalesRepDashboard: React.FC<{
 
   // Total order amount across all orders that belong to the sales rep's assigned suppliers
   const totalOrdersAmount = filteredMyOrders.reduce((sum, order) => sum + (order.total || 0), 0);
+  // Total order cost for this sales rep (sum of costPrice * quantity for all items in filteredMyOrders)
+  const totalOrderCostForRep = filteredMyOrders.reduce((sum, order) => {
+    if (!order.orderItems) return sum;
+    const orderCost = order.orderItems.reduce((itemSum, item) => {
+      const product = products.find(p => p.id === item.productId);
+      const costPrice = (typeof product?.costPrice === 'number' && product.costPrice > 0) ? product.costPrice : 0;
+      return itemSum + (costPrice * (item.quantity || 0));
+    }, 0);
+    return sum + orderCost;
+  }, 0);
+
+  const totalProfitForRep = totalOrdersAmount - totalOrderCostForRep;
     
   const pendingOrders = filteredMyOrders.filter(order => 
         order.status === OrderStatus.Pending || order.status === OrderStatus.Shipped
@@ -1534,6 +1546,22 @@ const SalesRepDashboard: React.FC<{
 
             {/* Sales Rep Stats */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <Card className={`${totalProfitForRep >= 0 ? 'bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-950 dark:to-emerald-900 border-emerald-200 dark:border-emerald-800' : 'bg-gradient-to-br from-red-50 to-red-100 dark:from-red-950 dark:to-red-900 border-red-200 dark:border-red-800'} min-h-[140px] flex flex-col`}>
+          <CardHeader>
+            <CardTitle className={`${totalProfitForRep >= 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-700 dark:text-red-300'}`}>Order Profit</CardTitle>
+            <CardDescription>{totalProfitForRep >= 0 ? 'Profit from your orders (Total - Cost)' : 'Loss from your orders (Total - Cost)'}</CardDescription>
+          </CardHeader>
+          <CardContent className="flex-1 flex flex-col justify-between">
+            <div>
+              <p className={`${getFontSizeClass(formatCurrency(totalProfitForRep, currency))} font-bold ${totalProfitForRep >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>{formatCurrency(totalProfitForRep, currency)}</p>
+              <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Order Profit = Total Orders Amount - Total Order Cost (for your assigned suppliers / scope)</p>
+            </div>
+            <div className="flex justify-end mt-4">
+              <ChangeIndicator change={totalOrderCostForRep > 0 ? ((totalProfitForRep / (totalOrderCostForRep || 1)) * 100) : 0} />
+            </div>
+          </CardContent>
+        </Card>
+        
         <Card>
           <CardHeader>
             <CardTitle>Total Orders Amount</CardTitle>
