@@ -7,6 +7,7 @@ import { Modal } from '../ui/Modal';
 import { Badge } from '../ui/Badge';
 import { COMPANY_DETAILS } from '../../constants';
 import { supabase } from '../../supabaseClient';
+import html2pdf from 'html2pdf.js';
 import { exportDriverAllocations, exportDriverSales } from '../../utils/exportUtils';
 import { LoadingSpinner } from '@/hooks/useLoading';
 
@@ -347,12 +348,31 @@ export const Drivers: React.FC = () => {
         // Status should reflect allocations up to the selected date (inclusive). If any active (non-reconciled)
         // allocation exists on or before the selected date, consider the driver Allocated.
         const did = (driverId || '').toString().trim();
+        // First, check allocations that are exactly for the selected date. If a today's allocation exists
+        // and it's reconciled, we should show Not Allocated for immediate UX clarity after reconciliation.
+        const allocsForSelectedDate = (driverAllocations || []).filter(a => {
+            if (!a || !a.date) return false;
+            const aid = (a.driverId || a.driver_id || '').toString().trim();
+            if (!aid || !did) return false;
+            const idMatch = aid === did || aid.includes(did) || did.includes(aid);
+            const allocDateStr = a.date && a.date.slice ? a.date.slice(0,10) : String(a.date);
+            return idMatch && allocDateStr === selectedDate;
+        });
+        if (allocsForSelectedDate && allocsForSelectedDate.length > 0) {
+            // If any of today's allocations are still active (not reconciled), show Allocated
+            if (allocsForSelectedDate.some(a => (a.status ?? 'Allocated') !== 'Reconciled')) {
+                return { status: 'Allocated', badge: 'info' };
+            }
+            // All today's allocations are reconciled — treat as Not Allocated for today's view
+            return { status: 'Not Allocated', badge: 'default' };
+        }
+
+        // Fallback: consider allocations up to the selected date (inclusive) for historical allocations
         const allocsUpToDate = (driverAllocations || []).filter(a => {
             if (!a || !a.date) return false;
             const aid = (a.driverId || a.driver_id || '').toString().trim();
             const dateOk = new Date(a.date) <= new Date(selectedDate);
             if (!aid || !did) return false;
-            // match by exact id or substring (defensive)
             const idMatch = aid === did || aid.includes(did) || did.includes(aid);
             return idMatch && dateOk;
         });
@@ -573,8 +593,7 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
     const [paymentReference, setPaymentReference] = useState('');
     const [saleNotes, setSaleNotes] = useState('');
     
-    // State for reconciliation
-    const [returnedQuantities, setReturnedQuantities] = useState<Record<string, number>>({});
+    // No manual returned input: reconciliation will use calculated remaining (allocated - sold)
     
     // Refresh data when Daily Log opens to ensure we have latest orders
     useEffect(() => {
@@ -688,9 +707,8 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
                     });
                 });
         }
-        Object.keys(summary).forEach(pid => {
-            if (summary[pid].remaining <= 0) delete summary[pid];
-        });
+        // Keep products with remaining === 0 so reconciliation shows Allocated / Sold / Balance (0)
+        // Previously zero-remaining products were removed which hid fully-sold allocations.
         return summary;
     }, [activeAllocations, salesForDriver]);
     
@@ -926,20 +944,105 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
         }
         handleCloseSaleModal();
     };
+
+        // Print the latest allocation (allocated items) for this driver/date
+        const handlePrintAllocation = () => {
+                if (!latestActiveAllocation) {
+                        alert('No allocation to print for today.');
+                        return;
+                }
+
+        // Group allocated items by productId to sum quantities and sold counts
+        const grouped: Record<string, { allocated: number; sold: number }> = {};
+        (latestActiveAllocation.allocatedItems || []).forEach((item: any) => {
+            const pid = item.productId;
+            const qty = Number(item.quantity || 0);
+            const sold = Number(item.sold || 0);
+            if (!grouped[pid]) grouped[pid] = { allocated: 0, sold: 0 };
+            grouped[pid].allocated += qty;
+            grouped[pid].sold += sold;
+        });
+
+        const rowsHtml = Object.entries(grouped).map(([productId, vals]) => {
+            const prod = products.find(p => p.id === productId);
+            const name = prod?.name || productId;
+            const allocated = vals.allocated;
+            const sold = vals.sold;
+            const balance = Math.max(0, allocated - sold);
+            return `<tr>
+                    <td style="padding:4px 0;">${name}</td>
+                    <td style="padding:4px 0; text-align:center;">${allocated}</td>
+                    <td style="padding:4px 0; text-align:center;">${sold}</td>
+                    <td style="padding:4px 0; text-align:right;">${balance}</td>
+                </tr>`;
+        }).join('');
+
+                const billHTML = `
+            <!doctype html>
+            <html>
+                <head>
+                    <meta charset="utf-8" />
+                    <title>Allocation - ${driver.name} - ${todayStr}</title>
+                    <style>
+                        body { font-family: Arial, Helvetica, sans-serif; color: #000; width: 80mm; margin: 0; padding: 6px; }
+                        .center { text-align: center; }
+                        table { width: 100%; border-collapse: collapse; font-size: 12px; }
+                        th, td { vertical-align: top; padding: 6px 8px; }
+                        .header { margin-bottom: 6px; }
+                        .company { font-weight: bold; font-size: 14px; }
+                        .date { font-size: 11px; margin-bottom: 6px; }
+                        .divider { border-top: 1px dashed #000; margin: 6px 0; }
+                    </style>
+                </head>
+                <body>
+                    <div class="center header">
+                        <div class="company">${COMPANY_DETAILS.name}</div>
+                        <div class="date">${COMPANY_DETAILS.address || ''}</div>
+                        <div class="date">${COMPANY_DETAILS.phone || ''}</div>
+                        <div class="date">Driver: ${driver.name} — Date: ${todayStr}</div>
+                    </div>
+                    <div class="divider"></div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <td style="font-weight:bold; text-align:left;">Product</td>
+                                <td style="font-weight:bold;text-align:center;">Allocated</td>
+                                <td style="font-weight:bold;text-align:center;">Sold</td>
+                                <td style="font-weight:bold;text-align:right;">Balance</td>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rowsHtml}
+                        </tbody>
+                    </table>
+                    <div class="divider"></div>
+                    <div style="text-align:center;font-size:11px;margin-top:6px;">Thank you - ${COMPANY_DETAILS.name}</div>
+                </body>
+            </html>
+        `;
+
+                const height = Math.max(200, 20 + (latestActiveAllocation.allocatedItems || []).length * 12);
+                const options = {
+                        margin: 1,
+                        filename: `Allocation-${driver.name}-${todayStr}.pdf`,
+                        image: { type: 'jpeg', quality: 1 },
+                        html2canvas: { scale: 2 },
+                        jsPDF: { unit: 'mm', format: [80, height], orientation: 'portrait' }
+                } as any;
+
+                html2pdf().set(options).from(billHTML).save();
+        };
     
-    const handleReturnedQtyChange = (productId: string, quantity: number) => {
-        const expected = stockSummary[productId]?.remaining || 0;
-        const newQuantity = Math.max(0, Math.min(quantity, expected));
-        setReturnedQuantities(prev => ({ ...prev, [productId]: newQuantity }));
-    };
+    // removed manual returned qty handler - reconciliation uses the computed remaining values
     
     const handleReconcile = () => {
         const allocation = latestActiveAllocation;
         if (!allocation) return;
 
+        // Build returned items from computed remaining (allocated - sold) to avoid manual input
         const itemsToReturn = allocation.allocatedItems.map(({productId}) => ({
             productId,
-            quantity: returnedQuantities[productId] ?? 0,
+            quantity: stockSummary[productId]?.remaining || 0,
         }));
 
         const salesTotal = driverSales
@@ -960,24 +1063,10 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
                 console.error('Supabase allocation reconcile error:', allocError);
             }
 
-            // Update product stock in Supabase and UI (add returned quantity)
-            for (const { productId, quantity } of itemsToReturn) {
-                const product = products.find(p => p.id === productId);
-                if (product) {
-                    const newStock = product.stock + quantity;
-                    await supabase.from('products').update({ stock: newStock }).eq('id', productId);
-                }
-            }
-            setProducts(prevProducts => {
-                const updatedProducts = [...prevProducts];
-                itemsToReturn.forEach(({ productId, quantity }) => {
-                    const productIndex = updatedProducts.findIndex(p => p.id === productId);
-                    if (productIndex !== -1) {
-                        updatedProducts[productIndex].stock += quantity;
-                    }
-                });
-                return updatedProducts;
-            });
+            // NOTE: Per user request, do NOT add the allocation balance back into the main warehouse
+            // product stock here. We still mark the allocation as 'Reconciled' and record returneditems
+            // on the allocation record, but we intentionally avoid updating the `products.stock` value
+            // in the products table or in the UI state.
 
             // Fetch fresh allocations and products for UI sync
             const { data: freshAllocations } = await supabase.from('driver_allocations').select('*');
@@ -1037,41 +1126,45 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
         })();
     };
     
-    // Calculate collections from both driver sales and today's delivered orders
+    // Calculate collections from today's driver sales and today's delivered orders only
     const collections = useMemo(() => {
-        // Aggregate across all dates for this driver
-        const deliveredOrdersForDriver = orders.filter(order => {
+        // Helper to test date equality YYYY-MM-DD
+        const isSameDay = (isoOrDateStr: string | undefined, dayStr: string) => {
+            if (!isoOrDateStr) return false;
+            const ds = (isoOrDateStr.slice ? isoOrDateStr.slice(0, 10) : new Date(isoOrDateStr).toISOString().slice(0,10));
+            return ds === dayStr;
+        };
+
+        // Only include driver sales that happened today (by sale.date)
+        const salesToday = salesForDriver.filter(sale => isSameDay(sale.date, todayStr));
+
+        // Only include orders assigned to this driver that were delivered today
+        const deliveredOrdersForDriverToday = orders.filter(order => {
             const isAssignedToDriver = order.assignedUserId === driver.id;
             const isDelivered = order.status === 'Delivered';
-            return isAssignedToDriver && isDelivered;
+            const deliveredToday = isSameDay(order.date, todayStr) || isSameDay(order.created_at as any, todayStr);
+            return isAssignedToDriver && isDelivered && deliveredToday;
         });
 
-        // Start with driver sales data (all dates)
-        let result = salesForDriver.reduce((acc, sale) => {
-            acc.total += sale.total || 0;
-            acc.paid += sale.amountPaid || 0;
-            acc.credit += sale.creditAmount || 0;
-            const method = sale.paymentMethod || '';
-            // Breakdown collected amounts by payment method when possible
-            if (method === 'Cheque') {
-                acc.cheque += sale.amountPaid || 0;
-            } else if (method === 'Cash') {
-                acc.cash += sale.amountPaid || 0;
-            } else if (method === 'Bank') {
-                acc.bank += sale.amountPaid || 0;
-            } else if (method === 'Mixed') {
-                // Mixed payments: amountPaid may include cheque/bank/cash combined
-                acc.mixed += sale.amountPaid || 0;
-            } else if (method === 'Credit') {
-                // credit only - amountPaid is likely 0
-            }
-            return acc;
-        }, { total: 0, paid: 0, credit: 0, cheque: 0, cash: 0, bank: 0, mixed: 0 });
+        // Start aggregating from zero — today's totals only
+        const result = { total: 0, paid: 0, credit: 0, cheque: 0, cash: 0, bank: 0, mixed: 0 } as any;
 
-        // Add data from all delivered orders for this driver
-        deliveredOrdersForDriver.forEach(order => {
+        // Aggregate today's driver sales
+        for (const sale of salesToday) {
+            result.total += sale.total || 0;
+            result.paid += sale.amountPaid || 0;
+            result.credit += sale.creditAmount || 0;
+            const method = sale.paymentMethod || '';
+            if (method === 'Cheque') result.cheque += sale.amountPaid || 0;
+            else if (method === 'Cash') result.cash += sale.amountPaid || 0;
+            else if (method === 'Bank') result.bank += sale.amountPaid || 0;
+            else if (method === 'Mixed') result.mixed += sale.amountPaid || 0;
+        }
+
+        // Add today's delivered orders assigned to this driver
+        for (const order of deliveredOrdersForDriverToday) {
             const orderTotal = order.total || 0;
-            const orderPaid = order.amountPaid || (orderTotal - (order.chequeBalance || 0) - (order.creditBalance || 0));
+            const orderPaid = (order.amountPaid ?? (orderTotal - (order.chequeBalance || 0) - (order.creditBalance || 0))) || 0;
             const orderCredit = order.creditBalance || 0;
             const orderCheque = order.chequeBalance || 0;
 
@@ -1079,9 +1172,10 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
             result.paid += orderPaid;
             result.credit += orderCredit;
             result.cheque += orderCheque;
-        });
+        }
+
         return result;
-    }, [salesForDriver, orders, driver.id]);
+    }, [salesForDriver, orders, driver.id, todayStr]);
 
     return (
       <Modal isOpen={true} onClose={onClose} title={`Daily Log: ${driver.name} (${todayStr})`}>
@@ -1097,9 +1191,16 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
                 <div className="space-y-4">
                     <div className="flex flex-col sm:flex-row gap-3 sm:justify-between sm:items-center">
                         <h4 className="text-base sm:text-lg font-semibold text-slate-800 dark:text-slate-200">Sales Summary</h4>
-                                 <button onClick={handleOpenSaleModal} disabled={activeAllocations.length === 0} className="px-4 py-2.5 text-xs sm:text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:bg-slate-400 dark:disabled:bg-slate-600 min-h-[40px] self-start sm:self-auto">
+                        <div className="flex gap-2">
+                         <button onClick={handleOpenSaleModal} disabled={activeAllocations.length === 0} className="px-4 py-2.5 text-xs sm:text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:bg-slate-400 dark:disabled:bg-slate-600 min-h-[40px] self-start sm:self-auto">
                             Add Sale
                          </button>
+                         {latestActiveAllocation && (
+                            <button onClick={handlePrintAllocation} className="px-4 py-2.5 text-xs sm:text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 min-h-[40px] self-start sm:self-auto">
+                                Print Allocation
+                            </button>
+                         )}
+                        </div>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 text-center">
                         <div className="p-3 sm:p-4 rounded-lg bg-blue-50 dark:bg-blue-900/40"><p className="text-xs text-blue-600 dark:text-blue-300">Total Sales</p><p className="text-lg sm:text-xl font-bold text-blue-800 dark:text-blue-200 break-words">{formatCurrency(collections.total, currency)}</p></div>
@@ -1143,10 +1244,11 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
                         <table className="min-w-full text-sm">
                             <thead className="bg-slate-50 dark:bg-slate-700 text-xs uppercase">
                                 <tr>
-                                    <th className="py-2 px-4 text-left">Product</th>
-                                    <th className="py-2 px-4 text-center">Allocated</th>
-                                    <th className="py-2 px-4 text-center">Actual Returned</th>
-                                </tr>
+                                        <th className="py-2 px-4 text-left">Product</th>
+                                        <th className="py-2 px-4 text-center">Allocated</th>
+                                        <th className="py-2 px-4 text-center">Sold</th>
+                                        <th className="py-2 px-4 text-center">Balance</th>
+                                    </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
                                 {Object.entries(stockSummary).map(([productId, summary]) => {
@@ -1156,22 +1258,12 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
                                     console.log(`📋 Reconciliation table - Product ${product?.name || productId}: allocated=${s.allocated}, sold=${s.sold}, remaining=${s.remaining}`);
                                     console.log(`🔍 RAW ALLOCATION DATA for ${product?.name}:`, latestActiveAllocation?.allocatedItems?.filter(item => item.productId === productId));
                                     
-                                    const discrepancy = (returnedQuantities[productId] ?? 0) !== s.remaining;
-                                    return (
+                                        return (
                                         <tr key={productId}>
                                             <td className="py-3 px-4 font-medium text-slate-900 dark:text-white">{product.name}</td>
                                             <td className="py-3 px-4 text-center">{s.allocated}</td>
-                                            <td className={`py-1 px-4 text-center ${discrepancy ? 'bg-red-100 dark:bg-red-900/50' : ''}`}>
-                                                <input
-                                                    type="number"
-                                                    id={`returned-${productId}`}
-                                                    name={`returned-${productId}`}
-                                                    value={returnedQuantities[productId] || ''}
-                                                    onChange={e => handleReturnedQtyChange(productId, parseInt(e.target.value, 10) || 0)}
-                                                    placeholder="0"
-                                                    className="w-20 p-2 text-center bg-transparent border rounded-md dark:border-slate-600"
-                                                />
-                                            </td>
+                                            <td className="py-3 px-4 text-center">{s.sold}</td>
+                                            <td className="py-3 px-4 text-center font-semibold text-slate-800 dark:text-slate-100">{s.remaining}</td>
                                         </tr>
                                     );
                                 })}

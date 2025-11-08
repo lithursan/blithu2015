@@ -103,10 +103,19 @@ export const Products: React.FC = () => {
 
       if (allocationsForDriver.length > 0) {
         const allocatedQuantities = new Map<string, number>();
+        // Sum remaining allocated quantity = quantity - sold for each allocated item
         allocationsForDriver.forEach(alloc => {
           (alloc.allocatedItems || []).forEach((item: any) => {
-            const prev = allocatedQuantities.get(item.productId) || 0;
-            allocatedQuantities.set(item.productId, prev + (item.quantity || 0));
+            try {
+              const qty = Number(item?.quantity || 0);
+              const sold = Number(item?.sold || 0);
+              const remaining = Math.max(0, qty - sold);
+              if (remaining <= 0) return;
+              const prev = allocatedQuantities.get(item.productId) || 0;
+              allocatedQuantities.set(item.productId, prev + remaining);
+            } catch (e) {
+              // defensive: skip malformed items
+            }
           });
         });
 

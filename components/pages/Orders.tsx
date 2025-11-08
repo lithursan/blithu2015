@@ -1410,10 +1410,16 @@ export const Orders: React.FC = () => {
   // Refetch all data to sync UI everywhere
   await refetchData();
     // --- Sync allocation salesTotal and update allocatedItems after delivery ---
-    if (currentUser?.role === UserRole.Driver && driverAllocations.length > 0) {
-      // Distribute delivered items across ALL allocations for this driver (oldest first)
+    // If the order is assigned to a driver, or the current user is the driver, sync delivered items
+    const deliveryAssigneeIsDriver = (targetOrder.assignedUserId && users && users.length > 0)
+      ? users.find(u => u.id === targetOrder.assignedUserId)?.role === UserRole.Driver
+      : false;
+
+    if ((currentUser?.role === UserRole.Driver || deliveryAssigneeIsDriver) && driverAllocations.length > 0) {
+      // Distribute delivered items across ALL allocations for the relevant driver (oldest first)
+      const driverIdToUse = currentUser?.role === UserRole.Driver ? currentUser.id : targetOrder.assignedUserId;
       const allocationsForDriver = driverAllocations
-        .filter((a: any) => a.driverId === currentUser.id)
+        .filter((a: any) => a.driverId === driverIdToUse)
         .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
       if (allocationsForDriver.length > 0) {

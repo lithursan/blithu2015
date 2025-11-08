@@ -1208,6 +1208,8 @@ const DriverDashboard: React.FC<{
 }> = ({ currentUser, orders, products, customers }) => {
     const currency = currentUser?.settings.currency || 'LKR';
     
+  const { driverSales = [] } = useData() || {};
+    
 
     
     // Get recent orders for driver dashboard (since exact today might be empty)
@@ -1275,6 +1277,7 @@ const DriverDashboard: React.FC<{
                     📍 Enable Location Sharing
                 </a>
             </div>
+      {/* Driver Sales Summary Cards (Today's totals) — consolidated below to avoid duplication */}
             
             {/* Driver Stats */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -1323,6 +1326,98 @@ const DriverDashboard: React.FC<{
                     </CardContent>
                 </Card>
             </div>
+
+      {/* Driver Sales Summary (today) - shows same 4 cards as Daily Log */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {(() => {
+          const todayKey = new Date().toISOString().split('T')[0];
+
+          // Sales recorded by driver today
+          const salesToday = (driverSales || []).filter((s: any) => {
+            if (!s || !s.date) return false;
+            const did = (s.driverId || s.driver_id || '').toString().trim();
+            if (!did || did !== (currentUser?.id || '').toString().trim()) return false;
+            const dstr = s.date && s.date.slice ? s.date.slice(0,10) : String(s.date);
+            return dstr === todayKey;
+          });
+
+          // Orders delivered today assigned to this driver
+          const deliveredOrdersForDriverToday = orders.filter(order => {
+            const isAssignedToDriver = order.assignedUserId === currentUser?.id;
+            const isDelivered = order.status === 'Delivered';
+            const deliveredToday = order.date && order.date.slice ? order.date.slice(0,10) === todayKey : new Date(order.date).toISOString().split('T')[0] === todayKey;
+            return isAssignedToDriver && isDelivered && deliveredToday;
+          });
+
+          // Total Sales = driver sales today + delivered orders totals
+          const totalSalesAmt = (salesToday.reduce((sum: number, s: any) => sum + (s.total || 0), 0) || 0)
+            + (deliveredOrdersForDriverToday.reduce((sum: number, o: any) => sum + (o.total || 0), 0) || 0);
+
+          // Total Collected (cash/bank/mixed) = sum of amountPaid from sales + paid portion of delivered orders
+          const collectedFromSales = salesToday.reduce((sum: number, s: any) => sum + (s.amountPaid || 0), 0);
+          const collectedFromOrders = deliveredOrdersForDriverToday.reduce((sum: number, o: any) => {
+            const orderTotal = o.total || 0;
+            const orderPaid = (o.amountPaid ?? (orderTotal - (o.chequeBalance || 0) - (o.creditBalance || 0))) || 0;
+            return sum + orderPaid;
+          }, 0);
+          const totalCollectedAmt = collectedFromSales + collectedFromOrders;
+
+          // Collected (Cheque)
+          const chequeFromSales = salesToday.reduce((sum: number, s: any) => (s.paymentMethod === 'Cheque' ? sum + (s.amountPaid || 0) : sum), 0);
+          const chequeFromOrders = deliveredOrdersForDriverToday.reduce((sum: number, o: any) => sum + (o.chequeBalance || 0), 0);
+          const totalChequeAmt = chequeFromSales + chequeFromOrders;
+
+          // Outstanding Credit (credit amounts from sales + orders)
+          const creditFromSales = salesToday.reduce((sum: number, s: any) => sum + (s.creditAmount || 0), 0);
+          const creditFromOrders = deliveredOrdersForDriverToday.reduce((sum: number, o: any) => sum + (o.creditBalance || 0), 0);
+          const totalCreditAmt = creditFromSales + creditFromOrders;
+
+          return (
+            <>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Total Sales</CardTitle>
+                  <CardDescription>Today's total sales</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-3xl font-bold text-blue-600">{formatCurrency(totalSalesAmt, currency)}</p>
+                  <p className="text-sm text-slate-500 mt-1">Includes van sales and delivered orders assigned to you today</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Total Collected</CardTitle>
+                  <CardDescription>Cash/Bank collected today</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-3xl font-bold text-green-600">{formatCurrency(totalCollectedAmt, currency)}</p>
+                  <p className="text-sm text-slate-500 mt-1">Sum of payments received today</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Collected (Cheque)</CardTitle>
+                  <CardDescription>Cheque amounts collected today</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-3xl font-bold text-yellow-600">{formatCurrency(totalChequeAmt, currency)}</p>
+                  <p className="text-sm text-slate-500 mt-1">Cheque amounts recorded today</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Outstanding Credit</CardTitle>
+                  <CardDescription>Credit remaining today</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-3xl font-bold text-red-600">{formatCurrency(totalCreditAmt, currency)}</p>
+                  <p className="text-sm text-slate-500 mt-1">Total credit from today's sales and delivered orders</p>
+                </CardContent>
+              </Card>
+            </>
+          );
+        })()}
+      </div>
 
             {/* Delivery Schedule */}
             <Card>
@@ -1417,9 +1512,116 @@ const DriverDashboard: React.FC<{
                             <p className="text-slate-500 dark:text-slate-400">No deliveries scheduled for today.</p>
                         </div>
                     )}
-                </CardContent>
-            </Card>
-        </div>
+        </CardContent>
+      </Card>
+      {/* Daily Sales Log: show allocation summary (Allocated / Sold / Balance) and today's driver sales */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Daily Sales Log</CardTitle>
+          <CardDescription>Allocation summary and today's sales from your van</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {(() => {
+            const { driverAllocations = [], driverSales = [] } = useData() || {};
+            const todayKey = new Date().toISOString().split('T')[0];
+            // Find latest allocation for this driver for today (not reconciled)
+            const todaysAllocs = (driverAllocations || []).filter((a: any) => {
+              if (!a || !a.date) return false;
+              const aid = (a.driverId || a.driver_id || '').toString().trim();
+              const did = (currentUser?.id || '').toString().trim();
+              if (!aid || !did) return false;
+              const idMatch = aid === did || aid.includes(did) || did.includes(aid);
+              const allocDateStr = a.date && a.date.slice ? a.date.slice(0,10) : String(a.date);
+              const notReconciled = (a.status ?? 'Allocated') !== 'Reconciled';
+              return idMatch && allocDateStr === todayKey && notReconciled;
+            });
+            const latestAlloc = todaysAllocs.length > 0 ? todaysAllocs.reduce((best: any, cur: any) => {
+              const bestKey = (best?.created_at ?? best?.createdAt ?? best?.id ?? '').toString();
+              const curKey = (cur?.created_at ?? cur?.createdAt ?? cur?.id ?? '').toString();
+              return curKey > bestKey ? cur : best;
+            }, todaysAllocs[0]) : null;
+
+            // Build summary grouped by product
+            const summary: Record<string, { allocated: number; sold: number; remaining: number }> = {};
+            if (latestAlloc && Array.isArray(latestAlloc.allocatedItems)) {
+              latestAlloc.allocatedItems.forEach((it: any) => {
+                const pid = it.productId;
+                const qty = Number(it.quantity || 0);
+                const sold = Number(it.sold || 0);
+                if (!summary[pid]) summary[pid] = { allocated: 0, sold: 0, remaining: 0 };
+                summary[pid].allocated += qty;
+                summary[pid].sold += sold;
+                summary[pid].remaining = summary[pid].allocated - summary[pid].sold;
+              });
+            }
+
+            // Driver sales today
+            const salesToday = (driverSales || []).filter((s: any) => {
+              if (!s || !s.date) return false;
+              const did = (s.driverId || s.driver_id || '').toString().trim();
+              const match = did && did === (currentUser?.id || '').toString().trim();
+              const dstr = s.date && s.date.slice ? s.date.slice(0,10) : String(s.date);
+              return match && dstr === todayKey;
+            });
+
+            return (
+              <div className="space-y-4">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-slate-50 dark:bg-slate-700 text-xs uppercase">
+                      <tr>
+                        <th className="py-2 px-4 text-left">Product</th>
+                        <th className="py-2 px-4 text-center">Allocated</th>
+                        <th className="py-2 px-4 text-center">Sold</th>
+                        <th className="py-2 px-4 text-center">Balance</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+                      {Object.entries(summary).length === 0 ? (
+                        <tr><td className="py-3 px-4" colSpan={4}>No allocation for today</td></tr>
+                      ) : Object.entries(summary).map(([pid, s]) => {
+                        const prod = products.find(p => p.id === pid) || { name: pid };
+                        return (
+                          <tr key={pid}>
+                            <td className="py-3 px-4 font-medium text-slate-900 dark:text-white">{prod.name}</td>
+                            <td className="py-3 px-4 text-center">{s.allocated}</td>
+                            <td className="py-3 px-4 text-center">{s.sold}</td>
+                            <td className="py-3 px-4 text-center font-semibold">{s.remaining}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div>
+                  <h4 className="text-sm font-semibold">Today's Sales</h4>
+                  {salesToday.length === 0 ? (
+                    <p className="text-sm text-slate-500">No sales recorded today.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {salesToday.map((sale: any) => (
+                        <div key={sale.id} className="p-2 border rounded-lg">
+                          <div className="flex justify-between items-center">
+                            <div>
+                              <div className="font-medium">{sale.customerName || sale.customer || 'Customer'}</div>
+                              <div className="text-xs text-slate-500">{new Date(sale.date).toLocaleTimeString()}</div>
+                            </div>
+                            <div className="text-right">
+                              <div className="font-semibold">{formatCurrency(sale.total || sale.totalAmount || 0, currency)}</div>
+                              <div className="text-xs text-slate-500">Paid: {formatCurrency(sale.amountPaid || 0, currency)}</div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+        </CardContent>
+      </Card>
+    </div>
     );
 };
 

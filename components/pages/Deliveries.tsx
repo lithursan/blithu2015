@@ -94,8 +94,12 @@ export const Deliveries: React.FC = () => {
   // Set of dates that already have an allocation (any driver)
   const allocatedDates = React.useMemo(() => {
     const set = new Set<string>();
+    // Only consider allocations that are still active (not reconciled).
     (driverAllocations || []).forEach((a: any) => {
-      if (a && a.date) set.add(a.date.slice ? a.date.slice(0, 10) : a.date);
+      if (!a || !a.date) return;
+      const status = (a.status ?? 'Allocated');
+      if (status === 'Reconciled') return; // treat reconciled as not allocated
+      set.add(a.date.slice ? a.date.slice(0, 10) : a.date);
     });
     return set;
   }, [driverAllocations]);
@@ -193,8 +197,11 @@ export const Deliveries: React.FC = () => {
   const allocationForSelectedDate = React.useMemo(() => {
     if (!driverAllocations || !selectedDates || selectedDates.size !== 1) return null;
     const onlyDate = Array.from(selectedDates)[0];
+    // Only return active (non-reconciled) allocations for the selected date
     return (driverAllocations as any[]).find(a => {
       if (!a || !a.date) return false;
+      const status = (a.status ?? 'Allocated');
+      if (status === 'Reconciled') return false;
       const d = a.date.slice ? a.date.slice(0, 10) : a.date;
       return d === onlyDate;
     }) || null;
@@ -203,8 +210,11 @@ export const Deliveries: React.FC = () => {
   // Helper: find allocation object for an arbitrary date
   const getAllocationForDate = (date: string) => {
     if (!driverAllocations) return null;
+    // Only treat non-reconciled allocations as active for unallocate purposes
     return (driverAllocations as any[]).find(a => {
       if (!a || !a.date) return false;
+      const status = (a.status ?? 'Allocated');
+      if (status === 'Reconciled') return false;
       const d = a.date.slice ? a.date.slice(0, 10) : a.date;
       return d === date;
     }) || null;
@@ -511,13 +521,7 @@ export const Deliveries: React.FC = () => {
                       </button>
                     )}
                     
-                    <button 
-                      onClick={handlePrintAggregated} 
-                      className="px-6 py-3 bg-gradient-to-r from-purple-500 to-violet-500 hover:from-purple-600 hover:to-violet-600 text-white rounded-xl font-bold text-sm shadow-lg shadow-purple-200 dark:shadow-purple-900/50 transition-all duration-300 hover:shadow-xl hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-lg" 
-                      disabled={aggregatedProducts.length === 0}
-                    >
-                      🖨️ Print
-                    </button>
+                    {/* Print moved to Driver Daily Log - removed from Deliveries UI per request */}
                   </div>
                 </div>
               </div>
