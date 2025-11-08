@@ -7,9 +7,11 @@ import { ThemeContext } from '../../contexts/ThemeContext';
 
 interface SalesChartProps {
   data: SalesData[];
+  // optional: control maximum number of x ticks shown (helps mobile)
+  maxXTicks?: number;
 }
 
-export const SalesChart: React.FC<SalesChartProps> = ({ data }) => {
+export const SalesChart: React.FC<SalesChartProps> = ({ data, maxXTicks = 7 }) => {
     const themeContext = useContext(ThemeContext);
     if (!themeContext) {
         throw new Error("SalesChart must be used within a ThemeProvider");
@@ -20,7 +22,9 @@ export const SalesChart: React.FC<SalesChartProps> = ({ data }) => {
 
 
   // Rotate x-axis labels when there are many points to keep them readable
-  const xLabelRotate = data.length > 6 ? -30 : 0;
+  const xLabelRotate = data.length > maxXTicks ? -30 : 0;
+  // Compute tick interval so the x-axis doesn't crowd on small screens
+  const tickInterval = data.length > maxXTicks ? Math.ceil(data.length / maxXTicks) - 1 : 0;
 
   return (
     // Make the chart fill the parent's height so the dashboard can control sizing responsively
@@ -36,10 +40,10 @@ export const SalesChart: React.FC<SalesChartProps> = ({ data }) => {
       >
         <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
         <XAxis
-          dataKey="month"
+          dataKey="label"
           stroke={tickColor}
           tick={{ fill: tickColor, fontSize: 12, angle: xLabelRotate, textAnchor: xLabelRotate ? 'end' : 'middle' }}
-          interval={0}
+          interval={tickInterval}
         />
         <YAxis stroke={tickColor} />
         <Tooltip 
@@ -51,7 +55,11 @@ export const SalesChart: React.FC<SalesChartProps> = ({ data }) => {
                 `LKR ${value.toLocaleString()}`, 
                 name
             ]}
-            labelFormatter={(label) => `Month: ${label}`}
+      // If the dataset contains a `fullLabel` for the point, show that in the tooltip.
+      labelFormatter={(label) => {
+          const point = data.find(d => d.label === label);
+          return `Date: ${point?.fullLabel || label}`;
+      }}
         />
         <Legend />
         <Line type="monotone" dataKey="sales" stroke="#3b82f6" strokeWidth={2} activeDot={{ r: 6 }} name="Total Sales" />

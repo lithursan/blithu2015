@@ -768,17 +768,8 @@ export const Orders: React.FC = () => {
     setFreeItems(prev => ({ ...prev, [productId]: newQuantity }));
   };
 
-  const toggleHoldItem = (productId: string) => {
-    setHeldItems(prev => {
-        const newSet = new Set(prev);
-        if (newSet.has(productId)) {
-            newSet.delete(productId);
-        } else {
-            newSet.add(productId);
-        }
-        return newSet;
-    });
-};
+  // Note: 'Hold' functionality removed from UI per request — keep heldItems state for compatibility with existing data but
+  // remove the interactive toggle function so items cannot be toggled to 'held' from the product list.
 
   const { total, inStockItems, heldItemsCount } = useMemo(() => {
     return Object.entries(orderItems).reduce(
@@ -1260,45 +1251,8 @@ export const Orders: React.FC = () => {
     );
   };
 
-  const handleToggleHoldInView = (productId: string, action: 'hold' | 'unhold') => {
-    if (!viewingOrder) return;
-
-    const updatedOrder = JSON.parse(JSON.stringify(viewingOrder));
-    let itemToMove: OrderItem | undefined;
-
-    if (action === 'hold') {
-      const itemIndex = updatedOrder.orderItems.findIndex((item: OrderItem) => item.productId === productId);
-      if (itemIndex === -1) return;
-      
-      itemToMove = updatedOrder.orderItems[itemIndex];
-      updatedOrder.orderItems.splice(itemIndex, 1);
-      
-      if (!updatedOrder.backorderedItems) {
-        updatedOrder.backorderedItems = [];
-      }
-      updatedOrder.backorderedItems.push(itemToMove);
-
-    } else { // unhold
-      const product = products.find(p => p.id === productId);
-      if (!product || getEffectiveStock(product) === 0) return;
-
-      const itemIndex = (updatedOrder.backorderedItems || []).findIndex((item: OrderItem) => item.productId === productId);
-      if (itemIndex === -1) return;
-
-      itemToMove = updatedOrder.backorderedItems![itemIndex];
-      updatedOrder.backorderedItems!.splice(itemIndex, 1);
-      updatedOrder.orderItems.push(itemToMove);
-    }
-    
-    const newTotal = updatedOrder.orderItems.reduce((sum: number, item: OrderItem) => {
-        const subtotal = item.price * item.quantity;
-        return sum + subtotal;
-    }, 0);
-    updatedOrder.total = newTotal;
-
-    setViewingOrder(updatedOrder);
-    setOrders(prevOrders => prevOrders.map(o => o.id === updatedOrder.id ? updatedOrder : o));
-  };
+  // 'Hold/Unhold in view' removed: this function previously moved items between orderItems and backorderedItems.
+  // The interactive controls were removed from the UI; backordered state continues to be derived from DB and stock levels.
 
   const handleSaveBalances = () => {
 
@@ -1645,6 +1599,54 @@ export const Orders: React.FC = () => {
     } else {
       // Already delivered: just print, do not touch allocation/stock
       generateAndDownloadBill(viewingOrder.status, customer);
+      setBillLoading(false);
+    }
+  };
+
+  // Download bill directly from order card (does not rely on viewingOrder state)
+  const handleCardDownloadBill = async (order: Order) => {
+    if (billLoading) return;
+    setBillLoading(true);
+    try {
+      let customer = await ensureCustomerById(order.customerId);
+      if (!customer) {
+        customer = {
+          id: order.customerId,
+          name: order.customerName || 'Unknown Customer',
+          email: '', phone: '', location: '', route: 'Unassigned', joinDate: '', totalSpent: 0, outstandingBalance: 0, avatarUrl: ''
+        } as unknown as Customer;
+      }
+
+      // If order not delivered and the user can mark delivered, perform finalize flow
+      if (order.status !== OrderStatus.Delivered && canMarkDelivered) {
+        if (!confirm('This will mark the order as delivered and reduce stock. Continue?')) {
+          setBillLoading(false);
+          return;
+        }
+        const success = await handleConfirmFinalize(order);
+        if (!success) {
+          setBillLoading(false);
+          return;
+        }
+        // Update orders state to mark delivered for immediate UX
+        setOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: OrderStatus.Delivered } : o));
+        await refetchData();
+        // generate using latest order object (status updated)
+        generateAndDownloadBill(OrderStatus.Delivered, customer);
+        setBillLoading(false);
+        return;
+      }
+
+      // Already delivered: just generate and download
+      // Temporarily set viewingOrder so generateAndDownloadBill has the same context (it reads viewingOrder internally)
+      setViewingOrder(order);
+      // small delay to ensure viewingOrder is set (not strictly necessary but keeps behaviour consistent)
+      setTimeout(() => {
+        generateAndDownloadBill(order.status, customer);
+        setBillLoading(false);
+      }, 250);
+    } catch (err) {
+      console.error('Error downloading bill from card:', err);
       setBillLoading(false);
     }
   };
@@ -2088,6 +2090,41 @@ export const Orders: React.FC = () => {
                                 <div className={`text-sm font-bold ${cardStyle.text} drop-shadow-sm`}>
                                   Outstanding: {formatCurrency(outstandingAmount, currency)}
                                 </div>
+
+                                {/* Return Amount and Amount Paid (show on card) */}
+                                {(() => {
+                                  const returnAmt = typeof order.returnAmount === 'number' ? order.returnAmount : 0;
+                                  const chequeAmt = order.chequeBalance == null || isNaN(Number(order.chequeBalance)) ? 0 : Number(order.chequeBalance);
+                                  const creditAmt = order.creditBalance == null || isNaN(Number(order.creditBalance)) ? 0 : Number(order.creditBalance);
+                                  // For pending orders, show paid as 0 per requirement
+                                  const paidFallback = Math.max(0, (order.total || 0) - (chequeAmt + creditAmt + returnAmt));
+                                  const amountPaid = order.status === OrderStatus.Pending
+                                    ? 0
+                                    : ((typeof order.amountPaid === 'number' && order.amountPaid > 0) ? order.amountPaid : paidFallback);
+
+                                  const reconciliationTotal = returnAmt + amountPaid + chequeAmt + creditAmt;
+                                  const diff = Math.round(((order.total || 0) - reconciliationTotal) * 100) / 100;
+
+                                  return (
+                                    <>
+                                      <div className="text-sm text-blue-600 dark:text-blue-400 font-medium">
+                                        Return: {formatCurrency(returnAmt, currency)}
+                                      </div>
+                                      <div className="text-sm text-green-600 dark:text-green-400 font-medium">
+                                        Paid: {formatCurrency(amountPaid, currency)}
+                                      </div>
+                                      {/* Reconciliation hint for Delivered orders */}
+                                      {order.status === OrderStatus.Delivered && (
+                                        <div className="text-xs text-slate-400 mt-1">
+                                          Total = Return + Paid + Cheque + Credit = {formatCurrency(reconciliationTotal, currency)}
+                                          {Math.abs(diff) > 0.005 && (
+                                            <span className="ml-2 text-xs text-red-500">(Diff: {formatCurrency(diff, currency)})</span>
+                                          )}
+                                        </div>
+                                      )}
+                                    </>
+                                  );
+                                })()}
                                 
                                 {/* Items Count */}
                                 <div className="text-xs text-slate-500 dark:text-slate-400">
@@ -2179,28 +2216,36 @@ export const Orders: React.FC = () => {
                                   }
                                   return null;
                                 })()}
-                                <button 
-                                  onClick={() => openViewModal(order)} 
-                                  className="flex-1 px-2 py-2 sm:py-1 text-xs font-medium text-slate-600 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-300 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 rounded transition-colors min-h-[32px] sm:min-h-auto"
-                                >
-                                  View
-                                </button>
-                                {canEdit && (
-                                  <button 
-                                    onClick={() => openEditModal(order)} 
-                                    className="flex-1 px-2 py-2 sm:py-1 text-xs font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/20 dark:hover:bg-blue-900/30 rounded transition-colors min-h-[32px] sm:min-h-auto"
-                                  >
-                                    Edit
-                                  </button>
-                                )}
-                                {canDelete && (
-                                  <button 
-                                    onClick={() => openDeleteModal(order)} 
-                                    className="px-2 py-2 sm:py-1 text-xs font-medium text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/30 rounded transition-colors min-h-[32px] sm:min-h-auto"
-                                  >
-                                    <span className="hidden sm:inline">Delete</span>
-                                    <span className="sm:hidden">Del</span>
-                                  </button>
+                                {/* Action buttons: hide download/view/edit/delete for Delivered orders when user is Driver/Sales/Manager */}
+                                {((order.status === OrderStatus.Delivered) && (currentUser?.role === UserRole.Driver || currentUser?.role === UserRole.Sales || currentUser?.role === UserRole.Manager)) ? (
+                                  // Render nothing (only Location button remains visible above)
+                                  null
+                                ) : (
+                                  <>
+                                    <button 
+                                      onClick={() => openViewModal(order)} 
+                                      className="flex-1 px-2 py-2 sm:py-1 text-xs font-medium text-slate-600 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-300 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 rounded transition-colors min-h-[32px] sm:min-h-auto"
+                                    >
+                                      View
+                                    </button>
+                                    {canEdit && (
+                                      <button 
+                                        onClick={() => openEditModal(order)} 
+                                        className="flex-1 px-2 py-2 sm:py-1 text-xs font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/20 dark:hover:bg-blue-900/30 rounded transition-colors min-h-[32px] sm:min-h-auto"
+                                      >
+                                        Edit
+                                      </button>
+                                    )}
+                                    {canDelete && (
+                                      <button 
+                                        onClick={() => openDeleteModal(order)} 
+                                        className="px-2 py-2 sm:py-1 text-xs font-medium text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/30 rounded transition-colors min-h-[32px] sm:min-h-auto"
+                                      >
+                                        <span className="hidden sm:inline">Delete</span>
+                                        <span className="sm:hidden">Del</span>
+                                      </button>
+                                    )}
+                                  </>
                                 )}
                               </div>
                             </CardContent>
@@ -2408,7 +2453,7 @@ export const Orders: React.FC = () => {
                     <div className="w-8 text-center">Qty</div>
                     <div className="w-8 text-center">Free</div>
                   </div>
-                  <div className="px-2 text-center">Hold</div>
+                  {/* Hold column removed - no interactive hold control */}
                 </div>
               </div>
               <div className="p-1">
@@ -2516,16 +2561,7 @@ export const Orders: React.FC = () => {
                             </div>
                           </div>
                           
-                          <button
-                            onClick={() => toggleHoldItem(product.id)}
-                            className={`px-2 py-1 text-xs font-medium rounded ${
-                              isHeld 
-                                ? 'bg-yellow-400 text-yellow-900' 
-                                : 'bg-blue-500 text-white'
-                            }`}
-                          >
-                            {isHeld ? 'H' : 'Hold'}
-                          </button>
+                          {/* Hold button removed from product row per UX change */}
                         </div>
                       </div>
                     )
@@ -2808,7 +2844,7 @@ export const Orders: React.FC = () => {
                         <th className="py-1 px-2 text-right">Free</th>
                         <th className="py-1 px-2 text-right">Unit Price</th>
                         <th className="py-1 px-2 text-right">Subtotal</th>
-                        <th className="py-1 px-2 text-center">Actions</th>
+                        {/* Actions column removed (Hold/Unhold removed) */}
                       </tr>
                                       </thead>
                                       <tbody className="text-slate-600 dark:text-slate-400 bg-white dark:bg-slate-800 divide-y divide-slate-200 dark:divide-slate-700">
@@ -2831,14 +2867,7 @@ export const Orders: React.FC = () => {
                             <td className="py-1 px-2 text-right font-semibold text-xs text-slate-900 dark:text-white">
                               {formatCurrency(subtotal, currency)}
                             </td>
-                            <td className="py-1 px-2 text-center">
-                              <button 
-                                onClick={() => handleToggleHoldInView(item.productId, 'hold')}
-                                className="px-2 py-0.5 text-xs font-medium rounded transition-colors bg-yellow-400 text-yellow-900 hover:bg-yellow-500 focus:outline-none focus:ring-1 focus:ring-yellow-500"
-                              >
-                                Hold
-                              </button>
-                            </td>
+                            {/* Hold action removed */}
                           </tr>
                         )
                       })}
@@ -2872,16 +2901,7 @@ export const Orders: React.FC = () => {
                                                               </div>
                                                           </td>
                                                           <td className="py-3 px-4 text-right font-semibold text-slate-900 dark:text-white">{item.quantity}</td>
-                                                          <td className="py-3 px-4 text-center">
-                                                              <button
-                                                                  onClick={() => handleToggleHoldInView(item.productId, 'unhold')}
-                                                                  className="px-3 py-1 text-xs font-medium rounded-md transition-colors bg-green-500 text-white hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800 disabled:bg-slate-300 dark:disabled:bg-slate-600 disabled:cursor-not-allowed"
-                                                                  disabled={!product || getEffectiveStock(product) === 0}
-                                                                  title={!product || getEffectiveStock(product) === 0 ? 'Item is out of stock' : 'Move to current order'}
-                                                              >
-                                                                  Unhold
-                                                              </button>
-                                                          </td>
+                              {/* Unhold action removed */}
                                                       </tr>
                                                   )
                                               })}
@@ -2901,7 +2921,7 @@ export const Orders: React.FC = () => {
                                     Save Balances
                                 </button>
                            )}
-                            {canPrintBill && (
+                            {canPrintBill && !(viewingOrder.status === OrderStatus.Delivered && (currentUser?.role === UserRole.Driver || currentUser?.role === UserRole.Sales || currentUser?.role === UserRole.Manager)) && (
                               <button 
                                   onClick={handleDownloadBill} 
                                   type="button" 

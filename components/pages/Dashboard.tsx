@@ -543,65 +543,60 @@ export const Dashboard: React.FC = () => {
     return filtered;
   }, [safeProducts, selectedSupplier, selectedCategory, accessibleSuppliers]);
 
-    const salesDataForChart = useMemo(() => {
-        const monthlyData: { [key: string]: { sales: number; cost: number; orders: any[] } } = {};
-        const monthYearSet = new Set<string>();
+  const salesDataForChart = useMemo(() => {
+    // Group delivered orders by day (YYYY-MM-DD) so the chart shows date-wise data
+    const dailyData: { [key: string]: { sales: number; orders: any[] } } = {};
+    const dateSet = new Set<string>();
 
-        filteredOrders.forEach(order => {
-            if (order.status === OrderStatus.Delivered) {
-                const date = new Date(order.date);
-                const month = date.toLocaleString('en-US', { month: 'short' });
-                const year = date.getFullYear();
-                const key = `${month} ${year}`;
-                
-                monthYearSet.add(key);
-                
-                if (!monthlyData[key]) {
-                    monthlyData[key] = { sales: 0, cost: 0, orders: [] };
-                }
-                
-                monthlyData[key].sales += order.total;
-                monthlyData[key].orders.push(order);
-            }
-        });
-        
-        const sortedMonths = Array.from(monthYearSet).sort((a, b) => {
-             return new Date(a).getTime() - new Date(b).getTime();
-        });
+    filteredOrders.forEach(order => {
+      if (order.status === OrderStatus.Delivered) {
+        const d = new Date(order.date);
+        const key = d.toISOString().split('T')[0]; // YYYY-MM-DD
+        dateSet.add(key);
 
-        return sortedMonths.map(key => {
-            const data = monthlyData[key] || { sales: 0, cost: 0, orders: [] };
-            
-            // Calculate delivery cost for this month
-            const deliveryCost = data.orders.reduce((sum, order) => {
-                if (!order.orderItems) return sum;
-                const orderCost = order.orderItems.reduce((itemSum, item) => {
-                    const product = safeProducts.find(p => p.id === item.productId);
-                    const costPrice = (typeof product?.costPrice === 'number' && product.costPrice > 0) ? product.costPrice : 0;
-                    return itemSum + (costPrice * (item.quantity || 0));
-                }, 0);
-                return sum + orderCost;
-            }, 0);
-            
-            // Calculate gross profit (sales - delivery cost)
-            const grossProfit = data.sales - deliveryCost;
-            
-            // Get monthly expenses (simplified - you may need to fetch actual expenses data)
-            const monthlyExpenses = 0; // You can add expense calculation here if needed
-            
-            // Calculate net profit
-            const netProfit = grossProfit - monthlyExpenses;
+        if (!dailyData[key]) {
+          dailyData[key] = { sales: 0, orders: [] };
+        }
 
-            return {
-                month: key,
-                sales: data.sales,
-                deliveryCost: deliveryCost,
-                grossProfit: grossProfit,
-                netProfit: netProfit
-            };
-        });
+        dailyData[key].sales += order.total || 0;
+        dailyData[key].orders.push(order);
+      }
+    });
 
-    }, [filteredOrders, safeProducts]);
+    const sortedDates = Array.from(dateSet).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+
+    return sortedDates.map(key => {
+      const data = dailyData[key] || { sales: 0, orders: [] };
+
+      const deliveryCost = data.orders.reduce((sum, order) => {
+        if (!order.orderItems) return sum;
+        const orderCost = order.orderItems.reduce((itemSum, item) => {
+          const product = safeProducts.find(p => p.id === item.productId);
+          const costPrice = (typeof product?.costPrice === 'number' && product.costPrice > 0) ? product.costPrice : 0;
+          return itemSum + (costPrice * (item.quantity || 0));
+        }, 0);
+        return sum + orderCost;
+      }, 0);
+
+      const grossProfit = data.sales - deliveryCost;
+      const dailyExpenses = 0; // placeholder for daily expenses
+      const netProfit = grossProfit - dailyExpenses;
+
+      const dateObj = new Date(key);
+      const label = dateObj.toLocaleDateString('en-US', { day: '2-digit', month: 'short' }); // e.g. "08 Nov"
+      const fullLabel = dateObj.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' }); // e.g. "08 Nov 2025"
+
+      return {
+        label,
+        fullLabel,
+        sales: data.sales,
+        deliveryCost,
+        grossProfit,
+        netProfit
+      };
+    });
+
+  }, [filteredOrders, safeProducts]);
 
 
     const handleResetFilters = () => {
@@ -612,11 +607,22 @@ export const Dashboard: React.FC = () => {
     };
 
     // Stats based on filtered data
-    // Calculate total cost for delivered orders in current period
+    // Calculate total delivered sales (only Delivered orders)
     const totalSales = filteredOrders.reduce((sum, order) => order.status === 'Delivered' ? sum + order.total : sum, 0);
     // Sum cost only for delivered orders in the current filtered period
     const totalCost = filteredOrders.reduce((sum, order) => {
       if (order.status !== OrderStatus.Delivered) return sum;
+      if (!order.orderItems) return sum;
+      const orderCost = order.orderItems.reduce((itemSum, item) => {
+        const product = safeProducts.find(p => p.id === item.productId);
+        const costPrice = (typeof product?.costPrice === 'number' && product.costPrice > 0) ? product.costPrice : 0;
+        return itemSum + (costPrice * (item.quantity || 0));
+      }, 0);
+      return sum + orderCost;
+    }, 0);
+
+    // Calculate total order cost for ALL filtered orders (regardless of status)
+    const totalOrderCost = filteredOrders.reduce((sum, order) => {
       if (!order.orderItems) return sum;
       const orderCost = order.orderItems.reduce((itemSum, item) => {
         const product = safeProducts.find(p => p.id === item.productId);
@@ -669,6 +675,10 @@ export const Dashboard: React.FC = () => {
   const creditChange = calculateChange(currentCreditBalance, prevCreditBalance);
   const paidChange = calculateChange(currentPaid, prevPaid);
   const returnChange = calculateChange(currentReturnAmount, prevReturnAmount);
+  // Outstanding (cheque + credit) change for filtered period
+  const currentOutstanding = currentChequeBalance + currentCreditBalance;
+  const prevOutstanding = prevChequeBalance + prevCreditBalance;
+  const outstandingChange = calculateChange(currentOutstanding, prevOutstanding);
     // Financial stats calculations (overall totals)
   const totalChequeBalance = orders.reduce((sum, order) => sum + (order.chequeBalance || 0), 0);
   const totalCreditBalance = orders.reduce((sum, order) => sum + (order.creditBalance || 0), 0);
@@ -964,6 +974,25 @@ export const Dashboard: React.FC = () => {
             </div>
           </CardContent>
         </Card>
+        {/* Order Cost (all orders in filtered period) */}
+        <Card className="bg-gradient-to-br from-indigo-50 to-indigo-100 dark:from-indigo-950 dark:to-indigo-900 border-indigo-200 dark:border-indigo-800 min-h-[180px] flex flex-col">
+          <CardHeader className="flex-shrink-0">
+            <CardTitle className="text-indigo-700 dark:text-indigo-300">Order Cost</CardTitle>
+          </CardHeader>
+          <CardContent className="flex-1 flex flex-col justify-between">
+            <div className="flex justify-between items-start">
+              <div>
+                <p className={`${getFontSizeClass(formatCurrency(totalOrderCost, currency))} font-bold text-indigo-600 dark:text-indigo-400`}>{formatCurrency(totalOrderCost, currency)}</p>
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Order Cost = sum(item.costPrice * item.quantity) for ALL orders in the selected period (all statuses)</p>
+              </div>
+            </div>
+            <div className="flex justify-end mt-4">
+              <ChangeIndicator change={calculateChange(totalOrderCost, 0)} />
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Delivered Cost (only delivered orders) */}
         <Card className="bg-gradient-to-br from-indigo-50 to-indigo-100 dark:from-indigo-950 dark:to-indigo-900 border-indigo-200 dark:border-indigo-800 min-h-[180px] flex flex-col">
           <CardHeader className="flex-shrink-0">
             <CardTitle className="text-indigo-700 dark:text-indigo-300">Delivered Cost</CardTitle>
@@ -1003,12 +1032,12 @@ export const Dashboard: React.FC = () => {
           <CardContent className="flex-1 flex flex-col justify-between">
             <div className="flex justify-between items-start">
               <div>
-                <p className={`${getFontSizeClass(formatCurrency(totalChequeBalance, currency))} font-bold text-orange-600 dark:text-orange-400`}>{formatCurrency(totalChequeBalance, currency)}</p>
+                <p className={`${getFontSizeClass(formatCurrency(currentChequeBalance, currency))} font-bold text-orange-600 dark:text-orange-400`}>{formatCurrency(currentChequeBalance, currency)}</p>
                 <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Cheque = sum(order.chequeBalance) across orders</p>
               </div>
             </div>
-            <div className="flex justify-end mt-4">
-              <ChangeIndicator change={totalChequeBalance > 0 ? 0 : 0} />
+              <div className="flex justify-end mt-4">
+              <ChangeIndicator change={chequeChange} />
             </div>
           </CardContent>
         </Card>
@@ -1022,7 +1051,7 @@ export const Dashboard: React.FC = () => {
             <CardContent className="flex-1 flex flex-col justify-between">
               <div className="flex justify-between items-start">
                 <div>
-                  <p className={`${getFontSizeClass(formatCurrency(totalReturnAmount, currency))} font-bold text-sky-600 dark:text-sky-400`}>{formatCurrency(totalReturnAmount, currency)}</p>
+                  <p className={`${getFontSizeClass(formatCurrency(currentReturnAmount, currency))} font-bold text-sky-600 dark:text-sky-400`}>{formatCurrency(currentReturnAmount, currency)}</p>
                   <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Returns = sum(order.returnAmount)</p>
                 </div>
               </div>
@@ -1039,12 +1068,12 @@ export const Dashboard: React.FC = () => {
           <CardContent className="flex-1 flex flex-col justify-between">
             <div className="flex justify-between items-start">
               <div>
-                <p className={`${getFontSizeClass(formatCurrency(totalCreditBalance, currency))} font-bold text-red-600 dark:text-red-400`}>{formatCurrency(totalCreditBalance, currency)}</p>
+                <p className={`${getFontSizeClass(formatCurrency(currentCreditBalance, currency))} font-bold text-red-600 dark:text-red-400`}>{formatCurrency(currentCreditBalance, currency)}</p>
                 <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Credit = sum(order.creditBalance)</p>
               </div>
             </div>
             <div className="flex justify-end mt-4">
-              <ChangeIndicator change={totalCreditBalance > 0 ? 0 : 0} />
+              <ChangeIndicator change={creditChange} />
             </div>
           </CardContent>
         </Card>
@@ -1055,26 +1084,27 @@ export const Dashboard: React.FC = () => {
           <CardContent className="flex-1 flex flex-col justify-between">
             <div className="flex justify-between items-start">
               <div>
-                <p className={`${getFontSizeClass(formatCurrency(totalChequeBalance + totalCreditBalance, currency))} font-bold text-amber-600 dark:text-amber-400`}>{formatCurrency(totalChequeBalance + totalCreditBalance, currency)}</p>
+                <p className={`${getFontSizeClass(formatCurrency(currentChequeBalance + currentCreditBalance, currency))} font-bold text-amber-600 dark:text-amber-400`}>{formatCurrency(currentChequeBalance + currentCreditBalance, currency)}</p>
                 <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Outstanding = Total Cheque + Total Credit</p>
               </div>
             </div>
             <div className="flex justify-end mt-4">
-              <ChangeIndicator change={(totalChequeBalance + totalCreditBalance) > 0 ? 0 : 0} />
+              <ChangeIndicator change={outstandingChange} />
             </div>
           </CardContent>
         </Card>
         {/* Low Stock card removed per request. Low stock alerting logic remains in settings/email service unless you want it removed too. */}
-        {/* Total Profit Card - Admin Only */}
-        {isAdmin && (
+        {/* Total Profit Card - Admin and Manager */}
+        {(isAdmin || isManager) && (
           <Card className="bg-gradient-to-br from-teal-50 to-teal-100 dark:from-teal-950 dark:to-teal-900 border-teal-200 dark:border-teal-800 min-h-[180px] flex flex-col">
             <CardHeader>
-              <CardTitle className="text-teal-700 dark:text-teal-300">�Total Profit (Admin)</CardTitle>
+              <CardTitle className="text-teal-700 dark:text-teal-300">Total Profit</CardTitle>
             </CardHeader>
             <CardContent className="flex-1 flex flex-col justify-between">
               <div className="flex justify-between items-start">
                 <div>
                   <p className={`${getFontSizeClass(formatCurrency(totalSales - totalCost, currency))} font-bold text-teal-600 dark:text-teal-400`}>{formatCurrency(totalSales - totalCost, currency)}</p>
+                  <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Profit = Total Delivered Sales - Delivered Cost (respecting current filters)</p>
                 </div>
               </div>
               <div className="flex justify-end mt-4">
@@ -1095,9 +1125,9 @@ export const Dashboard: React.FC = () => {
         <Card>
           <CardHeader>
             <CardTitle>Financial Overview</CardTitle>
-            <CardDescription>Monthly performance of sales, costs, and profits</CardDescription>
+            <CardDescription>Daily performance of sales, costs, and profits</CardDescription>
           </CardHeader>
-          <CardContent className="h-[520px]">
+          <CardContent className="h-[360px] sm:h-[420px] md:h-[520px]">
             {salesDataForChart.length > 0 ? (
                 <div className="h-full">
                   <SalesChart data={salesDataForChart} />
