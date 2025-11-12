@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom';
 import { NAV_ITEMS } from '../../constants';
 import { useAuth } from '../../contexts/AuthContext';
 import { UserRole } from '../../types';
+import { useData } from '../../contexts/DataContext';
 
 interface SidebarProps {
   isSidebarOpen: boolean;
@@ -19,10 +20,16 @@ const Logo = () => (
 
 export const Sidebar: React.FC<SidebarProps> = ({ isSidebarOpen, closeSidebar }) => {
   const { currentUser } = useAuth();
+  const { upcomingChequesCount = 0 } = useData();
 
   const accessibleNavItems = NAV_ITEMS.filter(item => {
+    // Hide cheques from drivers specifically (drivers should not access cheque management)
+    if (item.path === '/cheques') {
+      return currentUser?.role !== UserRole.Driver;
+    }
     if (item.path === '/users') {
-      return currentUser?.role === UserRole.Admin;
+      // Allow Admins and Managers to see User Management
+      return currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Manager;
     }
     // Limit deliveries, expenses, and live tracking to Admin and Manager
     if (item.path === '/deliveries' || item.path === '/expenses' || item.path === '/live-tracking') {
@@ -32,15 +39,21 @@ export const Sidebar: React.FC<SidebarProps> = ({ isSidebarOpen, closeSidebar })
     if (item.path === '/my-location') {
       return currentUser?.role === UserRole.Sales || currentUser?.role === UserRole.Driver;
     }
+    // Make Settings visible to Admins and Managers
+    if (item.path === '/settings') {
+      return currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Manager;
+    }
     if (item.path === '/drivers' || item.path === '/suppliers' || item.path === '/collections') {
       return currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Manager;
     }
+    // Cheque alerts settings only for Admin
+    
     return true;
   });
 
 
   return (
-    <aside className={`fixed inset-y-0 left-0 z-30 w-64 sm:w-72 lg:w-64 bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 transform transition-transform duration-300 ease-in-out ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 lg:fixed lg:inset-y-0 lg:left-0`}>
+  <aside className={`fixed inset-y-0 left-0 z-30 w-64 sm:w-72 lg:w-64 bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 transform transition-transform duration-300 ease-in-out ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 lg:fixed lg:inset-y-0 lg:left-0`}> 
       <div className="flex items-center justify-center h-16 sm:h-20 border-b border-slate-200 dark:border-slate-700 px-3 sm:px-4">
         <div className="relative w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-blue-500 to-blue-700 dark:from-blue-400 dark:to-blue-600 rounded-xl shadow-lg flex items-center justify-center">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-6 w-6 sm:h-7 sm:w-7 text-white">
@@ -56,15 +69,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ isSidebarOpen, closeSidebar })
           <p className="text-xs font-medium text-blue-600 dark:text-blue-400 tracking-wider truncate">DISTRIBUTORS (PVT) LTD</p>
         </div>
       </div>
-      <nav className="p-3 sm:p-4 flex-1 overflow-y-auto">
-        <ul className="space-y-1">
+      <nav className="p-2 sm:p-2 flex-1">
+        <ul className="space-y-0 pr-1">
           {accessibleNavItems.map((item) => (
             <li key={item.path}>
               <NavLink
                 to={item.path}
                 onClick={closeSidebar}
                 className={({ isActive }) =>
-                  `flex items-center px-3 py-2.5 sm:p-3 my-0.5 sm:my-1 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors duration-200 text-sm sm:text-base ${
+                  `flex items-center px-2 py-2 sm:p-2 my-0.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors duration-200 text-xs sm:text-sm ${
                     isActive ? 'bg-blue-50 text-blue-600 dark:bg-slate-700 dark:text-blue-400' : ''
                   }`
                 }
@@ -73,6 +86,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ isSidebarOpen, closeSidebar })
                   {item.icon}
                 </div>
                 <span className="ml-3 sm:ml-4 font-medium truncate">{item.label}</span>
+                {item.path === '/cheques' && upcomingChequesCount > 0 && (
+                  <span className="ml-2 inline-flex items-center justify-center px-2 py-0.5 text-xs font-medium leading-none text-red-700 bg-red-100 rounded-full">{upcomingChequesCount}</span>
+                )}
               </NavLink>
             </li>
           ))}

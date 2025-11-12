@@ -288,7 +288,7 @@ export const Orders: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<OrderStatus | 'all'>('all');
   const [productSearchTerm, setProductSearchTerm] = useState('');
   const [deliveryDateFilter, setDeliveryDateFilter] = useState('');
-  const [dateRangeFilter, setDateRangeFilter] = useState<'today' | 'this_week' | 'this_month' | 'all'>('all');
+  const [dateRangeFilter, setDateRangeFilter] = useState<'today' | 'this_week' | 'this_month' | 'all'>(currentUser?.role === UserRole.Driver ? 'today' : 'all');
   
   const [modalState, setModalState] = useState<'closed' | 'create' | 'edit'>('closed');
   const [currentOrder, setCurrentOrder] = useState<Order | null>(null);
@@ -538,46 +538,44 @@ export const Orders: React.FC = () => {
         );
     }
 
-  // Delivery date filters - disabled for Driver role
-  if (currentUser?.role !== UserRole.Driver) {
-    // Specific date filter
-    if (deliveryDateFilter) {
-      displayOrders = displayOrders.filter(order => {
-        const deliveryDate = order.expectedDeliveryDate || order.date;
-        if (!deliveryDate) return false;
-        const orderDateStr = typeof deliveryDate === 'string' ? deliveryDate.slice(0, 10) : deliveryDate;
-        return orderDateStr === deliveryDateFilter;
-      });
-    }
-    // Date range filter
-    if (dateRangeFilter !== 'all') {
-      const today = new Date();
-      const todayStr = today.toISOString().slice(0, 10); // YYYY-MM-DD format
-      displayOrders = displayOrders.filter(order => {
-        const deliveryDate = order.expectedDeliveryDate || order.date;
-        if (!deliveryDate) return false;
-        const orderDateStr = typeof deliveryDate === 'string' ? deliveryDate.slice(0, 10) : deliveryDate;
-        const orderDate = new Date(orderDateStr);
-        switch (dateRangeFilter) {
-          case 'today':
-            return orderDateStr === todayStr;
-          case 'this_week':
-            const startOfWeek = new Date(today);
-            startOfWeek.setDate(today.getDate() - today.getDay()); // Sunday
-            startOfWeek.setHours(0, 0, 0, 0);
-            const endOfWeek = new Date(startOfWeek);
-            endOfWeek.setDate(startOfWeek.getDate() + 6); // Saturday
-            endOfWeek.setHours(23, 59, 59, 999);
-            return orderDate >= startOfWeek && orderDate <= endOfWeek;
-          case 'this_month':
-            const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-            const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-            return orderDate >= startOfMonth && orderDate <= endOfMonth;
-          default:
-            return true;
-        }
-      });
-    }
+  // Delivery date filters (available to all roles including Drivers)
+  // Specific date filter
+  if (deliveryDateFilter) {
+    displayOrders = displayOrders.filter(order => {
+      const deliveryDate = order.expectedDeliveryDate || order.date;
+      if (!deliveryDate) return false;
+      const orderDateStr = typeof deliveryDate === 'string' ? deliveryDate.slice(0, 10) : deliveryDate;
+      return orderDateStr === deliveryDateFilter;
+    });
+  }
+  // Date range filter
+  if (dateRangeFilter !== 'all') {
+    const today = new Date();
+    const todayStr = today.toISOString().slice(0, 10); // YYYY-MM-DD format
+    displayOrders = displayOrders.filter(order => {
+      const deliveryDate = order.expectedDeliveryDate || order.date;
+      if (!deliveryDate) return false;
+      const orderDateStr = typeof deliveryDate === 'string' ? deliveryDate.slice(0, 10) : deliveryDate;
+      const orderDate = new Date(orderDateStr);
+      switch (dateRangeFilter) {
+        case 'today':
+          return orderDateStr === todayStr;
+        case 'this_week':
+          const startOfWeek = new Date(today);
+          startOfWeek.setDate(today.getDate() - today.getDay()); // Sunday
+          startOfWeek.setHours(0, 0, 0, 0);
+          const endOfWeek = new Date(startOfWeek);
+          endOfWeek.setDate(startOfWeek.getDate() + 6); // Saturday
+          endOfWeek.setHours(23, 59, 59, 999);
+          return orderDate >= startOfWeek && orderDate <= endOfWeek;
+        case 'this_month':
+          const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+          const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+          return orderDate >= startOfMonth && orderDate <= endOfMonth;
+        default:
+          return true;
+      }
+    });
   }
 
     // Sort orders with custom priority:
@@ -632,6 +630,23 @@ export const Orders: React.FC = () => {
       return acc;
     }, {} as Record<string, Order[]>);
   }, [filteredOrders, products]);
+
+  // Total Paid across currently displayed (filtered) orders
+  const totalPaidAcrossDisplayedOrders = useMemo(() => {
+    return filteredOrders.reduce((sum, order) => {
+      try {
+        const returnAmt = typeof order.returnAmount === 'number' ? order.returnAmount : 0;
+        const chequeAmt = order.chequeBalance == null || isNaN(Number(order.chequeBalance)) ? 0 : Number(order.chequeBalance);
+        const creditAmt = order.creditBalance == null || isNaN(Number(order.creditBalance)) ? 0 : Number(order.creditBalance);
+        // fallback paid when amountPaid not stored
+        const paidFallback = Math.max(0, (order.total || 0) - (chequeAmt + creditAmt + returnAmt));
+        const amountPaid = order.status === OrderStatus.Pending ? 0 : ((typeof order.amountPaid === 'number' && order.amountPaid > 0) ? order.amountPaid : paidFallback);
+        return sum + (Number(amountPaid) || 0);
+      } catch (e) {
+        return sum;
+      }
+    }, 0);
+  }, [filteredOrders]);
 
   const openCreateModal = () => {
     setCurrentOrder(null);
@@ -1888,6 +1903,13 @@ export const Orders: React.FC = () => {
                 <span className="sm:hidden">+ Order</span>
               </button>
             )}
+            {/* Driver-only: show Total Paid across displayed orders */}
+            {currentUser?.role === UserRole.Driver && (
+              <div className="flex items-center px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm font-semibold text-slate-700 dark:text-slate-200">
+                <span className="mr-2 text-xs text-slate-500">Total Paid</span>
+                <span>{formatCurrency(totalPaidAcrossDisplayedOrders, currency)}</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1923,7 +1945,6 @@ export const Orders: React.FC = () => {
                       <option value={OrderStatus.Delivered}>Delivered</option>
                   </select>
                 </div>
-                {currentUser?.role !== UserRole.Driver && (
                 <div>
                   <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">Time Range</label>
                   <select
@@ -1940,11 +1961,10 @@ export const Orders: React.FC = () => {
                       <option value="this_month">This Month</option>
                   </select>
                 </div>
-                )}
+                
               </div>
             </div>
             
-            {currentUser?.role !== UserRole.Driver && (
               <div className="pt-3 flex flex-col sm:flex-row gap-3 sm:gap-4 sm:items-end">
                 <div className="flex-1 max-w-xs">
                   <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">Specific Date</label>
@@ -1976,7 +1996,6 @@ export const Orders: React.FC = () => {
                   )}
                 </div>
               </div>
-            )}
           </CardHeader>
           <CardContent>
             <div className="space-y-8">

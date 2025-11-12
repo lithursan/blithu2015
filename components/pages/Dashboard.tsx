@@ -992,6 +992,25 @@ export const Dashboard: React.FC = () => {
           </CardContent>
         </Card>
 
+        {/* Difference Card: Order Cost - Total Orders Amount (Admin/Manager view) */}
+        <Card className="bg-gradient-to-br from-stone-50 to-stone-100 dark:from-stone-950 dark:to-stone-900 border-stone-200 dark:border-stone-800 min-h-[180px] flex flex-col">
+          <CardHeader className="flex-shrink-0">
+            <CardTitle className="text-stone-700 dark:text-stone-300">Difference</CardTitle>
+            <CardDescription>Order Cost - Total Orders Amount</CardDescription>
+          </CardHeader>
+          <CardContent className="flex-1 flex flex-col justify-between">
+            <div className="flex justify-between items-start">
+              <div>
+                <p className={`${getFontSizeClass(formatCurrency(totalOrderCost - totalOrdersAmount, currency))} font-bold text-stone-600 dark:text-stone-400`}>{formatCurrency(totalOrderCost - totalOrdersAmount, currency)}</p>
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Difference between calculated order cost and total order values (filtered period)</p>
+              </div>
+            </div>
+            <div className="flex justify-end mt-4">
+              <ChangeIndicator change={calculateChange(totalOrderCost, totalOrdersAmount)} />
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Delivered Cost (only delivered orders) */}
         <Card className="bg-gradient-to-br from-indigo-50 to-indigo-100 dark:from-indigo-950 dark:to-indigo-900 border-indigo-200 dark:border-indigo-800 min-h-[180px] flex flex-col">
           <CardHeader className="flex-shrink-0">

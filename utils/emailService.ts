@@ -131,6 +131,94 @@ export class EmailService {
     }
   }
 
+  // Send cheque deposit reminder (e.g., 3 days before deposit date)
+  async sendChequeDepositAlert(user: User, cheque: any): Promise<boolean> {
+    try {
+      const emailData = {
+        to: user.email,
+        subject: `Cheque Deposit Reminder - ${cheque.cheque_number || cheque.id}`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #2563eb;">Upcoming Cheque Deposit</h2>
+            <p>Hello ${user.name},</p>
+            <p>This is a reminder that a cheque is scheduled for deposit soon:</p>
+            <div style="background-color: #f8fafc; padding: 20px; border-radius: 8px; margin: 20px 0;">
+              <p><strong>Payer:</strong> ${cheque.payer_name || '-'} </p>
+              <p><strong>Amount:</strong> LKR ${cheque.amount?.toLocaleString?.() ?? cheque.amount}</p>
+              <p><strong>Bank:</strong> ${cheque.bank || '-'}</p>
+              <p><strong>Cheque #:</strong> ${cheque.cheque_number || '-'}</p>
+              <p><strong>Deposit Date:</strong> ${cheque.deposit_date ? new Date(cheque.deposit_date).toLocaleDateString() : '-'}</p>
+            </div>
+            <p>Please ensure funds are available and proceed with the deposit.</p>
+          </div>
+        `
+      };
+
+      console.log('📧 CHEQUE DEPOSIT REMINDER EMAIL:', emailData);
+
+      if (typeof window !== 'undefined' && 'Notification' in window) {
+        if (Notification.permission === 'granted') {
+          new Notification(`Cheque deposit due: LKR ${cheque.amount}`, {
+            body: `${cheque.payer_name || '-'} — Deposit on ${cheque.deposit_date ? new Date(cheque.deposit_date).toLocaleDateString() : 'N/A'}`,
+            icon: '/favicon.ico'
+          });
+        }
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Failed to send cheque deposit reminder:', error);
+      return false;
+    }
+  }
+
+  // Send cheque deposit reminder to an explicit email address (used for automated alerts)
+  async sendChequeDepositToAddress(recipientEmail: string, cheque: any, stageLabel?: string, options?: { from?: string; message?: string }): Promise<boolean> {
+    try {
+      const subject = `Cheque Deposit Reminder - ${cheque.cheque_number || cheque.id} ${stageLabel ? `(${stageLabel})` : ''}`;
+      const fromAddr = options?.from || 'Shivam2025@gmail.com';
+      const customMessage = options?.message;
+      const html = `
+        <div style="font-family: Arial, sans-serif; max-width: 700px; margin: 0 auto;">
+          <h2 style="color:#2563eb;">Upcoming Cheque Deposit</h2>
+          <p>This is an automated reminder for an incoming cheque scheduled for deposit.</p>
+          ${customMessage ? `<p><em>${customMessage}</em></p>` : ''}
+          <div style="background:#f8fafc;padding:16px;border-radius:8px;margin:12px 0;">
+            <p><strong>Payer:</strong> ${cheque.payer_name || '-'}</p>
+            <p><strong>Amount:</strong> LKR ${cheque.amount?.toLocaleString?.() ?? cheque.amount}</p>
+            <p><strong>Bank:</strong> ${cheque.bank || '-'}</p>
+            <p><strong>Cheque #:</strong> ${cheque.cheque_number || '-'}</p>
+            <p><strong>Cheque Date:</strong> ${cheque.cheque_date ? new Date(cheque.cheque_date).toLocaleDateString() : '-'}</p>
+            <p><strong>Deposit Date:</strong> ${cheque.deposit_date ? new Date(cheque.deposit_date).toLocaleDateString() : '-'}</p>
+            <p><strong>Notes:</strong> ${cheque.notes || '-'}</p>
+            <p><strong>Linked Order ID:</strong> ${cheque.order_id || '-'}</p>
+            <p><strong>Linked Collection ID:</strong> ${cheque.collection_id || '-'}</p>
+          </div>
+          <p>Please make sure funds are available and proceed with the deposit on the scheduled day.</p>
+          <div style="margin-top:18px;color:#64748b;font-size:12px;">Automated notification from SHIVAM DISTRIBUTORS (PVT) LTD.</div>
+        </div>
+      `;
+
+      const emailData = { from: fromAddr, to: recipientEmail, subject, html };
+      console.log('📧 CHEQUE DEPOSIT EMAIL (auto):', emailData);
+
+      // Show a browser notification in development when possible
+      if (typeof window !== 'undefined' && 'Notification' in window) {
+        if (Notification.permission === 'granted') {
+          new Notification(`Cheque deposit due: LKR ${cheque.amount}`, {
+            body: `${cheque.payer_name || '-'} — Deposit on ${cheque.deposit_date ? new Date(cheque.deposit_date).toLocaleDateString() : 'N/A'}`,
+            icon: '/favicon.ico'
+          });
+        }
+      }
+
+      return true;
+    } catch (err) {
+      console.error('Failed to send cheque deposit to address:', err);
+      return false;
+    }
+  }
+
   // Request notification permission
   async requestNotificationPermission(): Promise<boolean> {
     if (typeof window === 'undefined' || !('Notification' in window)) {

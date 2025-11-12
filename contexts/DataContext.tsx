@@ -11,7 +11,7 @@ import {
     DatabaseDriverAllocation, 
     safeJsonParse 
 } from '../database-types';
-import { emailService } from '../utils/emailService';
+ 
 
 interface DataContextType {
   users: User[];
@@ -29,6 +29,9 @@ interface DataContextType {
   suppliers: Supplier[];
   setSuppliers: Dispatch<SetStateAction<Supplier[]>>;
   refetchData: () => Promise<void>;
+    // Cheque alert hooks
+    upcomingCheques?: any[];
+    upcomingChequesCount?: number;
   calculateCustomerOutstanding?: (customerId: string) => number;
     // Aggregated delivery products keyed by date (YYYY-MM-DD) produced by the Deliveries page
     deliveryAggregatedProducts?: Record<string, { productId: string; qty: number }[]>;
@@ -54,6 +57,26 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const [driverSales, setDriverSales] = useState<DriverSale[]>([]);
     const [suppliers, setSuppliers] = useState<Supplier[]>([]);
     const [deliveryAggregatedProducts, setDeliveryAggregatedProducts] = useState<Record<string, { productId: string; qty: number }[]>>({});
+    const [alertedChequeIds, setAlertedChequeIds] = useState<Set<string>>(new Set());
+    const [upcomingCheques, setUpcomingCheques] = useState<any[]>([]);
+
+    // Helper to populate upcoming cheques used for UI badges
+    const fetchUpcomingCheques = React.useCallback(async () => {
+        try {
+            const today = new Date();
+            const end = new Date();
+            end.setDate(end.getDate() + 3);
+            const fromStr = today.toISOString().slice(0,10);
+            const toStr = end.toISOString().slice(0,10);
+            const { data: upData, error: upError } = await supabase.from('cheques').select('*').gte('deposit_date', fromStr).lte('deposit_date', toStr).order('deposit_date', { ascending: true });
+            if (!upError && upData) {
+                const filtered = (upData || []).filter((c: any) => { const st = (c.status||'').toLowerCase(); return st !== 'cleared' && st !== 'bounced' && st !== 'cancelled'; });
+                setUpcomingCheques(filtered);
+            }
+        } catch (e) {
+            console.error('Failed to fetch upcoming cheques for UI badge', e);
+        }
+    }, []);
 
     React.useEffect(() => {
         // Fetch all data from Supabase tables
@@ -89,6 +112,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             if (ordersError) {
                 console.error('Supabase orders fetch error:', ordersError);
             }
+            // populate upcoming cheques for UI badges
+            await fetchUpcomingCheques();
             if (!ordersError && ordersData) {
                 const mappedOrders = ordersData.map((row: DatabaseOrder & { returnamount?: number }) => {
                     const orderItemsResult = safeJsonParse(row.orderitems, [], 'orderitems', row.id);
@@ -155,18 +180,15 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             for (const { name, setter } of tables) {
                 console.log(`Fetching ${name} table...`);
                 let { data, error } = await supabase.from(name).select('*');
-                
-                // If 409 error, try alternative approaches
-                if (error?.code === '409' || error?.message?.includes('409')) {
+                if (error) {
                     console.warn(`409 error for ${name}, trying fallback approaches...`);
-                    
                     // Try with explicit column list for customers
                     if (name === 'customers') {
                         const customerColumns = 'id,name,email,phone,location,joindate,totalspent,outstandingbalance,avatarurl,discounts,route';
                         const { data: retryData, error: retryError } = await supabase
                             .from('customers')
                             .select(customerColumns);
-                        
+
                         if (!retryError) {
                             data = retryData;
                             error = null;
@@ -359,21 +381,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                             notes: row.notes,
                         }));
                         setter(mappedSales);
-                    } else if (name === 'users') {
-                        const mappedUsers = data.map((row: any) => ({
-                            id: row.id,
-                            name: row.name,
-                            email: row.email,
-                            phone: row.phone,
-                            role: row.role,
-                            status: row.status,
-                            avatarUrl: row.avatarurl ?? '',
-                            lastLogin: row.lastlogin,
-                            password: row.password,
-                            assignedSupplierNames: row.assignedsuppliernames ?? [],
-                            settings: row.settings ?? {},
-                        }));
-                        setter(mappedUsers);
                     } else {
                         setter(data);
                     }
@@ -385,6 +392,17 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             console.error('Overall fetchData error:', error);
         });
     }, []);
+
+    // Function to check for cheques with deposit date equal to specific offsets (3 days and 2 days)
+    // and send email alerts to a fixed address. This persists the alert stage in the DB
+    // to avoid duplicate emails across sessions.
+    // NOTE: Cheque alert runner removed — UI badge still populated via fetchUpcomingCheques.
+
+    // Update UI list of upcoming cheques after alerts run or refetch
+    React.useEffect(() => {
+        // populate upcoming cheques on mount
+        fetchUpcomingCheques().catch(err => console.error('Failed to fetch upcoming cheques on mount', err));
+    }, [fetchUpcomingCheques]);
 
     // Function to calculate real-time customer outstanding balance
     const calculateCustomerOutstanding = React.useCallback((customerId: string) => {
@@ -582,6 +600,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         } catch (error) {
             console.error('Refetch data error:', error);
         }
+            // Refresh upcoming cheques after refetch so UI badge remains current
+            try {
+                await fetchUpcomingCheques();
+            } catch (err) {
+                console.error('Error fetching upcoming cheques after refetch:', err);
+            }
     }, []);
 
     const value = {
@@ -592,6 +616,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         driverAllocations, setDriverAllocations,
         driverSales, setDriverSales,
         suppliers, setSuppliers,
+        upcomingCheques, upcomingChequesCount: upcomingCheques.length,
         deliveryAggregatedProducts,
         setDeliveryAggregatedProducts,
         refetchData,

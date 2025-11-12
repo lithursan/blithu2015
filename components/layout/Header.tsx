@@ -1,6 +1,7 @@
 import React, { useContext, useState } from 'react';
 import { ThemeContext } from '../../contexts/ThemeContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { useData } from '../../contexts/DataContext';
 import { Switch } from '../ui/Switch';
 
 interface HeaderProps {
@@ -16,6 +17,7 @@ export const Header: React.FC<HeaderProps> = ({ toggleSidebar }) => {
     
     const { currentUser, logout } = useAuth();
     const [isDropdownOpen, setDropdownOpen] = useState(false);
+  const { upcomingChequesCount = 0 } = useData();
 
   return (
     <header className="sticky top-0 z-20 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border-b border-slate-200 dark:border-slate-700">
@@ -80,16 +82,26 @@ export const Header: React.FC<HeaderProps> = ({ toggleSidebar }) => {
               aria-label="User menu"
             >
               {currentUser?.avatarUrl && currentUser.avatarUrl.startsWith('data:image') ? (
-                <img
-                  src={currentUser.avatarUrl}
-                  alt={currentUser?.name}
-                  className="w-8 h-8 sm:w-10 sm:h-10 rounded-full border-2 border-blue-500"
-                />
+                <div className="relative">
+                  <img
+                    src={currentUser.avatarUrl}
+                    alt={currentUser?.name}
+                    className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full border-2 ${currentUser?.role === 'Admin' && upcomingChequesCount > 0 ? 'border-red-500' : 'border-blue-500'}`}
+                  />
+                  {currentUser?.role === 'Admin' && upcomingChequesCount > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 w-3 h-3 bg-red-600 rounded-full border-2 border-white" />
+                  )}
+                </div>
               ) : (
-                <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-blue-500 flex items-center justify-center">
+                <div className="relative">
+                  <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-blue-500 flex items-center justify-center">
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 sm:h-6 sm:w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                   </svg>
+                  </div>
+                  {currentUser?.role === 'Admin' && upcomingChequesCount > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 w-3 h-3 bg-red-600 rounded-full border-2 border-white" />
+                  )}
                 </div>
               )}
               <div className="hidden sm:block text-left min-w-0">

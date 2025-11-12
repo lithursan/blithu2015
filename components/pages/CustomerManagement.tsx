@@ -102,6 +102,9 @@ const RouteCustomerList: React.FC<RouteCustomerListProps> = ({ selectedRoute, on
   const [modalMode, setModalMode] = useState<'add' | 'edit'>('add');
   const [currentCustomer, setCurrentCustomer] = useState<Partial<Customer>>({});
   const [customerToDelete, setCustomerToDelete] = useState<Customer | null>(null);
+  const [customerToTransfer, setCustomerToTransfer] = useState<Customer | null>(null);
+  const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
+  const [transferRouteValue, setTransferRouteValue] = useState<string>('');
   const [phoneValidation, setPhoneValidation] = useState<{
     isValid: boolean;
     message: string;
@@ -119,6 +122,7 @@ const RouteCustomerList: React.FC<RouteCustomerListProps> = ({ selectedRoute, on
                    currentUser?.role === UserRole.Sales;
 
   const canDelete = currentUser?.role === UserRole.Admin;
+  const canTransfer = currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Manager;
 
   // Calculate metrics for each customer from orders table
   const customerOutstandingMap: Record<string, number> = {};
@@ -861,6 +865,18 @@ const RouteCustomerList: React.FC<RouteCustomerListProps> = ({ selectedRoute, on
                               Edit
                             </button>
                           )}
+                            {canTransfer && (
+                              <button
+                                onClick={() => {
+                                  setCustomerToTransfer(customer);
+                                  setTransferRouteValue(customer.route || 'Unassigned');
+                                  setIsTransferModalOpen(true);
+                                }}
+                                className="text-amber-700 hover:text-amber-900 dark:text-amber-300 dark:hover:text-amber-200 font-medium text-xs bg-amber-50 dark:bg-amber-900/20 px-3 py-2 rounded min-h-[32px] transition-colors"
+                              >
+                                Transfer
+                              </button>
+                            )}
                           {canDelete && (
                             <button 
                               onClick={() => setCustomerToDelete(customer)} 
@@ -1059,6 +1075,57 @@ const RouteCustomerList: React.FC<RouteCustomerListProps> = ({ selectedRoute, on
           >
             {phoneValidation.isChecking ? 'Validating...' : 'Save Customer'}
           </button>
+        </div>
+      </Modal>
+
+      {/* Transfer Route Modal (Admin/Manager only) */}
+      <Modal isOpen={isTransferModalOpen} onClose={() => { setIsTransferModalOpen(false); setCustomerToTransfer(null); }} title={`Transfer Customer to another Route`}>
+        <div className="p-4 sm:p-6 space-y-4">
+          <div>
+            <p className="text-sm text-slate-700 dark:text-slate-300">Transferring: <strong>{customerToTransfer?.name}</strong></p>
+          </div>
+          <div>
+            <label className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">Select Route</label>
+            <select
+              value={transferRouteValue}
+              onChange={(e) => setTransferRouteValue(e.target.value)}
+              className="w-full px-3 py-2 text-sm rounded bg-slate-50 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-900 dark:text-white"
+            >
+              <option value="Unassigned">Unassigned</option>
+              {distinctRoutes.map(r => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </select>
+            <p className="text-xs text-slate-500 mt-2">Tip: you can type a new route name below to create a new route.</p>
+            <input
+              type="text"
+              placeholder="Or enter a new route name"
+              value={transferRouteValue}
+              onChange={(e) => setTransferRouteValue(e.target.value)}
+              className="mt-2 w-full px-3 py-2 text-sm rounded bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-900 dark:text-white"
+            />
+          </div>
+        </div>
+        <div className="flex items-center justify-end p-4 sm:p-6 border-t border-slate-200 rounded-b dark:border-slate-600">
+          <button onClick={() => { setIsTransferModalOpen(false); setCustomerToTransfer(null); }} className="mr-2 px-4 py-2 bg-white text-slate-700 rounded border">Cancel</button>
+          <button onClick={async () => {
+            if (!customerToTransfer) return;
+            const newRoute = transferRouteValue || 'Unassigned';
+            try {
+              const { error } = await supabase.from('customers').update({ route: newRoute }).eq('id', customerToTransfer.id);
+              if (error) {
+                alert('Failed to transfer customer: ' + error.message);
+                return;
+              }
+              alert(`Customer ${customerToTransfer.name} moved to route: ${newRoute}`);
+              setIsTransferModalOpen(false);
+              setCustomerToTransfer(null);
+              await refetchData();
+            } catch (err) {
+              console.error('Transfer error:', err);
+              alert('Unexpected error while transferring customer. See console.');
+            }
+          }} className="px-4 py-2 bg-amber-600 text-white rounded hover:bg-amber-700">Confirm Transfer</button>
         </div>
       </Modal>
 

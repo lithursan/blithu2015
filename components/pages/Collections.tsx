@@ -54,6 +54,16 @@ export const Collections: React.FC = () => {
   const [typeFilter, setTypeFilter] = useState<'all' | 'credit' | 'cheque'>('all');
   const [selectedCollection, setSelectedCollection] = useState<CollectionRecord | null>(null);
   const [verificationNotes, setVerificationNotes] = useState('');
+  const [chequeForm, setChequeForm] = useState<any>({
+    payerName: '',
+    amount: 0,
+    bank: '',
+    chequeNumber: '',
+    chequeDate: new Date().toISOString().slice(0,10),
+    depositDate: '' ,
+    notes: ''
+  });
+  const [chequeSaving, setChequeSaving] = useState(false);
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
 
@@ -160,11 +170,11 @@ export const Collections: React.FC = () => {
         notes: `${selectedCollection.collection_type.toUpperCase()} collection of ${formatCurrency(selectedCollection.amount)} completed by ${currentUser?.name}. ${verificationNotes ? 'Notes: ' + verificationNotes : ''}`,
         amountpaid: prevAmountPaid + selectedCollection.amount
       };
-      // Reduce the appropriate balance to 0 since it's been collected
+      // Reduce the appropriate balance to 0 since it's been collected.
+      // NOTE: do NOT zero chequebalance for cheque collections here — cheques are tracked
+      // separately and should only clear the chequebalance when the cheque itself clears.
       if (selectedCollection.collection_type === 'credit') {
         updatedOrderData.creditbalance = 0;
-      } else if (selectedCollection.collection_type === 'cheque') {
-        updatedOrderData.chequebalance = 0;
       }
       // Update order in database
       const { error: orderError } = await supabase
@@ -199,6 +209,51 @@ export const Collections: React.FC = () => {
     } catch (error) {
       console.error('Error recognizing collection:', error);
       alert('Failed to recognize collection. Please try again.');
+    }
+  };
+
+  const recordChequeFromCollection = async () => {
+    if (!selectedCollection) return;
+    setChequeSaving(true);
+    try {
+      const payload = {
+        payer_name: chequeForm.payerName || (customerMap[selectedCollection.customer_id] || null),
+        amount: Number(chequeForm.amount || selectedCollection.amount || 0),
+        bank: chequeForm.bank || null,
+        cheque_number: chequeForm.chequeNumber || null,
+        cheque_date: chequeForm.chequeDate || null,
+        deposit_date: chequeForm.depositDate || null,
+        notes: chequeForm.notes || `Created from collection ${selectedCollection.id}`,
+        status: 'Received',
+        created_by: currentUser?.id || null,
+        created_at: new Date().toISOString()
+      };
+
+  // Attach collection_id and order_id so cheque <-> collection linkage exists
+  if (selectedCollection.id) (payload as any).collection_id = selectedCollection.id;
+  if (selectedCollection.order_id) (payload as any).order_id = selectedCollection.order_id;
+
+  const { data: chequeData, error: chequeErr } = await supabase.from('cheques').insert([payload]).select();
+      if (chequeErr) throw chequeErr;
+
+      // After cheque saved, refresh global data so ChequeManagement will show it
+      await refetchData();
+
+  alert('Cheque record saved. Collection remains pending until the cheque is cleared/deposited.');
+
+  // Optionally add a note that the cheque was recorded
+  setVerificationNotes(prev => prev ? prev + ' | Cheque recorded.' : 'Cheque recorded.');
+
+  // Do NOT mark the collection as complete here. Cheque is recorded and
+  // collection remains pending until the cheque is cleared/deposited.
+  // reset form and close modal
+      setChequeForm({ payerName: '', amount: 0, bank: '', chequeNumber: '', chequeDate: new Date().toISOString().slice(0,10), depositDate: '', notes: '' });
+      setSelectedCollection(null);
+    } catch (err) {
+      console.error('Error saving cheque from collection:', err);
+      alert('Failed to save cheque. See console for details.');
+    } finally {
+      setChequeSaving(false);
     }
   };
 
@@ -463,7 +518,44 @@ export const Collections: React.FC = () => {
                         placeholder="Enter any verification notes or comments..."
                       />
                     </div>
-                    
+
+                    {/* If this is a cheque collection, show the cheque recording form */}
+                    {selectedCollection.collection_type === 'cheque' && (
+                      <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-lg space-y-3">
+                        <h4 className="font-semibold">Record Cheque Details</h4>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs text-slate-600 mb-1">Payer</label>
+                            <input value={chequeForm.payerName} onChange={e => setChequeForm((p:any)=>({...p,payerName:e.target.value}))} className="w-full px-3 py-2 border rounded" />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-slate-600 mb-1">Amount</label>
+                            <input type="number" value={chequeForm.amount || selectedCollection.amount || 0} onChange={e => setChequeForm((p:any)=>({...p,amount: Number(e.target.value)}))} className="w-full px-3 py-2 border rounded" />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-slate-600 mb-1">Bank</label>
+                            <input value={chequeForm.bank} onChange={e => setChequeForm((p:any)=>({...p,bank:e.target.value}))} className="w-full px-3 py-2 border rounded" />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-slate-600 mb-1">Cheque Number</label>
+                            <input value={chequeForm.chequeNumber} onChange={e => setChequeForm((p:any)=>({...p,chequeNumber:e.target.value}))} className="w-full px-3 py-2 border rounded" />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-slate-600 mb-1">Cheque Date</label>
+                            <input type="date" value={chequeForm.chequeDate} onChange={e => setChequeForm((p:any)=>({...p,chequeDate:e.target.value}))} className="w-full px-3 py-2 border rounded" />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-slate-600 mb-1">Deposit Date (optional)</label>
+                            <input type="date" value={chequeForm.depositDate} onChange={e => setChequeForm((p:any)=>({...p,depositDate:e.target.value}))} className="w-full px-3 py-2 border rounded" />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-600 mb-1">Notes</label>
+                          <textarea value={chequeForm.notes} onChange={e => setChequeForm((p:any)=>({...p,notes:e.target.value}))} className="w-full px-3 py-2 border rounded" />
+                        </div>
+                      </div>
+                    )}
+
                     <div className="flex items-center justify-end space-x-3 pt-4 border-t border-slate-200 dark:border-slate-600">
                       <button
                         onClick={() => {
@@ -475,13 +567,26 @@ export const Collections: React.FC = () => {
                       >
                         Cancel
                       </button>
-                      <button
-                        onClick={handleRecognizeCollection}
-                        type="button"
-                        className="text-white bg-green-600 hover:bg-green-700 focus:ring-4 focus:outline-none focus:ring-green-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-green-600 dark:hover:bg-green-700"
-                      >
-                        ✅ Recognize Collection
-                      </button>
+                      {selectedCollection.collection_type === 'cheque' ? (
+                        <>
+                              <button
+                                onClick={recordChequeFromCollection}
+                                type="button"
+                                disabled={chequeSaving}
+                                className="text-white bg-indigo-600 hover:bg-indigo-700 focus:ring-4 focus:outline-none focus:ring-indigo-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center"
+                              >
+                                💳 Record Cheque
+                              </button>
+                        </>
+                      ) : (
+                        <button
+                          onClick={handleRecognizeCollection}
+                          type="button"
+                          className="text-white bg-green-600 hover:bg-green-700 focus:ring-4 focus:outline-none focus:ring-green-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center"
+                        >
+                          ✅ Recognize Collection
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
