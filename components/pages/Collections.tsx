@@ -66,6 +66,8 @@ export const Collections: React.FC = () => {
   const [chequeSaving, setChequeSaving] = useState(false);
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
+  const [isPartialPayment, setIsPartialPayment] = useState(false);
+  const [partialAmount, setPartialAmount] = useState<number>(0);
 
   // Fetch collections from Supabase on mount
   useEffect(() => {
@@ -126,6 +128,58 @@ export const Collections: React.FC = () => {
       return new Date(dateB).getTime() - new Date(dateA).getTime();
     });
   }, [collections, statusFilter, typeFilter, dateFrom, dateTo]);
+
+  // Group collections by date
+  const groupedCollections = useMemo(() => {
+    const groups = filteredCollections.reduce((acc, collection) => {
+      const collectionDate = collection.collected_at || collection.created_at;
+      const dateKey = collectionDate ? new Date(collectionDate).toDateString() : 'Unknown Date';
+      
+      if (!acc[dateKey]) {
+        acc[dateKey] = {
+          date: dateKey,
+          collections: [],
+          totalCredit: 0,
+          totalCheque: 0,
+          creditCount: 0,
+          chequeCount: 0,
+          pendingTotal: 0
+        };
+      }
+      
+      acc[dateKey].collections.push(collection);
+      
+      // Only count amounts for pending collections
+      if (collection.status === 'pending') {
+        acc[dateKey].pendingTotal += collection.amount;
+        
+        if (collection.collection_type === 'credit') {
+          acc[dateKey].totalCredit += collection.amount;
+          acc[dateKey].creditCount++;
+        } else {
+          acc[dateKey].totalCheque += collection.amount;
+          acc[dateKey].chequeCount++;
+        }
+      }
+      
+      return acc;
+    }, {} as Record<string, {
+      date: string;
+      collections: CollectionRecord[];
+      totalCredit: number;
+      totalCheque: number;
+      creditCount: number;
+      chequeCount: number;
+      pendingTotal: number;
+    }>);
+
+    // Sort groups by date (most recent first)
+    return Object.values(groups).sort((a: any, b: any) => {
+      if (a.date === 'Unknown Date') return 1;
+      if (b.date === 'Unknown Date') return -1;
+      return new Date(b.date).getTime() - new Date(a.date).getTime();
+    });
+  }, [filteredCollections]);
 
   // Map customer id -> name for quick lookup
   const customerMap = useMemo(() => {
@@ -210,6 +264,62 @@ export const Collections: React.FC = () => {
       console.error('Error recognizing collection:', error);
       alert('Failed to recognize collection. Please try again.');
     }
+  };
+
+  const handlePartialPayment = async () => {
+    if (!selectedCollection || !isPartialPayment) return;
+    
+    if (!partialAmount || partialAmount <= 0 || partialAmount >= selectedCollection.amount) {
+      alert('Please enter a valid partial amount (greater than 0 and less than total amount)');
+      return;
+    }
+
+    try {
+      // Update the current collection amount to remaining amount
+      const remainingAmount = selectedCollection.amount - partialAmount;
+      
+      const { error: updateError } = await supabase
+        .from('collections')
+        .update({ 
+          amount: remainingAmount,
+          notes: `Partial payment of ${formatCurrency(partialAmount)} received. Remaining: ${formatCurrency(remainingAmount)}. ${verificationNotes ? 'Notes: ' + verificationNotes : ''}` 
+        })
+        .eq('id', selectedCollection.id);
+      
+      if (updateError) throw updateError;
+
+      // Update local state
+      setCollections(prev =>
+        prev.map(c =>
+          c.id === selectedCollection.id
+            ? { ...c, amount: remainingAmount, notes: `Partial payment of ${formatCurrency(partialAmount)} received. Remaining: ${formatCurrency(remainingAmount)}. ${verificationNotes ? 'Notes: ' + verificationNotes : ''}` }
+            : c
+        )
+      );
+
+      // Refresh data
+      await refetchData();
+
+      alert(`Partial payment of ${formatCurrency(partialAmount)} recorded successfully. Remaining amount: ${formatCurrency(remainingAmount)}`);
+
+      setSelectedCollection(null);
+      setVerificationNotes('');
+      setIsPartialPayment(false);
+      setPartialAmount(0);
+    } catch (error) {
+      console.error('Error recording partial payment:', error);
+      alert('Failed to record partial payment. Please try again.');
+    }
+  };
+
+  const handleVerifyClick = (collection: CollectionRecord) => {
+    const password = prompt('Enter verification password:');
+    if (password !== '6789') {
+      alert('Incorrect password. Verification cancelled.');
+      return;
+    }
+    setSelectedCollection(collection);
+    setIsConvertingCredit(false);
   };
 
   const recordChequeFromCollection = async () => {
@@ -400,67 +510,166 @@ export const Collections: React.FC = () => {
         </CardHeader>
         
         <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left text-slate-500 dark:text-slate-400">
-              <thead className="text-xs text-slate-700 uppercase bg-slate-50 dark:bg-slate-700 dark:text-slate-400">
-                <tr>
-                  <th scope="col" className="px-6 py-3">Order ID</th>
-                  <th scope="col" className="px-6 py-3">Customer</th>
-                  <th scope="col" className="px-6 py-3">Type</th>
-                  <th scope="col" className="px-6 py-3">Amount</th>
-                  <th scope="col" className="px-6 py-3">Collected By</th>
-                  <th scope="col" className="px-6 py-3">Date</th>
-                  <th scope="col" className="px-6 py-3">Status</th>
-                  <th scope="col" className="px-6 py-3">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredCollections.map((collection) => (
-                  <tr key={collection.id} className="bg-white border-b dark:bg-slate-800 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600">
-                    <td className="px-6 py-4 font-medium text-slate-900 dark:text-white">
-                      {collection.order_id}
-                    </td>
-                    <td className="px-6 py-4">{customerMap[collection.customer_id] || collection.customer_id}</td>
-                    <td className="px-6 py-4">
-                      <Badge variant={collection.collection_type === 'credit' ? 'info' : 'warning'}>
-                        {collection.collection_type === 'credit' ? '💰 Credit' : '🏦 Cheque'}
-                      </Badge>
-                    </td>
-                    <td className="px-6 py-4 font-bold text-green-600">
-                      {formatCurrency(collection.amount)}
-                    </td>
-                    <td className="px-6 py-4">{collection.collected_by || '-'}</td>
-                    <td className="px-6 py-4">
-                      {(collection.collected_at || collection.created_at) ? new Date(collection.collected_at || collection.created_at!).toLocaleDateString('en-GB') : '-'}
-                    </td>
-                    <td className="px-6 py-4">
-                      <Badge variant={collection.status === 'pending' ? 'warning' : 'success'}>
-                        {collection.status === 'pending' ? '⏳ Pending' : '✅ Complete'}
-                      </Badge>
-                    </td>
-                    <td className="px-6 py-4">
-                      {collection.status === 'pending' ? (
-                        <button
-                          onClick={() => setSelectedCollection(collection)}
-                          className="font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
-                        >
-                          Verify & Recognize
-                        </button>
-                      ) : (
-                        <span className="text-sm text-slate-400">Completed</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            
-            {filteredCollections.length === 0 && (
-              <div className="text-center py-10">
-                <p className="text-slate-500 dark:text-slate-400">No collections found matching your criteria.</p>
-              </div>
-            )}
-          </div>
+          {filteredCollections.length === 0 ? (
+            <div className="text-center py-12">
+              <div className="text-4xl mb-4">📋</div>
+              <h3 className="text-lg font-medium text-slate-900 dark:text-slate-100 mb-2">No collections found</h3>
+              <p className="text-slate-500 dark:text-slate-400">Try adjusting your filters or check back later for new collections.</p>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {groupedCollections.map((group) => (
+                <div key={group.date} className="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden bg-white dark:bg-slate-800">
+                  {/* Date Header */}
+                  <div className="bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-slate-700 dark:to-slate-600 px-6 py-4 border-b border-slate-200 dark:border-slate-600">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+                          📅 {group.date === 'Unknown Date' ? 'Unknown Date' : new Date(group.date).toLocaleDateString('en-GB', {
+                            weekday: 'long',
+                            year: 'numeric',
+                            month: 'long',
+                            day: 'numeric'
+                          })}
+                        </h3>
+                        <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
+                          {group.collections.length} collection(s) • Pending Total: {formatCurrency(group.pendingTotal)}
+                        </p>
+                      </div>
+                      <div className="mt-3 sm:mt-0 flex space-x-4">
+                        {group.creditCount > 0 && (
+                          <div className="text-center">
+                            <div className="text-sm font-medium text-blue-600 dark:text-blue-400">💰 Credit (Pending)</div>
+                            <div className="text-xs text-slate-500">{group.creditCount} • {formatCurrency(group.totalCredit)}</div>
+                          </div>
+                        )}
+                        {group.chequeCount > 0 && (
+                          <div className="text-center">
+                            <div className="text-sm font-medium text-purple-600 dark:text-purple-400">🏦 Cheque (Pending)</div>
+                            <div className="text-xs text-slate-500">{group.chequeCount} • {formatCurrency(group.totalCheque)}</div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Collections for this date */}
+                  <div className="p-4 space-y-3">
+                    {group.collections.map((collection) => (
+                      <div key={collection.id} className="border border-slate-200 dark:border-slate-600 rounded-lg p-4 hover:shadow-md transition-shadow bg-slate-50 dark:bg-slate-700">
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-3 sm:space-y-0">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center space-x-3 mb-2">
+                              <div className="flex-shrink-0">
+                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                  collection.collection_type === 'credit' 
+                                    ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' 
+                                    : 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400'
+                                }`}>
+                                  {collection.collection_type === 'credit' ? '💰 Credit' : '🏦 Cheque'}
+                                </span>
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate">
+                                  Order: {collection.order_id}
+                                </p>
+                                <p className="text-sm text-slate-500 dark:text-slate-400 truncate">
+                                  {customerMap[collection.customer_id] || 
+                                   (collection.notes && collection.notes.includes('Payer: ') ? 
+                                    collection.notes.split('Payer: ')[1].split(' |')[0].split(')')[0] : 
+                                    collection.customer_id || 'Unknown Customer')}
+                                </p>
+                              </div>
+                            </div>
+                            
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
+                              <div>
+                                <p className="text-slate-500 dark:text-slate-400">Amount</p>
+                                <p className="font-semibold text-green-600">{formatCurrency(collection.amount)}</p>
+                              </div>
+                              <div>
+                                <p className="text-slate-500 dark:text-slate-400">Collected By</p>
+                                <p className="font-medium text-slate-900 dark:text-slate-100">{collection.collected_by || '-'}</p>
+                              </div>
+                              <div>
+                                <p className="text-slate-500 dark:text-slate-400">Status</p>
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                                  collection.status === 'pending' 
+                                    ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' 
+                                    : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
+                                }`}>
+                                  {collection.status === 'pending' ? '⏳ Pending' : '✅ Complete'}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                          
+                          <div className="flex-shrink-0">
+                            {collection.status === 'pending' ? (
+                              <div className="flex flex-col gap-1.5">
+                                <button
+                                  onClick={() => handleVerifyClick(collection)}
+                                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md transition-colors text-xs font-medium whitespace-nowrap"
+                                >
+                                  Verify & Recognize
+                                </button>
+                                {collection.collection_type === 'credit' && (
+                                  <>
+                                    <button
+                                      onClick={() => {
+                                        setSelectedCollection(collection);
+                                        setIsConvertingCredit(true);
+                                        setOptimisticConvertedId(collection.id);
+                                        setCollections(prev => prev.map(c => c.id === collection.id ? { ...c, collection_type: 'cheque' } : c));
+                                      }}
+                                      className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-md transition-colors text-xs font-medium whitespace-nowrap"
+                                    >
+                                      Convert to Cheque
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        setSelectedCollection(collection);
+                                        setIsPartialPayment(true);
+                                        setPartialAmount(0);
+                                        setIsConvertingCredit(false);
+                                      }}
+                                      className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md transition-colors text-xs font-medium whitespace-nowrap"
+                                    >
+                                      💰 Partial Payment
+                                    </button>
+                                  </>
+                                )}
+                                {isAdmin && (
+                                  <button
+                                    onClick={() => deleteCollection(collection.id)}
+                                    className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-md transition-colors text-xs font-medium whitespace-nowrap"
+                                  >
+                                    🗑️ Delete
+                                  </button>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="flex flex-col gap-1.5">
+                                <span className="text-xs text-slate-400 font-medium">Completed</span>
+                                {isAdmin && (
+                                  <button
+                                    onClick={() => deleteCollection(collection.id)}
+                                    className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-md transition-colors text-xs font-medium whitespace-nowrap"
+                                  >
+                                    🗑️ Delete
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -505,9 +714,47 @@ export const Collections: React.FC = () => {
                       </div>
                     </div>
                     
+                    {/* Partial Payment Section */}
+                    {isPartialPayment && selectedCollection?.collection_type === 'credit' && (
+                      <div className="bg-orange-50 dark:bg-orange-900/20 p-4 rounded-lg border border-orange-200 dark:border-orange-700">
+                        <h4 className="font-semibold text-orange-800 dark:text-orange-200 mb-3">Record Partial Payment</h4>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                              Total Amount
+                            </label>
+                            <p className="text-lg font-bold text-green-600">{formatCurrency(selectedCollection.amount)}</p>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                              Partial Payment Amount *
+                            </label>
+                            <input
+                              type="number"
+                              value={partialAmount || ''}
+                              onChange={(e) => setPartialAmount(Number(e.target.value))}
+                              min="1"
+                              max={selectedCollection.amount - 1}
+                              step="0.01"
+                              className="w-full px-3 py-2 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-500 text-slate-900 dark:text-slate-100 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                              placeholder="Enter amount received"
+                            />
+                          </div>
+                        </div>
+                        {partialAmount > 0 && (
+                          <div className="mt-3 p-3 bg-slate-100 dark:bg-slate-800 rounded">
+                            <p className="text-sm text-slate-700 dark:text-slate-300">
+                              <strong>Amount Received:</strong> {formatCurrency(partialAmount)}<br/>
+                              <strong>Remaining Balance:</strong> {formatCurrency(selectedCollection.amount - partialAmount)}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     <div>
                       <label htmlFor="verificationNotes" className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">
-                        Verification Notes (Optional)
+                        {isPartialPayment ? 'Payment Notes (Optional)' : 'Verification Notes (Optional)'}
                       </label>
                       <textarea
                         id="verificationNotes"
@@ -515,7 +762,7 @@ export const Collections: React.FC = () => {
                         onChange={(e) => setVerificationNotes(e.target.value)}
                         rows={3}
                         className="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:placeholder-slate-400 dark:text-white"
-                        placeholder="Enter any verification notes or comments..."
+                        placeholder={isPartialPayment ? "Enter payment details or comments..." : "Enter any verification notes or comments..."}
                       />
                     </div>
 
@@ -561,13 +808,23 @@ export const Collections: React.FC = () => {
                         onClick={() => {
                           setSelectedCollection(null);
                           setVerificationNotes('');
+                          setIsPartialPayment(false);
+                          setPartialAmount(0);
                         }}
                         type="button"
                         className="text-slate-500 bg-white hover:bg-slate-100 focus:ring-4 focus:outline-none focus:ring-blue-300 rounded-lg border border-slate-200 text-sm font-medium px-5 py-2.5 hover:text-slate-900 focus:z-10 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-500 dark:hover:text-white dark:hover:bg-slate-600"
                       >
                         Cancel
                       </button>
-                      {selectedCollection.collection_type === 'cheque' ? (
+                      {isPartialPayment ? (
+                        <button
+                          onClick={handlePartialPayment}
+                          type="button"
+                          className="text-white bg-orange-600 hover:bg-orange-700 focus:ring-4 focus:outline-none focus:ring-orange-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center"
+                        >
+                          💰 Record Partial Payment
+                        </button>
+                      ) : selectedCollection.collection_type === 'cheque' || isConvertingCredit ? (
                         <>
                               <button
                                 onClick={recordChequeFromCollection}

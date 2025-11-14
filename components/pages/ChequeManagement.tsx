@@ -238,16 +238,65 @@ const ChequeManagement: React.FC = () => {
       const { data: updatedCheque, error: updateErr } = await supabase.from('cheques').update({ status: 'Bounced', bounced_at: new Date().toISOString() }).eq('id', cheque.id).select();
       if (updateErr) throw updateErr;
 
-      // Create a collection record as 'credit' so it appears in Collections for follow-up
-      const collectionPayload: any = {
-        order_id: null,
-        customer_id: cheque.customer_id || null,
-        collection_type: 'credit',
-        amount: cheque.amount || 0,
-        status: 'pending',
-        created_by: currentUser?.id || null,
-        created_at: new Date().toISOString(),
-        notes: `Bounced cheque (id: ${cheque.id}, payer: ${cheque.payer_name || '-'})`
+      // Update local cheque state to reflect bounced status
+      setCheques(prev => prev.map(c => c.id === cheque.id ? updatedCheque : c));
+
+      // Helper to insert a collection with a fallback when server schema cache
+      // doesn't include certain columns (e.g., 'created_by'). Retries without
+      // the optional fields if needed.
+      const tryInsertCollection = async (payload: any) => {
+        try {
+            const { data, error } = await supabase.from('collections').insert([payload]).select();
+            if (error) throw error;
+            return { data, error: null };
+        } catch (e: any) {
+          // PostgREST schema cache errors show up as PGRST204 and mention missing column
+          const msg = (e && (e.message || e.error || JSON.stringify(e))) || '';
+            // Handle duplicate key (unique constraint) - since we now use order_id: null
+            // for bounced cheques, this should rarely happen, but keep as fallback
+            if (e && (e.code === '23505' || msg.includes('duplicate key value'))) {
+              console.error('Unexpected duplicate key for bounced cheque collection (order_id should be null):', e);
+              return { data: null, error: e };
+            }
+            // Handle 400 Bad Request or schema cache issues by removing optional fields
+            if (e && (e.code === 'PGRST204' || e.status === 400 || msg.includes("Could not find") || msg.includes('Bad Request'))) {
+            // Retry with only core required fields
+            const reduced: any = {
+              order_id: payload.order_id,
+              customer_id: payload.customer_id,
+              collection_type: payload.collection_type,
+              amount: payload.amount,
+              status: payload.status
+            };
+            // Add notes if it exists and isn't causing issues
+            if (payload.notes) reduced.notes = payload.notes;
+            
+            try {
+              const { data: d2, error: err2 } = await supabase.from('collections').insert([reduced]).select();
+              if (err2) throw err2;
+              return { data: d2, error: null };
+            } catch (e2: any) {
+              console.error('Retry insert with minimal fields failed:', e2);
+              // Final attempt with absolute minimum fields
+              try {
+                const minimal = {
+                  order_id: payload.order_id,
+                  customer_id: payload.customer_id,
+                  collection_type: payload.collection_type,
+                  amount: payload.amount,
+                  status: payload.status
+                };
+                const { data: d3, error: err3 } = await supabase.from('collections').insert([minimal]).select();
+                if (err3) throw err3;
+                return { data: d3, error: null };
+              } catch (e3) {
+                console.error('Final minimal insert failed:', e3);
+                return { data: null, error: e3 };
+              }
+            }
+          }
+          return { data: null, error: e };
+        }
       };
       const { data: collData, error: collErr } = await supabase.from('collections').insert([collectionPayload]).select();
       if (collErr) throw collErr;
