@@ -33,6 +33,12 @@ const ChequeManagement: React.FC = () => {
     if (!currentUser) return;
     fetchCheques();
     fetchPendingCollections();
+    // Listen for global cheques-updated events so we refresh when other components insert cheques
+    const onChequesUpdated = () => fetchCheques();
+    window.addEventListener('cheques-updated', onChequesUpdated);
+    return () => {
+      try { window.removeEventListener('cheques-updated', onChequesUpdated); } catch (e) {}
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
 
@@ -108,6 +114,18 @@ const ChequeManagement: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) return;
+    
+    // Validate all required fields (all except notes are mandatory)
+    if (!form.payerName?.trim() || 
+        !form.amount || 
+        Number(form.amount) <= 0 || 
+        !form.bank?.trim() || 
+        !form.chequeNumber?.trim() || 
+        !form.date?.trim()) {
+      alert('Please fill in all required fields: Payer Name, Amount, Bank, Cheque Number, and Cheque Date. Only Notes field is optional.');
+      return;
+    }
+    
     const payload = {
       payer_name: form.payerName || null,
       amount: Number(form.amount) || 0,
@@ -235,8 +253,9 @@ const ChequeManagement: React.FC = () => {
     setLoading(true);
     try {
       // Update cheque status to Bounced
-      const { data: updatedCheque, error: updateErr } = await supabase.from('cheques').update({ status: 'Bounced', bounced_at: new Date().toISOString() }).eq('id', cheque.id).select();
+      const { data: updatedData, error: updateErr } = await supabase.from('cheques').update({ status: 'Bounced', bounced_at: new Date().toISOString() }).eq('id', cheque.id).select();
       if (updateErr) throw updateErr;
+      const updatedCheque = (updatedData && updatedData[0]) || { ...cheque, status: 'Bounced', bounced_at: new Date().toISOString() };
 
       // Update local cheque state to reflect bounced status
       setCheques(prev => prev.map(c => c.id === cheque.id ? updatedCheque : c));
@@ -298,16 +317,91 @@ const ChequeManagement: React.FC = () => {
           return { data: null, error: e };
         }
       };
-      const { data: collData, error: collErr } = await supabase.from('collections').insert([collectionPayload]).select();
-      if (collErr) throw collErr;
 
-  // Update local state
-  setCheques(prev => prev.filter(c => c.id !== cheque.id));
-  // Refresh pending collections so Collections page reflects new credit
-  if (refetchData) await refetchData();
-  await fetchPendingCollections();
+      // Create a separate credit collection for bounced cheque with variant Order ID
+      try {
+        const originalOrderId = updatedCheque.order_id || cheque.order_id || null;
+        let customerId = updatedCheque.customer_id || cheque.customer_id || null;
+        const creditAmount = Number(updatedCheque.amount || cheque.amount || 0);
+        const payerName = updatedCheque.payer_name || cheque.payer_name || '';
+        const note = `Cheque bounced (cheque id: ${cheque.id}, cheque#: ${cheque.cheque_number || '-'})`;
+        
+        // If we have a payer name but no customer_id, try to find customer by name
+        if (!customerId && payerName && customers) {
+          const matchingCustomer = customers.find(c => 
+            (c.name && c.name.toLowerCase() === payerName.toLowerCase()) ||
+            (c.customerName && c.customerName.toLowerCase() === payerName.toLowerCase())
+          );
+          if (matchingCustomer) {
+            customerId = matchingCustomer.id;
+          }
+        }
+        
+        // Generate unique variant Order ID for bounced cheque (B1, B2, etc.)
+        let variantOrderId = null;
+        if (originalOrderId) {
+          // Find existing bounced collections for this order to determine next variant number
+          const { data: existingBounced, error: fetchErr } = await supabase
+            .from('collections')
+            .select('order_id')
+            .like('order_id', `${originalOrderId}_B%`)
+            .order('order_id', { ascending: false })
+            .limit(1);
+          
+          let nextVariant = 1;
+          if (!fetchErr && existingBounced && existingBounced.length > 0) {
+            const lastVariant = existingBounced[0].order_id;
+            const match = lastVariant.match(/_B(\d+)$/);
+            if (match) {
+              nextVariant = parseInt(match[1]) + 1;
+            }
+          }
+          variantOrderId = `${originalOrderId}_B${nextVariant}`;
+        } else {
+          // If no original order ID, create a generic bounced ID
+          variantOrderId = `BOUNCED_${Date.now()}_B1`;
+        }
 
-      alert('Cheque marked as bounced and a credit collection record was created.');
+        // Get original collection details (customer and collected_by) if available
+        let collectedBy = null;
+        if (originalOrderId) {
+          const { data: originalCol, error: origErr } = await supabase
+            .from('collections')
+            .select('collected_by, customer_id')
+            .eq('order_id', originalOrderId)
+            .limit(1)
+            .maybeSingle();
+          if (!origErr && originalCol) {
+            collectedBy = originalCol.collected_by;
+            // Use customer_id from original collection if we don't have one
+            if (!customerId && originalCol.customer_id) {
+              customerId = originalCol.customer_id;
+            }
+          }
+        }
+
+        const payload: any = {
+          order_id: variantOrderId,  // Use variant ID like ORD089_918_B1, ORD089_918_B2, etc.
+          customer_id: customerId,
+          collection_type: 'credit',
+          amount: creditAmount,
+          status: 'pending',
+          collected_by: collectedBy,  // Preserve original collected_by
+          created_by: currentUser?.id || null,
+          created_at: new Date().toISOString(),
+          notes: `${note}${originalOrderId ? ` (from order: ${originalOrderId})` : ''}${payerName ? ` | Payer: ${payerName}` : ''}`
+        };
+        const { data: collData, error: collErr } = await tryInsertCollection(payload);
+        if (collErr) console.error('Failed to insert credit collection for bounced cheque:', collErr, collData);
+      } catch (e) {
+        console.error('Error creating/merging credit collection for bounced cheque:', e);
+      }
+
+      // Refresh pending collections so Collections page reflects new credit
+      if (refetchData) await refetchData();
+      await fetchPendingCollections();
+
+      alert('Cheque marked as bounced and a credit collection record was created/updated.');
     } catch (err) {
       console.error('Error marking bounced:', err);
       alert('Failed to mark cheque bounced. See console for details.');
@@ -395,15 +489,21 @@ const ChequeManagement: React.FC = () => {
   }
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4">
-        <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-100">Cheque Management</h1>
-        <div className="mt-3 sm:mt-0 ml-0 sm:ml-4 w-full sm:w-auto">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6">
+      {/* Header Section */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-100">Cheque Management</h1>
+          <p className="text-slate-600 dark:text-slate-400 mt-1">
+            Manage received cheques and track deposit schedules
+          </p>
+        </div>
+        <div className="mt-4 sm:mt-0 flex space-x-2">
           <button
-            type="button"
             onClick={() => setShowForm(s => !s)}
-            className="w-full sm:w-auto px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-sm"
+            className="flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors"
           >
+            <span className="text-lg mr-2">+</span>
             {showForm ? 'Hide Form' : 'Record Cheque'}
           </button>
         </div>
@@ -485,160 +585,283 @@ const ChequeManagement: React.FC = () => {
               <div className="p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
                 <span className="text-2xl">🏦</span>
               </div>
-              <div>
-                <label className="block text-sm font-medium">Amount</label>
-                <input type="number" step="0.01" className="w-full px-3 py-2 rounded bg-slate-800 text-slate-100 placeholder-slate-400 border border-slate-700" value={form.amount} onChange={e => handleChange('amount', e.target.value)} />
+              <div className="ml-4">
+                <p className="text-sm font-medium text-slate-600 dark:text-slate-400">Total Cheques</p>
+                <p className="text-2xl font-bold text-blue-600">{cheques.length}</p>
               </div>
-              <div>
-                <label className="block text-sm font-medium">Bank</label>
-                <input className="w-full px-3 py-2 rounded bg-slate-800 text-slate-100 placeholder-slate-400 border border-slate-700" value={form.bank} onChange={e => handleChange('bank', e.target.value)} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium">Cheque Number</label>
-                <input className="w-full px-3 py-2 rounded bg-slate-800 text-slate-100 placeholder-slate-400 border border-slate-700" value={form.chequeNumber} onChange={e => handleChange('chequeNumber', e.target.value)} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium">Cheque Date</label>
-                <input type="date" className="w-full px-3 py-2 rounded bg-slate-800 text-slate-100 placeholder-slate-400 border border-slate-700" value={form.date} onChange={e => handleChange('date', e.target.value)} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium">Notes</label>
-                <textarea className="w-full px-3 py-2 rounded bg-slate-800 text-slate-100 placeholder-slate-400 border border-slate-700" value={form.notes} onChange={e => handleChange('notes', e.target.value)} />
-              </div>
-              <div>
-                <button type="submit" disabled={loading} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md w-full sm:w-auto">Save Cheque</button>
-              </div>
-            </form>
+            </div>
           </CardContent>
-          </Card>
-        )}
+        </Card>
+        
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center">
+              <div className="p-3 bg-green-100 dark:bg-green-900/30 rounded-lg">
+                <span className="text-2xl">✅</span>
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-slate-600 dark:text-slate-400">Cleared</p>
+                <p className="text-2xl font-bold text-green-600">
+                  {cheques.filter(c => c.status === 'Cleared').length}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
-        <Card className={showForm ? 'lg:col-span-2' : 'lg:col-span-1'}>
-          <CardHeader>
-            <CardTitle className="text-lg sm:text-xl">Received Cheques</CardTitle>
-            <CardDescription className="text-slate-300">List of cheques recorded</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {loading ? (
-              <p className="text-slate-300">Loading...</p>
-            ) : cheques.length === 0 ? (
-              <p className="text-sm text-slate-400">No cheques recorded yet.</p>
-            ) : (
-              <>
-                {/* Desktop / tablet table */}
-                <div className="hidden sm:block overflow-x-auto">
-                  <table className="w-full text-sm text-left">
-                    <thead className="text-sm text-slate-200 uppercase bg-slate-800">
-                      <tr>
-                        <th className="px-4 py-3">Payer</th>
-                        <th className="px-4 py-3">Amount</th>
-                        <th className="px-4 py-3">Bank</th>
-                        <th className="px-4 py-3">Cheque #</th>
-                        <th className="px-4 py-3">Date</th>
-                        <th className="px-4 py-3">Deposit Date</th>
-                        <th className="px-4 py-3">Status</th>
-                        <th className="px-4 py-3">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {cheques.map(c => (
-                        <tr key={c.id} className={`border-b border-slate-700 ${isChequeDueToday(c) ? 'bg-yellow-900/20' : isChequeUpcoming(c) ? 'bg-red-900/20' : ''}`}>
-                          <td className="px-4 py-3 font-semibold text-slate-100">{c.payer_name || '-'}</td>
-                          <td className="px-4 py-3 text-slate-200">{formatCurrency(c.amount || 0)}</td>
-                          <td className="px-4 py-3 text-slate-200">{c.bank || '-'}</td>
-                          <td className="px-4 py-3 text-slate-200">{c.cheque_number || '-'}</td>
-                          <td className="px-4 py-3 text-slate-200">{(c.cheque_date || c.created_at || '').slice ? (c.cheque_date || c.created_at).slice(0,10) : String(c.cheque_date || c.created_at)}</td>
-                          <td className="px-4 py-3">
-                            <input type="date" defaultValue={c.deposit_date ? (c.deposit_date.slice ? c.deposit_date.slice(0,10) : c.deposit_date) : ''} onChange={(e) => setDepositDate(c.id, e.target.value)} className="px-2 py-1 rounded bg-slate-800 text-slate-100 border border-slate-700" />
-                          </td>
-                        <td className="px-4 py-3 text-slate-200">{c.status || 'Received'} {isChequeDueToday(c) && <span className="ml-2 inline-block px-2 py-0.5 text-xs font-medium text-yellow-800 bg-yellow-200 rounded">Due Today</span>}</td>
-                          <td className="px-4 py-3">
-                            {c.status !== 'Cleared' && (
-                              <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-2">
-                                <button onClick={() => markCleared(c.id)} className="px-3 py-2 bg-green-600 text-white rounded-md text-sm w-full sm:w-auto mb-2 sm:mb-0">Mark Cleared</button>
-                                <button onClick={() => markBounced(c)} className="px-3 py-2 bg-red-600 text-white rounded-md text-sm w-full sm:w-auto mb-2 sm:mb-0">Mark Bounced</button>
-                                <button onClick={() => deleteCheque(c.id)} className="px-3 py-2 bg-gray-700 text-white rounded-md text-sm w-full sm:w-auto">Delete</button>
-                              </div>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Mobile stacked cards view */}
-                <div className="sm:hidden space-y-3">
-                  {cheques.map(c => (
-                    <div key={c.id} className={`p-3 rounded border ${isChequeDueToday(c) ? 'bg-yellow-900/10 border-yellow-500' : isChequeUpcoming(c) ? 'bg-red-900/10 border-red-700' : 'bg-slate-800 border-slate-700'}`}>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="font-semibold text-slate-100">{c.payer_name || '-'}</div>
-                          <div className="text-sm text-slate-200">{formatCurrency(c.amount || 0)} • {c.bank || '-'}</div>
-                        </div>
-                        <div className="text-sm text-slate-200">{(c.cheque_date || c.created_at || '').slice ? (c.cheque_date || c.created_at).slice(0,10) : String(c.cheque_date || c.created_at)} {isChequeDueToday(c) && <span className="ml-2 inline-block px-2 py-0.5 text-xs font-medium text-yellow-800 bg-yellow-200 rounded">Due Today</span>}</div>
-                      </div>
-                      <div className="mt-2 flex items-center justify-between space-x-2">
-                        <div className="flex-1">
-                          <label className="text-xs text-slate-300">Deposit Date</label>
-                          <input type="date" defaultValue={c.deposit_date ? (c.deposit_date.slice ? c.deposit_date.slice(0,10) : c.deposit_date) : ''} onChange={(e) => setDepositDate(c.id, e.target.value)} className="mt-1 w-full px-2 py-1 rounded bg-slate-900 text-slate-100 border border-slate-700" />
-                        </div>
-                      </div>
-                      <div className="mt-3 flex flex-col space-y-2">
-                        <div className="text-sm text-slate-200">Status: {c.status || 'Received'}</div>
-                        <div className="flex gap-2">
-                          {c.status !== 'Cleared' && (
-                            <>
-                              <button onClick={() => markCleared(c.id)} className="flex-1 px-3 py-2 bg-green-600 text-white rounded-md text-sm">Mark Cleared</button>
-                              <button onClick={() => markBounced(c)} className="flex-1 px-3 py-2 bg-red-600 text-white rounded-md text-sm">Mark Bounced</button>
-                            </>
-                          )}
-                          <button onClick={() => deleteCheque(c.id)} className="flex-1 px-3 py-2 bg-gray-700 text-white rounded-md text-sm">Delete</button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center">
+              <div className="p-3 bg-orange-100 dark:bg-orange-900/30 rounded-lg">
+                <span className="text-2xl">⏳</span>
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-slate-600 dark:text-slate-400">Pending</p>
+                <p className="text-2xl font-bold text-orange-600">
+                  {cheques.filter(c => c.status !== 'Cleared' && c.status !== 'Bounced').length}
+                </p>
+              </div>
+            </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Pending cheque collections from Collections table */}
-      <div className="mt-6">
-        <h2 className="text-lg font-semibold mb-2">Pending Cheque Collections</h2>
-        {pendingCollections.length === 0 ? (
-          <p className="text-sm text-slate-500">No pending cheque collections.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left">
-              <thead className="text-xs text-slate-700 uppercase bg-slate-50">
-                <tr>
-                  <th className="px-3 py-2">Collection ID</th>
-                  <th className="px-3 py-2">Customer</th>
-                  <th className="px-3 py-2">Amount</th>
-                  <th className="px-3 py-2">Date</th>
-                  <th className="px-3 py-2">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pendingCollections.map((col: any) => (
-                  <tr key={col.id} className="border-b">
-                    <td className="px-3 py-2 font-medium">{col.id}</td>
-                    <td className="px-3 py-2">{(customers || []).find((c:any) => c.id === col.customer_id)?.name || col.customer_id || '-'}</td>
-                    <td className="px-3 py-2">{formatCurrency(col.amount || 0)}</td>
-                    <td className="px-3 py-2">{(col.collected_at || col.created_at || '').slice ? (col.collected_at || col.created_at).slice(0,10) : String(col.created_at || '')}</td>
-                    <td className="px-3 py-2">
-                      <button onClick={() => recognizeCollection(col)} className="px-2 py-1 bg-green-600 text-white rounded text-xs">Recognize</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      {/* Form Section */}
+      {showForm && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Record New Cheque</CardTitle>
+            <CardDescription>Enter details for a received cheque</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  Payer Name *
+                </label>
+                <input 
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent" 
+                  value={form.payerName} 
+                  onChange={e => handleChange('payerName', e.target.value)}
+                  placeholder="Enter payer name"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  Amount (LKR) *
+                </label>
+                <input 
+                  type="number" 
+                  step="0.01" 
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent" 
+                  value={form.amount} 
+                  onChange={e => handleChange('amount', e.target.value)}
+                  placeholder="0.00"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  Bank *
+                </label>
+                <input 
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent" 
+                  value={form.bank} 
+                  onChange={e => handleChange('bank', e.target.value)}
+                  placeholder="Bank name"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  Cheque Number *
+                </label>
+                <input 
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent" 
+                  value={form.chequeNumber} 
+                  onChange={e => handleChange('chequeNumber', e.target.value)}
+                  placeholder="Cheque number"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  Cheque Date *
+                </label>
+                <input 
+                  type="date" 
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent" 
+                  value={form.date} 
+                  onChange={e => handleChange('date', e.target.value)}
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  Notes (Optional)
+                </label>
+                <textarea 
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent" 
+                  value={form.notes} 
+                  onChange={e => handleChange('notes', e.target.value)}
+                  placeholder="Additional notes..."
+                  rows={3}
+                />
+              </div>
+              <div className="md:col-span-2 flex justify-end">
+                <button 
+                  type="submit" 
+                  disabled={loading} 
+                  className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-lg transition-colors"
+                >
+                  {loading ? 'Recording...' : 'Record Cheque'}
+                </button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Cheques List */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Received Cheques</CardTitle>
+              <CardDescription>
+                {cheques.length} cheque(s) recorded • Total Value: {formatCurrency(cheques.reduce((sum, c) => sum + (c.amount || 0), 0))}
+              </CardDescription>
+            </div>
+            {cheques.length > 0 && (
+              <div className="text-sm text-slate-500">
+                Total Value: {formatCurrency(cheques.reduce((sum, c) => sum + (c.amount || 0), 0))}
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="text-slate-500">Loading cheques...</div>
+            </div>
+          ) : cheques.length === 0 ? (
+            <div className="text-center py-8">
+              <div className="text-4xl mb-2">🏦</div>
+              <p className="text-slate-500 mb-2">No cheques recorded yet</p>
+              <p className="text-sm text-slate-400">Click "Record Cheque" to add your first cheque</p>
+            </div>
+          ) : (
+            <>
+              {/* Group cheques by deposit_date */}
+              {(() => {
+                const groups: Record<string, any[]> = {};
+                for (const c of cheques) {
+                  const key = c.deposit_date ? (c.deposit_date.slice ? c.deposit_date.slice(0,10) : String(c.deposit_date)) : 'Unscheduled';
+                  if (!groups[key]) groups[key] = [];
+                  groups[key].push(c);
+                }
+                const keys = Object.keys(groups).sort((a,b) => {
+                  if (a === 'Unscheduled') return 1;
+                  if (b === 'Unscheduled') return -1;
+                  return new Date(a).getTime() - new Date(b).getTime();
+                });
+                return (
+                  <div className="space-y-6">
+                    {keys.map(k => (
+                      <div key={k} className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
+                        <div className="bg-slate-50 dark:bg-slate-800 px-4 py-3 border-b border-slate-200 dark:border-slate-700">
+                          <div className="flex items-center justify-between">
+                            <h3 className="font-medium text-slate-900 dark:text-slate-100">
+                              {k === 'Unscheduled' ? '📅 Unscheduled Deposits' : `📅 ${new Date(k).toLocaleDateString('en-GB', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}`}
+                            </h3>
+                            <div className="text-sm text-slate-500">
+                              {groups[k].length} cheque(s) • {formatCurrency(groups[k].reduce((sum, c) => sum + (c.amount || 0), 0))}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full">
+                            <thead className="bg-slate-100 dark:bg-slate-700">
+                              <tr>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Payer</th>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Amount</th>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Bank</th>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Cheque #</th>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Date</th>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Deposit Date</th>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Status</th>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+                              {groups[k].map((c:any) => (
+                                <tr key={c.id} className={`${isChequeDueToday(c) ? 'bg-yellow-50 dark:bg-yellow-900/20' : isChequeUpcoming(c) ? 'bg-red-50 dark:bg-red-900/20' : 'bg-white dark:bg-slate-800'} hover:bg-slate-50 dark:hover:bg-slate-700/50`}>
+                                  <td className="px-4 py-3 text-sm font-medium text-slate-900 dark:text-slate-100">{c.payer_name || '-'}</td>
+                                  <td className="px-4 py-3 text-sm font-semibold text-green-600">{formatCurrency(c.amount || 0)}</td>
+                                  <td className="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">{c.bank || '-'}</td>
+                                  <td className="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">{c.cheque_number || '-'}</td>
+                                  <td className="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">{(c.cheque_date || c.created_at || '').slice ? (c.cheque_date || c.created_at).slice(0,10) : String(c.cheque_date || c.created_at)}</td>
+                                  <td className="px-4 py-3">
+                                    <input 
+                                      type="date" 
+                                      defaultValue={c.deposit_date ? (c.deposit_date.slice ? c.deposit_date.slice(0,10) : c.deposit_date) : ''} 
+                                      onChange={(e) => setDepositDate(c.id, e.target.value)} 
+                                      className="px-2 py-1 text-sm border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-indigo-500 focus:border-transparent" 
+                                    />
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                      c.status === 'Cleared' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
+                                      c.status === 'Bounced' ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' :
+                                      'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400'
+                                    }`}>
+                                      {c.status || 'Received'}
+                                    </span>
+                                    {isChequeDueToday(c) && <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400">Due Today</span>}
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    {c.status === 'Cleared' || c.status === 'Bounced' ? (
+                                      <button 
+                                        onClick={() => deleteCheque(c.id)} 
+                                        className="px-3 py-1 text-xs bg-slate-600 hover:bg-slate-700 text-white rounded transition-colors"
+                                      >
+                                        Delete
+                                      </button>
+                                    ) : (
+                                      <div className="flex space-x-2">
+                                        <button 
+                                          onClick={() => markCleared(c.id)} 
+                                          className="px-3 py-1 text-xs bg-green-600 hover:bg-green-700 text-white rounded transition-colors"
+                                        >
+                                          Clear
+                                        </button>
+                                        <button 
+                                          onClick={() => markBounced(c)} 
+                                          className="px-3 py-1 text-xs bg-red-600 hover:bg-red-700 text-white rounded transition-colors"
+                                        >
+                                          Bounce
+                                        </button>
+                                        <button 
+                                          onClick={() => deleteCheque(c.id)} 
+                                          className="px-3 py-1 text-xs bg-slate-600 hover:bg-slate-700 text-white rounded transition-colors"
+                                        >
+                                          Delete
+                                        </button>
+                                      </div>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+
     </div>
   );
 };

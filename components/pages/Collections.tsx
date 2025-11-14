@@ -54,15 +54,9 @@ export const Collections: React.FC = () => {
   const [typeFilter, setTypeFilter] = useState<'all' | 'credit' | 'cheque'>('all');
   const [selectedCollection, setSelectedCollection] = useState<CollectionRecord | null>(null);
   const [verificationNotes, setVerificationNotes] = useState('');
-  const [chequeForm, setChequeForm] = useState<any>({
-    payerName: '',
-    amount: 0,
-    bank: '',
-    chequeNumber: '',
-    chequeDate: new Date().toISOString().slice(0,10),
-    depositDate: '' ,
-    notes: ''
-  });
+  const [chequeForms, setChequeForms] = useState<any[]>([]);
+  const [isConvertingCredit, setIsConvertingCredit] = useState(false);
+  const [optimisticConvertedId, setOptimisticConvertedId] = useState<string | null>(null);
   const [chequeSaving, setChequeSaving] = useState(false);
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
@@ -86,8 +80,49 @@ export const Collections: React.FC = () => {
     fetchCollections();
   }, []);
 
+  const deleteCollection = async (collectionId: string) => {
+    if (!isAdmin) {
+      alert('Only Admin users can delete collections.');
+      return;
+    }
+
+    const password = prompt('Enter admin password to delete this collection:');
+    if (password !== '1234') {
+      alert('Incorrect password. Delete operation cancelled.');
+      return;
+    }
+
+    const confirmed = confirm('Are you sure you want to delete this collection? This action cannot be undone.');
+    if (!confirmed) return;
+
+    try {
+      const { error } = await supabase
+        .from('collections')
+        .delete()
+        .eq('id', collectionId);
+      
+      if (error) throw error;
+
+      // Update local state
+      setCollections(prev => prev.filter(c => c.id !== collectionId));
+      
+      // Refresh data to ensure consistency
+      await refetchData();
+      
+      alert('Collection deleted successfully.');
+    } catch (error) {
+      console.error('Error deleting collection:', error);
+      alert('Failed to delete collection. Please try again.');
+    }
+  };
+
   const isAdminManager = useMemo(() => 
     currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Manager,
+    [currentUser]
+  );
+
+  const isAdmin = useMemo(() => 
+    currentUser?.role === UserRole.Admin,
     [currentUser]
   );
 
@@ -189,6 +224,23 @@ export const Collections: React.FC = () => {
     });
     return map;
   }, [customers]);
+
+  // Initialize chequeForms when a cheque collection is selected
+  useEffect(() => {
+    if (selectedCollection && (selectedCollection.collection_type === 'cheque' || isConvertingCredit)) {
+      setChequeForms([{
+        payerName: customerMap[selectedCollection.customer_id] || '',
+        amount: selectedCollection.amount || 0,
+        bank: '',
+        chequeNumber: '',
+        chequeDate: new Date().toISOString().slice(0,10),
+        depositDate: '',
+        notes: ''
+      }]);
+    } else {
+      setChequeForms([]);
+    }
+  }, [selectedCollection, customerMap]);
 
   // Always use the full collections array for stats, not filteredCollections
   const totalStats = useMemo(() => {
@@ -326,28 +378,59 @@ export const Collections: React.FC = () => {
     if (!selectedCollection) return;
     setChequeSaving(true);
     try {
-      const payload = {
-        payer_name: chequeForm.payerName || (customerMap[selectedCollection.customer_id] || null),
-        amount: Number(chequeForm.amount || selectedCollection.amount || 0),
-        bank: chequeForm.bank || null,
-        cheque_number: chequeForm.chequeNumber || null,
-        cheque_date: chequeForm.chequeDate || null,
-        deposit_date: chequeForm.depositDate || null,
-        notes: chequeForm.notes || `Created from collection ${selectedCollection.id}`,
-        status: 'Received',
-        created_by: currentUser?.id || null,
-        created_at: new Date().toISOString()
-      };
+      // Validate all required fields (all except notes are mandatory)
+      const invalidForms = (chequeForms || []).filter(cf => 
+        !cf.payerName?.trim() || 
+        !cf.amount || 
+        cf.amount <= 0 || 
+        !cf.bank?.trim() || 
+        !cf.chequeNumber?.trim() || 
+        !cf.chequeDate?.trim()
+      );
+      
+      if (invalidForms.length > 0) {
+        alert('Please fill in all required fields: Payer, Amount, Bank, Cheque Number, and Cheque Date. Only Notes field is optional.');
+        setChequeSaving(false);
+        return;
+      }
 
-  // Attach collection_id and order_id so cheque <-> collection linkage exists
-  if (selectedCollection.id) (payload as any).collection_id = selectedCollection.id;
-  if (selectedCollection.order_id) (payload as any).order_id = selectedCollection.order_id;
+      // When converting from credit -> cheque, require deposit date for scheduling
+      if (isConvertingCredit) {
+        const missing = (chequeForms || []).some(cf => !cf.depositDate || String(cf.depositDate).trim() === '');
+        if (missing) {
+          alert('Please provide a Deposit Date for each cheque to schedule the conversion.');
+          setChequeSaving(false);
+          return;
+        }
+      }
+      // Prepare multiple payloads from `chequeForms` array
+      const payloads = (chequeForms && chequeForms.length ? chequeForms : [{
+        payerName: '', amount: selectedCollection.amount || 0, bank: '', chequeNumber: '', chequeDate: new Date().toISOString().slice(0,10), depositDate: '', notes: ''
+      }]).map((cf: any) => {
+        const p: any = {
+          payer_name: cf.payerName || (customerMap[selectedCollection.customer_id] || null),
+          amount: Number(cf.amount || selectedCollection.amount || 0),
+          bank: cf.bank || null,
+          cheque_number: cf.chequeNumber || null,
+          cheque_date: cf.chequeDate || null,
+          deposit_date: cf.depositDate || null,
+          notes: cf.notes || `Created from collection ${selectedCollection.id}`,
+          status: 'Received',
+          created_by: currentUser?.id || null,
+          created_at: new Date().toISOString()
+        };
+        if (selectedCollection.id) p.collection_id = selectedCollection.id;
+        if (selectedCollection.order_id) p.order_id = selectedCollection.order_id;
+        return p;
+      });
 
-  const { data: chequeData, error: chequeErr } = await supabase.from('cheques').insert([payload]).select();
+      const { data: chequeData, error: chequeErr } = await supabase.from('cheques').insert(payloads).select();
       if (chequeErr) throw chequeErr;
 
       // After cheque saved, refresh global data so ChequeManagement will show it
       await refetchData();
+      // Notify any listeners (e.g., ChequeManagement) that cheques were updated
+      try { window.dispatchEvent(new Event('cheques-updated')); } catch (e) { /* ignore */ }
 
   alert('Cheque record saved. Collection remains pending until the cheque is cleared/deposited.');
 
@@ -356,12 +439,78 @@ export const Collections: React.FC = () => {
 
   // Do NOT mark the collection as complete here. Cheque is recorded and
   // collection remains pending until the cheque is cleared/deposited.
-  // reset form and close modal
-      setChequeForm({ payerName: '', amount: 0, bank: '', chequeNumber: '', chequeDate: new Date().toISOString().slice(0,10), depositDate: '', notes: '' });
-      setSelectedCollection(null);
+  // reset forms and close modal
+  setChequeForms([]);
+  // If we were converting a credit collection, handle conversion safely (avoid 409)
+  if (isConvertingCredit && selectedCollection?.id) {
+    try {
+      // Check if a cheque collection for this order already exists
+      const { data: existingCol, error: fetchExistingErr } = await supabase
+        .from('collections')
+        .select('*')
+        .eq('order_id', selectedCollection.order_id)
+        .eq('collection_type', 'cheque')
+        .limit(1)
+        .maybeSingle();
+      if (fetchExistingErr) throw fetchExistingErr;
+
+      if (existingCol && existingCol.id) {
+        // Re-assign any newly inserted cheques to the existing collection
+        if (chequeData && Array.isArray(chequeData) && chequeData.length) {
+          const chequeIds = chequeData.map((d: any) => d.id).filter(Boolean);
+          if (chequeIds.length) {
+            const { error: reassignErr } = await supabase.from('cheques').update({ collection_id: existingCol.id }).in('id', chequeIds);
+            if (reassignErr) console.error('Failed to reassign cheques to existing collection:', reassignErr);
+          }
+        }
+
+        // Merge amounts into the existing collection row
+        const mergedAmount = (existingCol.amount || 0) + (selectedCollection.amount || 0);
+        const mergedNotes = `${existingCol.notes || ''}${existingCol.notes ? ' | ' : ''}Merged from ${selectedCollection.id}`;
+        const { error: mergeErr } = await supabase.from('collections').update({ amount: mergedAmount, notes: mergedNotes }).eq('id', existingCol.id);
+        if (mergeErr) console.error('Failed to merge collection amounts/notes:', mergeErr);
+
+        // Mark the original credit collection as completed/merged
+        const { error: finishErr } = await supabase.from('collections').update({ status: 'complete', notes: `Merged into ${existingCol.id}`, completed_by: currentUser?.name || '', completed_at: new Date().toISOString() }).eq('id', selectedCollection.id);
+        if (finishErr) console.error('Failed to mark original collection as merged:', finishErr);
+
+        // Update local state to reflect changes
+        setCollections(prev => prev.map(c => {
+          if (c.id === existingCol.id) return { ...c, amount: mergedAmount, notes: mergedNotes };
+          if (c.id === selectedCollection.id) return { ...c, status: 'complete', notes: `Merged into ${existingCol.id}` };
+          return c;
+        }));
+        if (optimisticConvertedId === selectedCollection.id) setOptimisticConvertedId(null);
+      } else {
+        // No existing cheque collection — safe to update type
+        const { error: updateErr } = await supabase.from('collections').update({ collection_type: 'cheque' }).eq('id', selectedCollection.id);
+        if (updateErr) {
+          console.error('Failed to update collection type after converting to cheque:', updateErr);
+          // Revert optimistic change if update failed
+          if (optimisticConvertedId === selectedCollection.id) {
+            setCollections(prev => prev.map(c => c.id === selectedCollection.id ? { ...c, collection_type: 'credit' } : c));
+            setOptimisticConvertedId(null);
+          }
+        } else {
+          setCollections(prev => prev.map(c => c.id === selectedCollection.id ? { ...c, collection_type: 'cheque' } : c));
+          // Conversion confirmed, clear optimistic id
+          if (optimisticConvertedId === selectedCollection.id) setOptimisticConvertedId(null);
+        }
+      }
+    } catch (e) {
+      console.error('Error during credit->cheque conversion handling:', e);
+    }
+  }
+  setIsConvertingCredit(false);
+  setSelectedCollection(null);
     } catch (err) {
       console.error('Error saving cheque from collection:', err);
       alert('Failed to save cheque. See console for details.');
+      // Revert optimistic UI change if present
+      if (optimisticConvertedId) {
+        setCollections(prev => prev.map(c => c.id === optimisticConvertedId ? { ...c, collection_type: 'credit' } : c));
+        setOptimisticConvertedId(null);
+      }
     } finally {
       setChequeSaving(false);
     }
@@ -377,13 +526,33 @@ export const Collections: React.FC = () => {
   }
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 space-y-8">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-100">Collection Management</h1>
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6">
+      {/* Header Section */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-100">Collection Management</h1>
+          <p className="text-slate-600 dark:text-slate-400 mt-1">
+            Review and verify all outstanding collections from field staff
+          </p>
+        </div>
+        <div className="mt-4 sm:mt-0 flex space-x-2">
+          <button
+            onClick={() => handleExport('csv')}
+            className="flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm"
+          >
+            📊 Export CSV
+          </button>
+          <button
+            onClick={() => handleExport('xlsx')}
+            className="flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors text-sm"
+          >
+            📈 Export Excel
+          </button>
+        </div>
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         <Card>
           <CardContent className="p-6">
             <div className="flex items-center">
@@ -439,76 +608,92 @@ export const Collections: React.FC = () => {
             </div>
           </CardContent>
         </Card>
+
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center">
+              <div className="p-2 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg">
+                <span className="text-2xl">📅</span>
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-slate-600 dark:text-slate-400">Date Groups</p>
+                <p className="text-2xl font-bold text-indigo-600">{groupedCollections.length}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Export & Filters */}
-      <div className="flex flex-wrap gap-2 mb-2">
-        <button
-          onClick={() => handleExport('csv')}
-          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm"
-        >
-          Download CSV
-        </button>
-        <button
-          onClick={() => handleExport('xlsx')}
-          className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm"
-        >
-          Download XLSX
-        </button>
-      </div>
+
+      {/* Filters Section */}
       <Card>
         <CardHeader>
-          <CardTitle>Collection Records</CardTitle>
-          <CardDescription>
-            Review and verify all outstanding collections from field staff
-          </CardDescription>
-          <div className="flex flex-col sm:flex-row sm:items-end space-y-2 sm:space-y-0 sm:space-x-4 pt-4">
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as 'all' | 'pending' | 'complete')}
-              className="px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="all">All Status</option>
-              <option value="pending">Pending Verification</option>
-              <option value="complete">Complete</option>
-            </select>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Collection Records</CardTitle>
+              <CardDescription>
+                {filteredCollections.length} collection(s) found • Total Value: {formatCurrency(filteredCollections.reduce((sum, c) => sum + c.amount, 0))}
+              </CardDescription>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mt-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Status Filter</label>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as 'all' | 'pending' | 'complete')}
+                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              >
+                <option value="all">All Status</option>
+                <option value="pending">Pending Verification</option>
+                <option value="complete">Complete</option>
+              </select>
+            </div>
 
-            <select
-              value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value as 'all' | 'credit' | 'cheque')}
-              className="px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="all">All Types</option>
-              <option value="credit">Credit Collections</option>
-              <option value="cheque">Cheque Collections</option>
-            </select>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Type Filter</label>
+              <select
+                value={typeFilter}
+                onChange={(e) => setTypeFilter(e.target.value as 'all' | 'credit' | 'cheque')}
+                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              >
+                <option value="all">All Types</option>
+                <option value="credit">💰 Credit Collections</option>
+                <option value="cheque">🏦 Cheque Collections</option>
+              </select>
+            </div>
 
-            {/* Date filter */}
-            <div className="flex flex-col sm:flex-row sm:items-end space-y-2 sm:space-y-0 sm:space-x-2">
-              <div>
-                <label htmlFor="dateFrom" className="block text-xs text-slate-500 mb-1">From</label>
-                <input
-                  type="date"
-                  id="dateFrom"
-                  value={dateFrom}
-                  onChange={e => setDateFrom(e.target.value)}
-                  className="px-2 py-1 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label htmlFor="dateTo" className="block text-xs text-slate-500 mb-1">To</label>
-                <input
-                  type="date"
-                  id="dateTo"
-                  value={dateTo}
-                  onChange={e => setDateTo(e.target.value)}
-                  className="px-2 py-1 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">From Date</label>
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={e => setDateFrom(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">To Date</label>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={e => setDateTo(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              />
+            </div>
+            
+            <div className="flex items-end">
+              <button
+                onClick={() => { setStatusFilter('all'); setTypeFilter('all'); setDateFrom(''); setDateTo(''); }}
+                className="w-full px-3 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-lg transition-colors text-sm"
+              >
+                Clear Filters
+              </button>
             </div>
           </div>
         </CardHeader>
-        
+
         <CardContent>
           {filteredCollections.length === 0 ? (
             <div className="text-center py-12">
@@ -677,8 +862,14 @@ export const Collections: React.FC = () => {
       <Modal
         isOpen={!!selectedCollection}
         onClose={() => {
+          // If we had an optimistic conversion pending, revert it when modal closes without confirming
+          if (optimisticConvertedId) {
+            setCollections(prev => prev.map(c => c.id === optimisticConvertedId ? { ...c, collection_type: 'credit' } : c));
+            setOptimisticConvertedId(null);
+          }
           setSelectedCollection(null);
           setVerificationNotes('');
+          setIsConvertingCredit(false);
         }}
         title="Verify Collection"
       >
@@ -766,39 +957,97 @@ export const Collections: React.FC = () => {
                       />
                     </div>
 
-                    {/* If this is a cheque collection, show the cheque recording form */}
-                    {selectedCollection.collection_type === 'cheque' && (
-                      <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-lg space-y-3">
+                    {/* If this is a cheque collection or we're converting, show the cheque recording form(s) */}
+                    {(selectedCollection.collection_type === 'cheque' || isConvertingCredit) && (
+                      <div className="bg-slate-100 dark:bg-slate-800 p-4 rounded-lg space-y-3 border border-slate-200 dark:border-slate-600">
                         <h4 className="font-semibold">Record Cheque Details</h4>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <div>
-                            <label className="block text-xs text-slate-600 mb-1">Payer</label>
-                            <input value={chequeForm.payerName} onChange={e => setChequeForm((p:any)=>({...p,payerName:e.target.value}))} className="w-full px-3 py-2 border rounded" />
+                        {chequeForms.map((cf, idx) => (
+                          <div key={idx} className="p-3 border border-slate-200 dark:border-slate-600 rounded-lg bg-slate-100 dark:bg-slate-700">
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="text-sm font-medium">Cheque {idx + 1}</div>
+                              {chequeForms.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setChequeForms(prev => prev.filter((_, i) => i !== idx))}
+                                  className="text-xs text-red-600 hover:underline"
+                                >
+                                  Remove
+                                </button>
+                              )}
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-xs text-slate-600 dark:text-slate-300 mb-1">Payer *</label>
+                                <input 
+                                  value={cf.payerName} 
+                                  onChange={e => setChequeForms(prev => prev.map((f, i) => i === idx ? { ...f, payerName: e.target.value } : f))} 
+                                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-600 border border-slate-300 dark:border-slate-500 text-slate-900 dark:text-slate-100 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" 
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs text-slate-600 dark:text-slate-300 mb-1">Amount *</label>
+                                <input 
+                                  type="number" 
+                                  value={cf.amount ?? selectedCollection.amount ?? 0} 
+                                  onChange={e => setChequeForms(prev => prev.map((f, i) => i === idx ? { ...f, amount: Number(e.target.value) } : f))} 
+                                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-600 border border-slate-300 dark:border-slate-500 text-slate-900 dark:text-slate-100 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" 
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs text-slate-600 dark:text-slate-300 mb-1">Bank *</label>
+                                <input 
+                                  value={cf.bank} 
+                                  onChange={e => setChequeForms(prev => prev.map((f, i) => i === idx ? { ...f, bank: e.target.value } : f))} 
+                                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-600 border border-slate-300 dark:border-slate-500 text-slate-900 dark:text-slate-100 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" 
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs text-slate-600 dark:text-slate-300 mb-1">Cheque Number *</label>
+                                <input 
+                                  value={cf.chequeNumber} 
+                                  onChange={e => setChequeForms(prev => prev.map((f, i) => i === idx ? { ...f, chequeNumber: e.target.value } : f))} 
+                                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-600 border border-slate-300 dark:border-slate-500 text-slate-900 dark:text-slate-100 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" 
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs text-slate-600 dark:text-slate-300 mb-1">Cheque Date *</label>
+                                <input 
+                                  type="date" 
+                                  value={cf.chequeDate} 
+                                  onChange={e => setChequeForms(prev => prev.map((f, i) => i === idx ? { ...f, chequeDate: e.target.value } : f))} 
+                                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-600 border border-slate-300 dark:border-slate-500 text-slate-900 dark:text-slate-100 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" 
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs text-slate-600 dark:text-slate-300 mb-1">Deposit Date {isConvertingCredit ? '(required to schedule)' : '(optional)'}</label>
+                                <input 
+                                  type="date" 
+                                  value={cf.depositDate} 
+                                  onChange={e => setChequeForms(prev => prev.map((f, i) => i === idx ? { ...f, depositDate: e.target.value } : f))} 
+                                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-600 border border-slate-300 dark:border-slate-500 text-slate-900 dark:text-slate-100 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" 
+                                />
+                              </div>
+                            </div>
+                            <div className="mt-3">
+                              <label className="block text-xs text-slate-600 dark:text-slate-300 mb-1">Notes (Optional)</label>
+                              <textarea 
+                                value={cf.notes} 
+                                onChange={e => setChequeForms(prev => prev.map((f, i) => i === idx ? { ...f, notes: e.target.value } : f))} 
+                                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-600 border border-slate-300 dark:border-slate-500 text-slate-900 dark:text-slate-100 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" 
+                                rows={2}
+                              />
+                            </div>
                           </div>
-                          <div>
-                            <label className="block text-xs text-slate-600 mb-1">Amount</label>
-                            <input type="number" value={chequeForm.amount || selectedCollection.amount || 0} onChange={e => setChequeForm((p:any)=>({...p,amount: Number(e.target.value)}))} className="w-full px-3 py-2 border rounded" />
-                          </div>
-                          <div>
-                            <label className="block text-xs text-slate-600 mb-1">Bank</label>
-                            <input value={chequeForm.bank} onChange={e => setChequeForm((p:any)=>({...p,bank:e.target.value}))} className="w-full px-3 py-2 border rounded" />
-                          </div>
-                          <div>
-                            <label className="block text-xs text-slate-600 mb-1">Cheque Number</label>
-                            <input value={chequeForm.chequeNumber} onChange={e => setChequeForm((p:any)=>({...p,chequeNumber:e.target.value}))} className="w-full px-3 py-2 border rounded" />
-                          </div>
-                          <div>
-                            <label className="block text-xs text-slate-600 mb-1">Cheque Date</label>
-                            <input type="date" value={chequeForm.chequeDate} onChange={e => setChequeForm((p:any)=>({...p,chequeDate:e.target.value}))} className="w-full px-3 py-2 border rounded" />
-                          </div>
-                          <div>
-                            <label className="block text-xs text-slate-600 mb-1">Deposit Date (optional)</label>
-                            <input type="date" value={chequeForm.depositDate} onChange={e => setChequeForm((p:any)=>({...p,depositDate:e.target.value}))} className="w-full px-3 py-2 border rounded" />
-                          </div>
-                        </div>
+                        ))}
+
                         <div>
-                          <label className="block text-xs text-slate-600 mb-1">Notes</label>
-                          <textarea value={chequeForm.notes} onChange={e => setChequeForm((p:any)=>({...p,notes:e.target.value}))} className="w-full px-3 py-2 border rounded" />
+                          <button
+                            type="button"
+                            onClick={() => setChequeForms(prev => [...prev, { payerName: '', amount: 0, bank: '', chequeNumber: '', chequeDate: new Date().toISOString().slice(0,10), depositDate: '', notes: '' }])}
+                            className="px-3 py-2 bg-slate-200 dark:bg-slate-600 text-sm rounded-lg"
+                          >
+                            + Add Another Cheque
+                          </button>
                         </div>
                       </div>
                     )}
@@ -832,7 +1081,7 @@ export const Collections: React.FC = () => {
                                 disabled={chequeSaving}
                                 className="text-white bg-indigo-600 hover:bg-indigo-700 focus:ring-4 focus:outline-none focus:ring-indigo-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center"
                               >
-                                💳 Record Cheque
+                                {isConvertingCredit ? '🔁 Convert to Cheque' : '💳 Record Cheque'}
                               </button>
                         </>
                       ) : (
