@@ -432,14 +432,69 @@ export const Collections: React.FC = () => {
       // Notify any listeners (e.g., ChequeManagement) that cheques were updated
       try { window.dispatchEvent(new Event('cheques-updated')); } catch (e) { /* ignore */ }
 
-  alert('Cheque record saved. Collection remains pending until the cheque is cleared/deposited.');
+  // Mark the collection as complete after cheque details are provided and confirmed
+  const updatedNotes = verificationNotes ? verificationNotes + ' | Cheque recorded.' : 'Cheque recorded.';
+  
+  // Update the order's amountpaid when completing the cheque collection
+  if (selectedCollection.order_id) {
+    try {
+      // Fetch the current order to get the latest amountpaid
+      const { data: orderData, error: fetchOrderError } = await supabase
+        .from('orders')
+        .select('amountpaid')
+        .eq('id', selectedCollection.order_id)
+        .single();
+      if (fetchOrderError) throw fetchOrderError;
+      
+      const prevAmountPaid = orderData?.amountpaid || 0;
+      const updatedOrderData = {
+        notes: `CHEQUE collection of ${formatCurrency(selectedCollection.amount)} completed by ${currentUser?.name}. ${updatedNotes}`,
+        amountpaid: prevAmountPaid + selectedCollection.amount
+      };
+      
+      // Update order in database
+      const { error: orderError } = await supabase
+        .from('orders')
+        .update(updatedOrderData)
+        .eq('id', selectedCollection.order_id);
+      if (orderError) {
+        console.error('Failed to update order amounts:', orderError);
+      }
+    } catch (err) {
+      console.error('Error updating order:', err);
+    }
+  }
+  
+  // Update collection status to complete
+  const { error: collectionCompleteError } = await supabase
+    .from('collections')
+    .update({ 
+      status: 'complete', 
+      notes: updatedNotes, 
+      completed_by: currentUser?.name || '', 
+      completed_at: new Date().toISOString() 
+    })
+    .eq('id', selectedCollection.id);
+    
+  if (collectionCompleteError) {
+    console.error('Failed to mark collection as complete:', collectionCompleteError);
+  } else {
+    // Update local state to reflect completion
+    setCollections(prev =>
+      prev.map(c =>
+        c.id === selectedCollection.id
+          ? { ...c, status: 'complete' as const, notes: updatedNotes, completed_by: currentUser?.name || '', completed_at: new Date().toISOString() }
+          : c
+      )
+    );
+  }
 
-  // Optionally add a note that the cheque was recorded
-  setVerificationNotes(prev => prev ? prev + ' | Cheque recorded.' : 'Cheque recorded.');
-
-  // Do NOT mark the collection as complete here. Cheque is recorded and
-  // collection remains pending until the cheque is cleared/deposited.
-  // reset forms and close modal
+  alert('Cheque details recorded and collection marked as complete.');
+  
+  // Update verification notes
+  setVerificationNotes(updatedNotes);
+  
+  // Reset forms and close modal
   setChequeForms([]);
   // If we were converting a credit collection, handle conversion safely (avoid 409)
   if (isConvertingCredit && selectedCollection?.id) {

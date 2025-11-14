@@ -202,17 +202,24 @@ const ChequeManagement: React.FC = () => {
 
           if (orderId) {
             // If collection references an order, update order amounts
-            const { data: orderData, error: orderErr } = await supabase.from('orders').select('amountpaid').eq('id', orderId).single();
+            const { data: orderData, error: orderErr } = await supabase.from('orders').select('amountpaid, chequebalance, creditbalance').eq('id', orderId).single();
             if (orderErr) throw orderErr;
             const prevAmountPaid = orderData?.amountpaid || 0;
+            const chequeAmount = updatedCheque?.amount || 0;
+            
             const updatedOrder: any = {
-              amountpaid: (prevAmountPaid || 0) + (updatedCheque?.amount || 0),
+              amountpaid: prevAmountPaid + chequeAmount,
             };
+            
+            // For cheque collections, reduce chequebalance by the specific cheque amount (not set to 0)
             if (collectionType === 'cheque') {
-              updatedOrder.chequebalance = 0;
+              const currentChequeBalance = orderData?.chequebalance || 0;
+              updatedOrder.chequebalance = Math.max(0, currentChequeBalance - chequeAmount);
             } else if (collectionType === 'credit') {
+              // For credit collections, we can still set creditbalance to 0 as before
               updatedOrder.creditbalance = 0;
             }
+            
             const { error: updateOrderErr } = await supabase.from('orders').update(updatedOrder).eq('id', orderId);
             if (updateOrderErr) throw updateOrderErr;
           }
@@ -525,8 +532,7 @@ const ChequeManagement: React.FC = () => {
       bank: form.bank || null,
       cheque_number: form.chequeNumber || null,
       deposit_date: form.date || null,
-      notes: form.notes || null,
-      updated_at: new Date().toISOString()
+      notes: form.notes || null
     };
 
     setLoading(true);
