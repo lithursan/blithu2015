@@ -24,7 +24,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isSidebarOpen, closeSidebar })
 
   const accessibleNavItems = NAV_ITEMS.filter(item => {
     // Hide cheques from drivers specifically (drivers should not access cheque management)
-    if (item.path === '/cheques') {
+    if (item.path === '/cheques' || item.path === '/issued-cheques') {
       return currentUser?.role !== UserRole.Driver;
     }
     if (item.path === '/users') {

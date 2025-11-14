@@ -14,6 +14,7 @@ import { Drivers } from './components/pages/Drivers';
 import { Suppliers } from './components/pages/Suppliers';
 import { Collections } from './components/pages/Collections';
 import ChequeManagement from './components/pages/ChequeManagement';
+import IssuedCheques from './components/pages/IssuedCheques';
 import Expenses from './components/pages/Expenses';
 import { LiveTracking } from './components/pages/LiveTracking';
 import { MyLocation } from './components/pages/MyLocation';
@@ -88,6 +89,7 @@ const MainLayout = () => {
                         <Route path="/suppliers" element={<Suppliers />} />
                         <Route path="/collections" element={<Collections />} />
                         <Route path="/cheques" element={<RoleProtectedRoute allowedRoles={["Admin"]} element={<ChequeManagement />} />} />
+                        <Route path="/issued-cheques" element={<RoleProtectedRoute allowedRoles={["Admin"]} element={<IssuedCheques />} />} />
                         <Route path="/drivers" element={<Drivers />} />
                         <Route path="/expenses" element={<RoleProtectedRoute allowedRoles={["Admin", "Manager"]} element={<Expenses />} />} />
                         <Route path="/live-tracking" element={<RoleProtectedRoute allowedRoles={["Admin", "Manager"]} element={<LiveTracking />} />} />

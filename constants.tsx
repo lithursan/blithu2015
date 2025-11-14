@@ -119,6 +119,16 @@ export const NAV_ITEMS = [
       </svg>
     ),
   },
+  {
+    path: '/issued-cheques',
+    label: 'Issued Cheques',
+    icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 4v12l-4-2-4 2V4M8 2h8a2 2 0 012 2v16l-6-3-6 3V4a2 2 0 012-2z" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 7h.01M9 11h6M9 15h6" />
+      </svg>
+    ),
+  },
   
   {
     path: '/users',

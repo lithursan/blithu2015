@@ -409,18 +409,81 @@ const ChequeManagement: React.FC = () => {
         </div>
       </div>
 
-      <div className={`grid grid-cols-1 ${showForm ? 'lg:grid-cols-3' : 'lg:grid-cols-1'} gap-4 mb-6`}>
-        {showForm && (
-          <Card className="lg:col-span-1">
-          <CardHeader>
-            <CardTitle className="text-lg sm:text-xl">Record Received Cheque</CardTitle>
-            <CardDescription className="text-slate-300">Enter cheque details and save</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-3">
-              <div>
-                <label className="block text-sm font-medium">Payer</label>
-                <input className="w-full px-3 py-2 rounded bg-slate-800 text-slate-100 placeholder-slate-400 border border-slate-700" value={form.payerName} onChange={e => handleChange('payerName', e.target.value)} />
+      {/* Alert Cards */}
+      {(() => {
+        const upcomingCheques = cheques.filter(c => isChequeUpcoming(c));
+        const dueTodayCheques = cheques.filter(c => isChequeDueToday(c));
+        const pendingCheques = cheques.filter(c => c.status !== 'Cleared' && c.status !== 'Bounced' && c.deposit_date);
+        
+        return (dueTodayCheques.length > 0 || upcomingCheques.length > 0 || pendingCheques.length > 0) && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 auto-cols-fr">
+            {dueTodayCheques.length > 0 && (
+              <Card className="border-0 bg-gradient-to-br from-orange-50 to-orange-100 dark:from-orange-900/20 dark:to-orange-800/20 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02]">
+                <CardContent className="p-6">
+                  <div className="flex items-center">
+                    <div className="p-3 bg-gradient-to-br from-orange-400 to-orange-500 rounded-xl shadow-lg">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                    </div>
+                    <div className="ml-4">
+                      <p className="text-sm font-semibold text-orange-800 dark:text-orange-200 uppercase tracking-wide">Due Today</p>
+                      <p className="text-2xl font-bold text-orange-600 dark:text-orange-400">{dueTodayCheques.length}</p>
+                      <p className="text-xs text-orange-700 dark:text-orange-300">cheque(s) to deposit</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+            
+            {upcomingCheques.length > 0 && (
+              <Card className="border-0 bg-gradient-to-br from-yellow-50 to-yellow-100 dark:from-yellow-900/20 dark:to-yellow-800/20 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02]">
+                <CardContent className="p-6">
+                  <div className="flex items-center">
+                    <div className="p-3 bg-gradient-to-br from-yellow-400 to-yellow-500 rounded-xl shadow-lg">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                    </div>
+                    <div className="ml-4">
+                      <p className="text-sm font-semibold text-yellow-800 dark:text-yellow-200 uppercase tracking-wide">Upcoming</p>
+                      <p className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">{upcomingCheques.length}</p>
+                      <p className="text-xs text-yellow-700 dark:text-yellow-300">within 3 days</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {pendingCheques.length > 0 && (
+              <Card className="border-0 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02]">
+                <CardContent className="p-6">
+                  <div className="flex items-center">
+                    <div className="p-3 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-lg">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                      </svg>
+                    </div>
+                    <div className="ml-4">
+                      <p className="text-sm font-semibold text-blue-800 dark:text-blue-200 uppercase tracking-wide">Scheduled</p>
+                      <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{pendingCheques.length}</p>
+                      <p className="text-xs text-blue-700 dark:text-blue-300">deposits planned</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center">
+              <div className="p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
+                <span className="text-2xl">🏦</span>
               </div>
               <div>
                 <label className="block text-sm font-medium">Amount</label>
