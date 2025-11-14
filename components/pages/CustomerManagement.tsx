@@ -122,7 +122,7 @@ const RouteCustomerList: React.FC<RouteCustomerListProps> = ({ selectedRoute, on
                    currentUser?.role === UserRole.Sales;
 
   const canDelete = currentUser?.role === UserRole.Admin;
-  const canTransfer = currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Manager;
+  const canTransfer = currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Secretary || currentUser?.role === UserRole.Manager;
 
   // Calculate metrics for each customer from orders table
   const customerOutstandingMap: Record<string, number> = {};
@@ -672,7 +672,7 @@ const RouteCustomerList: React.FC<RouteCustomerListProps> = ({ selectedRoute, on
       )}
 
       {/* Admin/Manager View Information */}
-      {(currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Manager) && (
+      {(currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Secretary || currentUser?.role === UserRole.Manager) && (
         <Card className="bg-gradient-to-r from-green-50 via-emerald-50 to-teal-50 dark:from-green-900/20 dark:via-emerald-900/20 dark:to-teal-900/20 border-green-200 dark:border-green-800">
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
@@ -781,7 +781,7 @@ const RouteCustomerList: React.FC<RouteCustomerListProps> = ({ selectedRoute, on
                                         👤 My Customer
                                       </Badge>
                                     );
-                                  } else if (currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Manager) {
+                                  } else if (currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Secretary || currentUser?.role === UserRole.Manager) {
                                     const creatorName = customer.created_by ? customer.created_by.slice(0, 8) + '...' : 'System';
                                     return (
                                       <Badge variant="secondary" className="px-1.5 py-0.5 text-xs bg-slate-100 text-slate-600 border-slate-300 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-600">

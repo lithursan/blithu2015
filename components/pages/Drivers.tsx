@@ -21,7 +21,7 @@ export const Drivers: React.FC = () => {
     const { users, products, setProducts, driverAllocations, setDriverAllocations, suppliers, deliveryAggregatedProducts, setDeliveryAggregatedProducts } = useData();
     const { currentUser } = useAuth();
 
-    if (currentUser?.role !== UserRole.Admin && currentUser?.role !== UserRole.Manager && currentUser?.role !== UserRole.Sales) {
+    if (currentUser?.role !== UserRole.Admin && currentUser?.role !== UserRole.Secretary && currentUser?.role !== UserRole.Manager && currentUser?.role !== UserRole.Sales) {
         return (
             <div className="p-4 sm:p-6 lg:p-8 text-center">
                  <Card className="max-w-md mx-auto">

@@ -315,7 +315,7 @@ const Expenses: React.FC = () => {
                                             <td className="py-2 px-3 text-right w-36"><span className="inline-block px-3 py-1 rounded-full font-medium text-white" style={{backgroundColor: '#16A34A'}}>{formatCurrency(parseFloat(exp.amount || 0))}</span></td>
                                             <td className="py-2 px-3 w-1/3 truncate">{exp.note}</td>
                                             <td className="py-2 px-3 text-center w-28">
-                                                {(currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Manager) && (
+                                                {(currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Secretary || currentUser?.role === UserRole.Manager) && (
                                                     <button
                                                         onClick={async () => {
                                                             console.log('Delete button clicked for expense ID:', exp.id);
@@ -410,7 +410,7 @@ const Expenses: React.FC = () => {
                                                         className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-sm rounded transition-colors"
                                                     >Delete</button>
                                                 )}
-                                                {!(currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Manager) && (
+                                                {!(currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Secretary || currentUser?.role === UserRole.Manager) && (
                                                     <span className="text-xs text-gray-500">No Access</span>
                                                 )}
                                             </td>

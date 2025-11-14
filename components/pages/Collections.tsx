@@ -117,12 +117,12 @@ export const Collections: React.FC = () => {
   };
 
   const isAdminManager = useMemo(() => 
-    currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Manager,
+    currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Secretary || currentUser?.role === UserRole.Manager,
     [currentUser]
   );
 
   const isAdmin = useMemo(() => 
-    currentUser?.role === UserRole.Admin,
+    currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Secretary,
     [currentUser]
   );
 
@@ -520,7 +520,7 @@ export const Collections: React.FC = () => {
     return (
       <div className="p-8 text-center">
         <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-4">Access Denied</h1>
-        <p className="text-slate-600 dark:text-slate-400">Only Admin and Manager roles can access the Collection Management page.</p>
+        <p className="text-slate-600 dark:text-slate-400">Only Admin, Secretary and Manager roles can access the Collection Management page.</p>
       </div>
     );
   }

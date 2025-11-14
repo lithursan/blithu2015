@@ -84,15 +84,15 @@ const MainLayout = () => {
                         <Route path="/" element={<Dashboard />} />
                         <Route path="/products" element={<Products />} />
                         <Route path="/orders" element={<Orders />} />
-                        <Route path="/deliveries" element={<RoleProtectedRoute allowedRoles={["Admin", "Manager"]} element={<Deliveries />} />} />
+                        <Route path="/deliveries" element={<RoleProtectedRoute allowedRoles={["Admin", "Secretary", "Manager"]} element={<Deliveries />} />} />
                         <Route path="/customers" element={<CustomerManagement />} />
                         <Route path="/suppliers" element={<Suppliers />} />
                         <Route path="/collections" element={<Collections />} />
-                        <Route path="/cheques" element={<RoleProtectedRoute allowedRoles={["Admin"]} element={<ChequeManagement />} />} />
-                        <Route path="/issued-cheques" element={<RoleProtectedRoute allowedRoles={["Admin"]} element={<IssuedCheques />} />} />
+                        <Route path="/cheques" element={<RoleProtectedRoute allowedRoles={["Admin", "Secretary", "Manager"]} element={<ChequeManagement />} />} />
+                        <Route path="/issued-cheques" element={<RoleProtectedRoute allowedRoles={["Admin", "Secretary", "Manager"]} element={<IssuedCheques />} />} />
                         <Route path="/drivers" element={<Drivers />} />
-                        <Route path="/expenses" element={<RoleProtectedRoute allowedRoles={["Admin", "Manager"]} element={<Expenses />} />} />
-                        <Route path="/live-tracking" element={<RoleProtectedRoute allowedRoles={["Admin", "Manager"]} element={<LiveTracking />} />} />
+                        <Route path="/expenses" element={<RoleProtectedRoute allowedRoles={["Admin", "Secretary", "Manager"]} element={<Expenses />} />} />
+                        <Route path="/live-tracking" element={<RoleProtectedRoute allowedRoles={["Admin", "Secretary", "Manager"]} element={<LiveTracking />} />} />
                         <Route path="/my-location" element={<RoleProtectedRoute allowedRoles={["Sales Rep", "Driver"]} element={<MyLocation />} />} />
                         <Route path="/users" element={<UserManagement />} />
                         <Route path="/settings" element={<Settings />} />

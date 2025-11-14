@@ -393,7 +393,7 @@ export const Orders: React.FC = () => {
   );
 
   const isManagerView = useMemo(() => 
-    currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Manager,
+    currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Secretary || currentUser?.role === UserRole.Manager,
     [currentUser]
   );
 

@@ -7,6 +7,7 @@ export enum OrderStatus {
 
 export enum UserRole {
   Admin = 'Admin',
+  Secretary = 'Secretary',
   Manager = 'Manager',
   Sales = 'Sales Rep',
   Driver = 'Driver',

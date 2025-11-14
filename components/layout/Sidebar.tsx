@@ -23,28 +23,28 @@ export const Sidebar: React.FC<SidebarProps> = ({ isSidebarOpen, closeSidebar })
   const { upcomingChequesCount = 0 } = useData();
 
   const accessibleNavItems = NAV_ITEMS.filter(item => {
-    // Hide cheques from drivers specifically (drivers should not access cheque management)
+    // Allow cheques access for Admin, Secretary and Manager
     if (item.path === '/cheques' || item.path === '/issued-cheques') {
-      return currentUser?.role !== UserRole.Driver;
+      return currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Secretary || currentUser?.role === UserRole.Manager;
     }
     if (item.path === '/users') {
-      // Allow Admins and Managers to see User Management
-      return currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Manager;
+      // Only allow Admins to see User Management (Secretary excluded)
+      return currentUser?.role === UserRole.Admin;
     }
-    // Limit deliveries, expenses, and live tracking to Admin and Manager
+    // Allow deliveries, expenses, and live tracking to Admin, Secretary and Manager
     if (item.path === '/deliveries' || item.path === '/expenses' || item.path === '/live-tracking') {
-      return currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Manager;
+      return currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Secretary || currentUser?.role === UserRole.Manager;
     }
     // My Location is only for Sales Reps and Drivers
     if (item.path === '/my-location') {
       return currentUser?.role === UserRole.Sales || currentUser?.role === UserRole.Driver;
     }
-    // Make Settings visible to Admins and Managers
+    // Make Settings visible to Admins, Secretary and Managers
     if (item.path === '/settings') {
-      return currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Manager;
+      return currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Secretary || currentUser?.role === UserRole.Manager;
     }
     if (item.path === '/drivers' || item.path === '/suppliers' || item.path === '/collections') {
-      return currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Manager;
+      return currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Secretary || currentUser?.role === UserRole.Manager;
     }
     // Cheque alerts settings only for Admin
     

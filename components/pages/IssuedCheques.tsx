@@ -3,6 +3,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../ui
 import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
 import { supabase } from '../../supabaseClient';
+import { UserRole } from '../../types';
 
 const formatCurrency = (amount: number, currency = 'LKR') => {
   try {
@@ -17,6 +18,9 @@ const IssuedCheques: React.FC = () => {
   const { refetchData, customers } = useData();
   const [issuedCheques, setIssuedCheques] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+
+  // Check if current user is manager (read-only access) - Secretary gets full access like Admin
+  const isManager = currentUser?.role === UserRole.Manager;
 
   const [form, setForm] = useState({
     payeeName: '',
@@ -239,8 +243,8 @@ const IssuedCheques: React.FC = () => {
     }
   };
 
-  if (!currentUser || currentUser.role !== 'Admin') {
-    return <div className="p-6">You must be an Admin to access Issued Cheques Management.</div>;
+  if (!currentUser || (currentUser.role !== 'Admin' && currentUser.role !== 'Secretary' && currentUser.role !== 'Manager')) {
+    return <div className="p-6">You must be an Admin, Secretary or Manager to access Issued Cheques Management.</div>;
   }
 
   // Get upcoming alerts count
@@ -269,17 +273,19 @@ const IssuedCheques: React.FC = () => {
               </p>
             </div>
           </div>
-          <div className="mt-4 sm:mt-0 flex space-x-3">
-            <button
-              onClick={() => setShowForm(s => !s)}
-              className="flex items-center px-6 py-3 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-[1.02] font-medium"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              {showForm ? 'Hide Form' : 'Record Issued Cheque'}
-            </button>
-          </div>
+          {!isManager && (
+            <div className="mt-4 sm:mt-0 flex space-x-3">
+              <button
+                onClick={() => setShowForm(s => !s)}
+                className="flex items-center px-6 py-3 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-[1.02] font-medium"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                {showForm ? 'Hide Form' : 'Record Issued Cheque'}
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -431,7 +437,7 @@ const IssuedCheques: React.FC = () => {
       </div>
 
       {/* Form Section */}
-      {showForm && (
+      {showForm && !isManager && (
         <Card className="border-0 bg-gradient-to-br from-slate-50 to-white dark:from-slate-800 dark:to-slate-900 shadow-xl">
           <CardHeader className="pb-6">
             <div className="flex items-center space-x-3">
@@ -574,7 +580,7 @@ const IssuedCheques: React.FC = () => {
             <div className="text-center py-8">
               <div className="text-4xl mb-2">📄</div>
               <p className="text-slate-500 mb-2">No issued cheques recorded yet</p>
-              <p className="text-sm text-slate-400">Click "Record Issued Cheque" to add your first cheque</p>
+              {!isManager && <p className="text-sm text-slate-400">Click "Record Issued Cheque" to add your first cheque</p>}
             </div>
           ) : (
             <>
@@ -617,7 +623,7 @@ const IssuedCheques: React.FC = () => {
                                 <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Cash Date</th>
                                 <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Purpose</th>
                                 <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Status</th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Actions</th>
+                                {!isManager && <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Actions</th>}
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
@@ -634,12 +640,18 @@ const IssuedCheques: React.FC = () => {
                                   <td className="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">{c.cheque_number || '-'}</td>
                                   <td className="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">{(c.issue_date || c.created_at || '').slice ? (c.issue_date || c.created_at).slice(0,10) : String(c.issue_date || c.created_at)}</td>
                                   <td className="px-4 py-3">
-                                    <input 
-                                      type="date" 
-                                      defaultValue={c.cash_date ? (c.cash_date.slice ? c.cash_date.slice(0,10) : c.cash_date) : ''} 
-                                      onChange={(e) => setCashDate(c.id, e.target.value)} 
-                                      className="px-2 py-1 text-sm border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-indigo-500 focus:border-transparent" 
-                                    />
+                                    {isManager ? (
+                                      <span className="px-2 py-1 text-sm text-slate-500 dark:text-slate-400">
+                                        {c.cash_date ? (c.cash_date.slice ? c.cash_date.slice(0,10) : c.cash_date) : 'Not set'}
+                                      </span>
+                                    ) : (
+                                      <input 
+                                        type="date" 
+                                        defaultValue={c.cash_date ? (c.cash_date.slice ? c.cash_date.slice(0,10) : c.cash_date) : ''} 
+                                        onChange={(e) => setCashDate(c.id, e.target.value)} 
+                                        className="px-2 py-1 text-sm border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-indigo-500 focus:border-transparent" 
+                                      />
+                                    )}
                                   </td>
                                   <td className="px-4 py-3 text-sm text-slate-500 dark:text-slate-400 max-w-32 truncate" title={c.purpose}>{c.purpose || '-'}</td>
                                   <td className="px-4 py-3">
@@ -653,37 +665,39 @@ const IssuedCheques: React.FC = () => {
                                     {isChequeDueToday(c) && <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400">Due Today</span>}
                                     {isChequeOverdue(c) && <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">Overdue</span>}
                                   </td>
-                                  <td className="px-4 py-3">
-                                    {c.status === 'Cashed' || c.status === 'Stopped' ? (
-                                      <button 
-                                        onClick={() => deleteCheque(c.id)} 
-                                        className="px-3 py-1 text-xs bg-slate-600 hover:bg-slate-700 text-white rounded transition-colors"
-                                      >
-                                        Delete
-                                      </button>
-                                    ) : (
-                                      <div className="flex space-x-2">
-                                        <button 
-                                          onClick={() => markCashed(c.id)} 
-                                          className="px-3 py-1 text-xs bg-green-600 hover:bg-green-700 text-white rounded transition-colors"
-                                        >
-                                          Mark Cashed
-                                        </button>
-                                        <button 
-                                          onClick={() => markStopped(c.id)} 
-                                          className="px-3 py-1 text-xs bg-red-600 hover:bg-red-700 text-white rounded transition-colors"
-                                        >
-                                          Stop Payment
-                                        </button>
+                                  {!isManager && (
+                                    <td className="px-4 py-3">
+                                      {c.status === 'Cashed' || c.status === 'Stopped' ? (
                                         <button 
                                           onClick={() => deleteCheque(c.id)} 
                                           className="px-3 py-1 text-xs bg-slate-600 hover:bg-slate-700 text-white rounded transition-colors"
                                         >
                                           Delete
                                         </button>
-                                      </div>
-                                    )}
-                                  </td>
+                                      ) : (
+                                        <div className="flex space-x-2">
+                                          <button 
+                                            onClick={() => markCashed(c.id)} 
+                                            className="px-3 py-1 text-xs bg-green-600 hover:bg-green-700 text-white rounded transition-colors"
+                                          >
+                                            Mark Cashed
+                                          </button>
+                                          <button 
+                                            onClick={() => markStopped(c.id)} 
+                                            className="px-3 py-1 text-xs bg-red-600 hover:bg-red-700 text-white rounded transition-colors"
+                                          >
+                                            Stop Payment
+                                          </button>
+                                          <button 
+                                            onClick={() => deleteCheque(c.id)} 
+                                            className="px-3 py-1 text-xs bg-slate-600 hover:bg-slate-700 text-white rounded transition-colors"
+                                          >
+                                            Delete
+                                          </button>
+                                        </div>
+                                      )}
+                                    </td>
+                                  )}
                                 </tr>
                               ))}
                             </tbody>

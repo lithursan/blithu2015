@@ -76,7 +76,7 @@ export const Products: React.FC = () => {
   const currency = currentUser?.settings.currency || 'LKR';
 
   const canEdit = useMemo(() => 
-    currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Manager,
+    currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Secretary || currentUser?.role === UserRole.Manager,
     [currentUser]
   );
 
