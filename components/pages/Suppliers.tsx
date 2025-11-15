@@ -6,6 +6,7 @@ import { useData } from '../../contexts/DataContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../supabaseClient';
 import { exportSuppliers } from '../../utils/exportUtils';
+import { exportToPDF } from '../../utils/pdfExport';
 import { confirmSecureDelete } from '../../utils/passwordConfirmation';
 
 export const Suppliers: React.FC = () => {
@@ -222,6 +223,41 @@ export const Suppliers: React.FC = () => {
     );
   },[suppliers, searchTerm, accessibleSuppliers]
   );
+
+  // PDF Export function
+  const exportSuppliersPDF = () => {
+    const columns = [
+      { key: 'name', title: 'Supplier Name' },
+      { key: 'contactPerson', title: 'Contact Person' },
+      { key: 'phone', title: 'Phone' },
+      { key: 'email', title: 'Email' },
+      { key: 'address', title: 'Address' },
+      { key: 'productCount', title: 'Products' },
+      { key: 'totalOrders', title: 'Total Orders' }
+    ];
+
+    const data = filteredSuppliers.map(supplier => {
+      const supplierProducts = products.filter(p => p.supplier === supplier.name);
+      const supplierOrders = orders.filter(order => 
+        order.orderItems.some(item => {
+          const product = products.find(p => p.id === item.productId);
+          return product?.supplier === supplier.name;
+        })
+      );
+
+      return {
+        name: supplier.name,
+        contactPerson: supplier.contactPerson,
+        phone: supplier.phone,
+        email: supplier.email,
+        address: supplier.address,
+        productCount: supplierProducts.length.toString(),
+        totalOrders: supplierOrders.length.toString()
+      };
+    });
+
+    exportToPDF('Suppliers Report', columns, data);
+  };
   
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6">
@@ -243,6 +279,13 @@ export const Suppliers: React.FC = () => {
               />
 
               <div className="flex items-center gap-2">
+                <button
+                  onClick={exportSuppliersPDF}
+                  className="px-3 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors text-sm"
+                  title="Export as PDF"
+                >
+                  📄 PDF
+                </button>
                 <button
                   onClick={() => exportSuppliers(filteredSuppliers, 'csv')}
                   className="px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors text-sm"

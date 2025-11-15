@@ -6,6 +6,7 @@ import { Modal } from '../ui/Modal';
 import { useData } from '../../contexts/DataContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { confirmSecureDelete } from '../../utils/passwordConfirmation';
+import { exportToPDF } from '../../utils/pdfExport';
 
 const formatCurrency = (amount: number, currency: string) => {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency, minimumFractionDigits: 0 }).format(amount).replace('$', `${currency} `);
@@ -229,6 +230,51 @@ export const RouteOverview: React.FC<RouteOverviewProps> = ({ onRouteSelect }) =
   const totalOutstanding = (Object.values(routeMetrics) as RouteMetric[]).reduce((sum, route) => sum + route.totalOutstanding, 0);
   const totalSpent = (Object.values(routeMetrics) as RouteMetric[]).reduce((sum, route) => sum + route.totalSpent, 0);
 
+  // PDF Export function
+  const exportRoutesPDF = () => {
+    const columns = [
+      { key: 'routeName', title: 'Route Name' },
+      { key: 'customerCount', title: 'Total Customers' },
+      { key: 'gpsCustomers', title: 'GPS Customers' },
+      { key: 'gpsCoverage', title: 'GPS Coverage' },
+      { key: 'totalOutstanding', title: 'Outstanding Amount' },
+      { key: 'totalRevenue', title: 'Total Revenue' },
+      { key: 'status', title: 'Route Status' }
+    ];
+
+    const data = routes.map(routeName => {
+      const metrics = routeMetrics[routeName] || {
+        customerCount: 0,
+        totalOutstanding: 0,
+        totalSpent: 0,
+        customers: [],
+        hasGPSCustomers: 0
+      };
+
+      const gpsCoverage = metrics.customerCount > 0 
+        ? `${Math.round((metrics.hasGPSCustomers / metrics.customerCount) * 100)}%`
+        : '0%';
+
+      const status = metrics.customerCount === 0 
+        ? 'Empty' 
+        : metrics.hasGPSCustomers === metrics.customerCount
+        ? 'Ready'
+        : 'Needs GPS';
+
+      return {
+        routeName: routeName,
+        customerCount: metrics.customerCount.toString(),
+        gpsCustomers: `${metrics.hasGPSCustomers}/${metrics.customerCount}`,
+        gpsCoverage: gpsCoverage,
+        totalOutstanding: formatCurrency(metrics.totalOutstanding, currency),
+        totalRevenue: formatCurrency(metrics.totalSpent, currency),
+        status: status
+      };
+    });
+
+    exportToPDF('Route Management Report', columns, data);
+  };
+
   useEffect(() => {
     loadRoutesFromDatabase();
   }, []);
@@ -242,9 +288,17 @@ export const RouteOverview: React.FC<RouteOverviewProps> = ({ onRouteSelect }) =
             Select a route to view and manage customers in that delivery route
           </p>
         </div>
-        <div className="text-right">
-          <div className="text-sm text-slate-500 dark:text-slate-400">Total Routes</div>
-          <div className="text-2xl font-bold text-slate-800 dark:text-slate-100">{routes.length}</div>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={exportRoutesPDF}
+            className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center gap-2"
+          >
+            📄 PDF
+          </button>
+          <div className="text-right">
+            <div className="text-sm text-slate-500 dark:text-slate-400">Total Routes</div>
+            <div className="text-2xl font-bold text-slate-800 dark:text-slate-100">{routes.length}</div>
+          </div>
         </div>
       </div>
 

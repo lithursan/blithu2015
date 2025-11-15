@@ -7,6 +7,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
 import { supabase } from '../../supabaseClient';
 import { exportUsers } from '../../utils/exportUtils';
+import { exportToPDF } from '../../utils/pdfExport';
 import { confirmSecureDelete } from '../../utils/passwordConfirmation';
 
 const getStatusBadgeVariant = (status: UserStatus): 'success' | 'danger' => {
@@ -277,12 +278,50 @@ export const UserManagement: React.FC = () => {
         [users, searchTerm]
     );
 
+    // PDF Export function
+    const exportUsersPDF = () => {
+        const columns = [
+            { key: 'name', title: 'Name' },
+            { key: 'email', title: 'Email' },
+            { key: 'phone', title: 'Phone' },
+            { key: 'role', title: 'Role' },
+            { key: 'status', title: 'Status' },
+            { key: 'lastLogin', title: 'Last Login' },
+            { key: 'assignedSuppliers', title: 'Assigned Suppliers' }
+        ];
+
+        const data = filteredUsers.map(user => ({
+            name: user.name,
+            email: user.email,
+            phone: user.phone || 'N/A',
+            role: user.role,
+            status: user.status,
+            lastLogin: user.lastLogin ? new Date(user.lastLogin).toLocaleDateString() : 'Never',
+            assignedSuppliers: user.assignedSupplierNames?.join(', ') || 'None'
+        }));
+
+        exportToPDF('Users Report', columns, data, {
+            summary: {
+                'Total Users': filteredUsers.length.toString(),
+                'Active Users': filteredUsers.filter(u => u.status === UserStatus.Active).length.toString(),
+                'Inactive Users': filteredUsers.filter(u => u.status === UserStatus.Inactive).length.toString()
+            }
+        });
+    };
+
     return (
         <div className="p-4 sm:p-6 lg:p-8 space-y-8">
             <div className="flex justify-between items-center">
                 <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-100">User Management</h1>
                 <div className="flex gap-2">
                     {/* Export Buttons */}
+                    <button
+                        onClick={exportUsersPDF}
+                        className="px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm"
+                        title="Export as PDF"
+                    >
+                        📄 PDF
+                    </button>
                     <button
                         onClick={() => exportUsers(filteredUsers, 'csv')}
                         className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"

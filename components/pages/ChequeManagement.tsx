@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
 import { supabase } from '../../supabaseClient';
 import { UserRole } from '../../types';
+import { exportToPDF } from '../../utils/pdfExport';
 
 const formatCurrency = (amount: number, currency = 'LKR') => {
   try {
@@ -566,6 +567,40 @@ const ChequeManagement: React.FC = () => {
     setShowForm(false);
   };
 
+  const exportChequesPDF = () => {
+    const columns = [
+      { key: 'payer_name', title: 'Payer Name' },
+      { key: 'amount', title: 'Amount' },
+      { key: 'bank', title: 'Bank' },
+      { key: 'cheque_number', title: 'Cheque Number' },
+      { key: 'deposit_date', title: 'Deposit Date' },
+      { key: 'status', title: 'Status' },
+      { key: 'notes', title: 'Notes' }
+    ];
+
+    const data = cheques.map(cheque => ({
+      payer_name: cheque.payer_name || 'N/A',
+      amount: `LKR ${(cheque.amount || 0).toFixed(2)}`,
+      bank: cheque.bank || 'N/A',
+      cheque_number: cheque.cheque_number || 'N/A',
+      deposit_date: cheque.deposit_date ? new Date(cheque.deposit_date).toLocaleDateString() : 'Not set',
+      status: cheque.status || 'Pending',
+      notes: cheque.notes || 'No notes'
+    }));
+
+    const totalAmount = cheques.reduce((sum, c) => sum + (c.amount || 0), 0);
+
+    exportToPDF('Received Cheques Report', columns, data, {
+      summary: {
+        'Total Cheques': cheques.length.toString(),
+        'Total Amount': `LKR ${totalAmount.toFixed(2)}`,
+        'Cleared Cheques': cheques.filter(c => c.status === 'Cleared').length.toString(),
+        'Pending Cheques': cheques.filter(c => c.status === 'Pending').length.toString(),
+        'Bounced Cheques': cheques.filter(c => c.status === 'Bounced').length.toString()
+      }
+    });
+  };
+
   if (!currentUser || (currentUser.role !== 'Admin' && currentUser.role !== 'Secretary' && currentUser.role !== 'Manager')) {
     return <div className="p-6">You must be an Admin, Secretary or Manager to access Cheque Management.</div>;
   }
@@ -580,8 +615,8 @@ const ChequeManagement: React.FC = () => {
             Manage received cheques and track deposit schedules
           </p>
         </div>
-        {!isManager && (
-          <div className="mt-4 sm:mt-0 flex space-x-2">
+        <div className="mt-4 sm:mt-0 flex space-x-2">
+          {!isManager && (
             <button
               onClick={() => setShowForm(s => !s)}
               className="flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors"
@@ -589,8 +624,19 @@ const ChequeManagement: React.FC = () => {
               <span className="text-lg mr-2">+</span>
               {showForm ? 'Hide Form' : 'Record Cheque'}
             </button>
-          </div>
-        )}
+          )}
+          {cheques.length > 0 && (
+            <button
+              onClick={exportChequesPDF}
+              className="flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              Export PDF
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Alert Cards */}

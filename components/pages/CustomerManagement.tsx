@@ -19,6 +19,8 @@ import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../supabaseClient';
 import { validatePhoneFormat, normalizePhoneNumber } from '../../utils/phoneValidation';
 import { confirmSecureDelete } from '../../utils/passwordConfirmation';
+import { exportToPDF } from '../../utils/pdfExport';
+import { exportToPDF } from '../../utils/pdfExport';
 
 const formatCurrency = (amount: number, currency: string) => {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency, minimumFractionDigits: 0 }).format(amount).replace('$', `${currency} `);
@@ -557,6 +559,44 @@ const RouteCustomerList: React.FC<RouteCustomerListProps> = ({ selectedRoute, on
     sum + (customerOutstandingMap[customer.id] || 0), 0
   );
 
+  // PDF Export function for route customers
+  const exportRouteCustomersPDF = () => {
+    const columns = [
+      { key: 'name', title: 'Customer Name' },
+      { key: 'phone', title: 'Phone Number' },
+      { key: 'route', title: 'Route' },
+      { key: 'outstanding', title: 'Outstanding Amount' },
+      { key: 'totalSales', title: 'Total Sales' },
+      { key: 'orderCount', title: 'Total Orders' }
+    ];
+
+    const data = filteredCustomers.map(customer => {
+      const outstanding = customerOutstandingMap[customer.id] || 0;
+      const totalSales = customerSalesMap[customer.id] || 0;
+      const orderCount = customerOrderCountMap[customer.id] || 0;
+      
+      // Clean location data (remove GPS coordinates for PDF)
+      const cleanLocation = customer.location ? 
+        customer.location.replace(/GPS:\s*-?\d+\.?\d*,\s*-?\d+\.?\d*\s*\(?\)?/g, '').trim() || 'No address' :
+        'No address';
+
+      return {
+        name: customer.name || 'Unknown',
+        phone: formatPhoneNumber(customer.phone || ''),
+        route: customer.route || 'Unassigned',
+        outstanding: formatCurrency(outstanding, currency),
+        totalSales: formatCurrency(totalSales, currency),
+        orderCount: orderCount.toString()
+      };
+    });
+
+    const title = selectedRoute === 'All Routes' ? 
+      'All Customers Report' : 
+      `${selectedRoute} Route Customers Report`;
+      
+    exportToPDF(title, columns, data);
+  };
+
   // Gradient patterns and route->gradient mapping (so all customers on same route share color)
   const gradientPatterns = [
     'bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 dark:from-blue-900/30 dark:via-indigo-900/30 dark:to-purple-900/30 border-l-4 border-blue-500 shadow-blue-100',
@@ -607,6 +647,12 @@ const RouteCustomerList: React.FC<RouteCustomerListProps> = ({ selectedRoute, on
         </div>
         
         <div className="flex gap-2 w-full sm:w-auto">
+          <button
+            onClick={exportRouteCustomersPDF}
+            className="px-4 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm sm:text-base min-h-[44px] flex items-center justify-center gap-2"
+          >
+            📄 <span className="hidden sm:inline">PDF</span>
+          </button>
           {canEdit && (
             <button 
               onClick={() => openModal('add')}

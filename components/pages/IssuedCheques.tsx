@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
 import { supabase } from '../../supabaseClient';
 import { UserRole } from '../../types';
+import { exportToPDF } from '../../utils/pdfExport';
 
 const formatCurrency = (amount: number, currency = 'LKR') => {
   try {
@@ -222,6 +223,44 @@ const IssuedCheques: React.FC = () => {
     }
   };
 
+  const exportIssuedChequesPDF = () => {
+    const columns = [
+      { key: 'payee_name', title: 'Payee Name' },
+      { key: 'amount', title: 'Amount' },
+      { key: 'bank', title: 'Bank' },
+      { key: 'cheque_number', title: 'Cheque Number' },
+      { key: 'issue_date', title: 'Issue Date' },
+      { key: 'cash_date', title: 'Cash Date' },
+      { key: 'purpose', title: 'Purpose' },
+      { key: 'status', title: 'Status' },
+      { key: 'notes', title: 'Notes' }
+    ];
+
+    const data = issuedCheques.map(cheque => ({
+      payee_name: cheque.payee_name || 'N/A',
+      amount: `LKR ${(cheque.amount || 0).toFixed(2)}`,
+      bank: cheque.bank || 'N/A',
+      cheque_number: cheque.cheque_number || 'N/A',
+      issue_date: cheque.issue_date ? new Date(cheque.issue_date).toLocaleDateString() : 'Not set',
+      cash_date: cheque.cash_date ? new Date(cheque.cash_date).toLocaleDateString() : 'Not set',
+      purpose: cheque.purpose || 'N/A',
+      status: cheque.status || 'Pending',
+      notes: cheque.notes || 'No notes'
+    }));
+
+    const totalAmount = issuedCheques.reduce((sum, c) => sum + (c.amount || 0), 0);
+
+    exportToPDF('Issued Cheques Report', columns, data, {
+      summary: {
+        'Total Issued Cheques': issuedCheques.length.toString(),
+        'Total Amount': `LKR ${totalAmount.toFixed(2)}`,
+        'Cashed Cheques': issuedCheques.filter(c => c.status === 'Cashed').length.toString(),
+        'Pending Cheques': issuedCheques.filter(c => c.status === 'Pending').length.toString(),
+        'Cancelled Cheques': issuedCheques.filter(c => c.status === 'Cancelled').length.toString()
+      }
+    });
+  };
+
   const deleteCheque = async (id: any) => {
     if (!id) return;
     const ok = window.confirm('Are you sure you want to delete this issued cheque? This action cannot be undone.');
@@ -273,8 +312,8 @@ const IssuedCheques: React.FC = () => {
               </p>
             </div>
           </div>
-          {!isManager && (
-            <div className="mt-4 sm:mt-0 flex space-x-3">
+          <div className="mt-4 sm:mt-0 flex space-x-3">
+            {!isManager && (
               <button
                 onClick={() => setShowForm(s => !s)}
                 className="flex items-center px-6 py-3 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-[1.02] font-medium"
@@ -284,8 +323,19 @@ const IssuedCheques: React.FC = () => {
                 </svg>
                 {showForm ? 'Hide Form' : 'Record Issued Cheque'}
               </button>
-            </div>
-          )}
+            )}
+            {issuedCheques.length > 0 && (
+              <button
+                onClick={exportIssuedChequesPDF}
+                className="flex items-center px-6 py-3 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-[1.02] font-medium"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                Export PDF
+              </button>
+            )}
+          </div>
         </div>
       </div>
 

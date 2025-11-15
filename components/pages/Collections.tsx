@@ -7,6 +7,7 @@ import { useData } from '../../contexts/DataContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { UserRole } from '../../types';
 import { supabase } from '../../supabaseClient';
+import { exportToPDF } from '../../utils/pdfExport';
 
 const formatCurrency = (amount: number, currency: string = 'LKR') => {
   return `${currency} ${amount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
@@ -47,7 +48,7 @@ export const Collections: React.FC = () => {
     const timestamp = new Date().toISOString().split('T')[0];
     exportData(formatted, `collections_${timestamp}`, format, 'Collections');
   };
-  const { refetchData, customers } = useData();
+  const { refetchData, customers, users } = useData();
   const { currentUser } = useAuth();
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'complete'>('all');
@@ -258,6 +259,46 @@ export const Collections: React.FC = () => {
       totalCollections: collections.length
     };
   }, [collections]);
+
+  const exportCollectionsPDF = () => {
+    const columns = [
+      { key: 'order_id', title: 'Order ID' },
+      { key: 'customer_name', title: 'Customer' },
+      { key: 'collection_type', title: 'Type' },
+      { key: 'amount', title: 'Amount' },
+      { key: 'status', title: 'Status' },
+      { key: 'collected_by', title: 'Collected By' },
+      { key: 'collected_at', title: 'Collected At' },
+      { key: 'notes', title: 'Notes' }
+    ];
+
+    const data = filteredCollections.map(collection => {
+      const customer = customers.find(c => c.id === collection.customer_id);
+      const collectedBy = users?.find(u => u.id === collection.collected_by);
+      
+      return {
+        order_id: collection.order_id || 'N/A',
+        customer_name: customer?.name || 'Unknown Customer',
+        collection_type: collection.collection_type || 'N/A',
+        amount: `LKR ${(collection.amount || 0).toFixed(2)}`,
+        status: collection.status || 'Pending',
+        collected_by: collectedBy?.name || 'N/A',
+        collected_at: collection.collected_at ? new Date(collection.collected_at).toLocaleDateString() : 'Not collected',
+        notes: collection.notes || 'No notes'
+      };
+    });
+
+    const totalAmount = filteredCollections.reduce((sum, c) => sum + (c.amount || 0), 0);
+
+    exportToPDF('Collections Report', columns, data, {
+      summary: {
+        'Total Collections': filteredCollections.length.toString(),
+        'Total Amount': `LKR ${totalAmount.toFixed(2)}`,
+        'Pending Collections': filteredCollections.filter(c => c.status === 'pending').length.toString(),
+        'Completed Collections': filteredCollections.filter(c => c.status === 'completed').length.toString()
+      }
+    });
+  };
 
   const handleRecognizeCollection = async () => {
     if (!selectedCollection) return;
@@ -596,6 +637,15 @@ export const Collections: React.FC = () => {
             className="flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm"
           >
             📊 Export CSV
+          </button>
+          <button
+            onClick={exportCollectionsPDF}
+            className="flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors text-sm"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            Export PDF
           </button>
           <button
             onClick={() => handleExport('xlsx')}

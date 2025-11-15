@@ -7,10 +7,11 @@ import { Badge } from '../ui/Badge';
 import { OrderStatus, DriverAllocation } from '../../types';
 import html2pdf from 'html2pdf.js';
 import { COMPANY_DETAILS } from '../../constants';
+import { exportToPDF } from '../../utils/pdfExport';
 
 // Deliveries page: group orders by expected delivery date, aggregate product quantities
 export const Deliveries: React.FC = () => {
-  const { orders, products, users, driverAllocations, setDriverAllocations, refetchData, deliveryAggregatedProducts, setDeliveryAggregatedProducts } = useData();
+  const { orders, products, users, customers, driverAllocations, setDriverAllocations, refetchData, deliveryAggregatedProducts, setDeliveryAggregatedProducts } = useData();
   // Allow selecting multiple dates to combine allocations/aggregation
   const [selectedDates, setSelectedDates] = useState<Set<string>>(new Set());
   const [allocatingToDriver, setAllocatingToDriver] = useState<string | null>(null);
@@ -347,16 +348,67 @@ export const Deliveries: React.FC = () => {
 
   // Confirm Delivery removed - deliveries are handled per-order via Orders page / Drivers flow
 
+  // PDF Export function
+  const exportDeliveriesPDF = () => {
+    const columns = [
+      { key: 'date', title: 'Delivery Date' },
+      { key: 'orders', title: 'Orders Count' },
+      { key: 'products', title: 'Products Summary' },
+      { key: 'totalValue', title: 'Total Value' },
+      { key: 'customers', title: 'Customers' }
+    ];
+
+    const data = Object.entries(ordersByDate).map(([dateStr, ordersForDate]) => {
+      const totalValue = ordersForDate.reduce((sum, order) => {
+        return sum + order.orderItems.reduce((orderSum, item) => {
+          const product = products.find(p => p.id === item.productId);
+          return orderSum + (item.quantity * (product?.price || 0));
+        }, 0);
+      }, 0);
+
+      const productSummary = ordersForDate.flatMap(order => 
+        order.orderItems.map(item => {
+          const product = products.find(p => p.id === item.productId);
+          return `${product?.name || 'Unknown'}: ${item.quantity}`;
+        })
+      ).slice(0, 3).join(', ');
+
+      const customersList = ordersForDate.map(order => {
+        const customer = customers.find(c => c.id === order.customerId);
+        return customer?.name || 'Unknown';
+      }).slice(0, 3).join(', ');
+
+      return {
+        date: new Date(dateStr).toLocaleDateString(),
+        orders: ordersForDate.length.toString(),
+        products: productSummary + (ordersForDate.length > 3 ? '...' : ''),
+        totalValue: `LKR ${totalValue.toFixed(2)}`,
+        customers: customersList + (ordersForDate.length > 3 ? '...' : '')
+      };
+    });
+
+    exportToPDF('Deliveries Report', columns, data);
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 dark:from-slate-900 dark:via-slate-800 dark:to-slate-700 p-4 sm:p-6">
       <div className="max-w-7xl mx-auto">
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 via-purple-600 to-indigo-600 bg-clip-text text-transparent mb-2">
-            🚚 Delivery Management
-          </h1>
-          <p className="text-slate-600 dark:text-slate-400 font-medium">
-            Organize and allocate products for efficient delivery
-          </p>
+        <div className="mb-6 flex justify-between items-start">
+          <div>
+            <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 via-purple-600 to-indigo-600 bg-clip-text text-transparent mb-2">
+              🚚 Delivery Management
+            </h1>
+            <p className="text-slate-600 dark:text-slate-400 font-medium">
+              Organize and allocate products for efficient delivery
+            </p>
+          </div>
+          <button
+            onClick={exportDeliveriesPDF}
+            className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-medium"
+            title="Export as PDF"
+          >
+            📄 Export PDF
+          </button>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

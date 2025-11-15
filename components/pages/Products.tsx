@@ -7,6 +7,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
 import { supabase, fetchProducts } from '../../supabaseClient';
 import { exportProducts } from '../../utils/exportUtils';
+import { exportToPDF } from '../../utils/pdfExport';
 import { useLoading, LoadingButton, LoadingSpinner } from '../../hooks/useLoading';
 import { useValidation, validationRules } from '../../hooks/useValidation';
 import { confirmSecureDelete } from '../../utils/passwordConfirmation';
@@ -321,6 +322,31 @@ export const Products: React.FC = () => {
     }, {} as Record<string, Product[]>);
   }, [filteredProducts]);
 
+  // PDF Export function
+  const exportProductsPDF = () => {
+    const columns = [
+      { key: 'sku', title: 'SKU' },
+      { key: 'name', title: 'Product Name' },
+      { key: 'category', title: 'Category' },
+      { key: 'supplier', title: 'Supplier' },
+      { key: 'price', title: 'Price' },
+      { key: 'stock', title: 'Stock' },
+      { key: 'status', title: 'Status' }
+    ];
+
+    const data = filteredProducts.map(product => ({
+      sku: product.sku,
+      name: product.name,
+      category: product.category,
+      supplier: product.supplier,
+      price: formatCurrency(product.price, currency),
+      stock: product.stock.toString(),
+      status: product.stock <= (product.minStock || 0) ? 'Low Stock' : 'In Stock'
+    }));
+
+    exportToPDF('Products Report', columns, data);
+  };
+
   return (
     <div className="p-3 sm:p-4 lg:p-6 space-y-6 sm:space-y-8">
       <div className="flex flex-col sm:flex-row gap-4 sm:justify-between sm:items-center">
@@ -329,6 +355,14 @@ export const Products: React.FC = () => {
         </h1>
         <div className="flex flex-wrap gap-2">
           {/* Export Buttons */}
+          <button
+            onClick={exportProductsPDF}
+            className="px-4 py-2.5 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl hover:from-red-600 hover:to-red-700 transition-all duration-300 text-xs sm:text-sm min-h-[42px] flex items-center justify-center shadow-md hover:shadow-lg transform hover:-translate-y-0.5 font-semibold"
+            title="Export as PDF"
+          >
+            <span className="hidden xs:inline">📄 PDF</span>
+            <span className="xs:hidden">PDF</span>
+          </button>
           <button
             onClick={() => exportProducts(filteredProducts, 'csv')}
             className="px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-xl hover:from-emerald-600 hover:to-emerald-700 transition-all duration-300 text-xs sm:text-sm min-h-[42px] flex items-center justify-center shadow-md hover:shadow-lg transform hover:-translate-y-0.5 font-semibold"

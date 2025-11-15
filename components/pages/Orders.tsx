@@ -9,6 +9,7 @@ import { useData } from '../../contexts/DataContext';
 import { supabase, fetchOrders } from '../../supabaseClient';
 import { useAuth } from '../../contexts/AuthContext';
 import { exportOrders } from '../../utils/exportUtils';
+import { exportToPDF } from '../../utils/pdfExport';
 import { emailService } from '../../utils/emailService';
 import { confirmSecureDelete } from '../../utils/passwordConfirmation';
 import html2pdf from "html2pdf.js";
@@ -1848,6 +1849,58 @@ export const Orders: React.FC = () => {
     html2pdf().set(options).from(billHTML).save();
   };
 
+  // PDF Export function
+  const exportOrdersPDF = () => {
+    const columns = [
+      { key: 'id', title: 'Order ID' },
+      { key: 'customerName', title: 'Customer' },
+      { key: 'items', title: 'Items' },
+      { key: 'total', title: 'Total' },
+      { key: 'status', title: 'Status' },
+      { key: 'assignedTo', title: 'Assigned To' },
+      { key: 'deliveryDate', title: 'Delivery Date' },
+      { key: 'createdAt', title: 'Order Date' }
+    ];
+
+    const data = filteredOrders.map(order => {
+      const customer = customers.find(c => c.id === order.customerId);
+      const assignedUser = order.assignedUserId ? users?.find(u => u.id === order.assignedUserId) : null;
+      const orderTotal = order.orderItems.reduce((sum, item) => {
+        const product = products.find(p => p.id === item.productId);
+        return sum + (item.quantity * (product?.price || 0));
+      }, 0);
+
+      const itemsList = order.orderItems.map(item => {
+        const product = products.find(p => p.id === item.productId);
+        return `${product?.name || 'Unknown'} (${item.quantity})`;
+      }).join(', ');
+
+      // Helper function to safely format dates
+      const formatDate = (dateValue: any) => {
+        if (!dateValue) return 'Not set';
+        try {
+          const date = new Date(dateValue);
+          if (isNaN(date.getTime())) return 'Invalid Date';
+          return date.toLocaleDateString('en-GB');
+        } catch (error) {
+          return 'Invalid Date';
+        }
+      };
+
+      return {
+        id: order.id,
+        customerName: customer?.name || 'Unknown Customer',
+        items: itemsList,
+        total: `${currency} ${orderTotal.toFixed(2)}`,
+        status: order.status,
+        assignedTo: assignedUser?.name || 'Unassigned',
+        deliveryDate: formatDate(order.expectedDeliveryDate || order.date),
+        createdAt: formatDate(order.created_at || order.date)
+      };
+    });
+
+    exportToPDF('Orders Report', columns, data);
+  };
 
   // ...existing code...
   // Place the return statement here, after all hooks and functions
@@ -1878,6 +1931,14 @@ export const Orders: React.FC = () => {
           <h1 className="text-2xl sm:text-3xl font-bold text-slate-800 dark:text-slate-100">Orders</h1>
           <div className="flex flex-wrap gap-2 sm:gap-3">
             {/* Export Buttons */}
+            <button
+              onClick={exportOrdersPDF}
+              className="px-3 sm:px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-xs sm:text-sm font-medium"
+              title="Export as PDF"
+            >
+              <span className="hidden sm:inline">📄 PDF</span>
+              <span className="sm:hidden">PDF</span>
+            </button>
             <button
               onClick={() => exportOrders(filteredOrders, 'csv')}
               className="px-3 sm:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm font-medium"

@@ -7,6 +7,7 @@ import { Badge } from '../ui/Badge';
 import { useData } from '../../contexts/DataContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { exportCustomers } from '../../utils/exportUtils';
+import { exportToPDF } from '../../utils/pdfExport';
 import { confirmSecureDelete } from '../../utils/passwordConfirmation';
 
 const formatCurrency = (amount: number, currency: string) => {
@@ -843,6 +844,46 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
     [allCustomers, customerTotalSpentMap]
   );
 
+  // PDF Export function
+  const exportCustomersPDF = () => {
+    const columns = [
+      { key: 'name', title: 'Customer Name' },
+      { key: 'phone', title: 'Phone' },
+      { key: 'location', title: 'Location' },
+      { key: 'route', title: 'Route' },
+      { key: 'outstandingAmount', title: 'Outstanding' },
+      { key: 'totalSpent', title: 'Total Spent' },
+      { key: 'lastOrderDate', title: 'Last Order' },
+      { key: 'createdBy', title: 'Created By' }
+    ];
+
+    const data = allCustomers.map(customer => {
+      const totalSpent = customerTotalSpentMap[customer.id] || 0;
+      const outstanding = customerOutstandingMap[customer.id] || 0;
+      const lastOrderDate = customerLastOrderMap[customer.id];
+      const createdBy = users?.find(u => u.id === customer.createdBy)?.name || 'Unknown';
+
+      return {
+        name: customer.name,
+        phone: customer.phone,
+        location: customer.location.replace(/GPS:\s*-?\d+\.?\d*,\s*-?\d+\.?\d*\s*(\([^)]*\))?/g, '').trim(),
+        route: customer.route || 'Unassigned',
+        outstandingAmount: formatCurrency(outstanding, currency),
+        totalSpent: formatCurrency(totalSpent, currency),
+        lastOrderDate: lastOrderDate ? new Date(lastOrderDate).toLocaleDateString() : 'Never',
+        createdBy: createdBy
+      };
+    });
+
+    exportToPDF('Customers Report', columns, data, {
+      summary: {
+        'Total Customers': allCustomers.length.toString(),
+        'Total Outstanding': formatCurrency(allCustomers.reduce((sum, c) => sum + (customerOutstandingMap[c.id] || 0), 0), currency),
+        'Total Spent': formatCurrency(totalSpent, currency)
+      }
+    });
+  };
+
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-8">
       <div className="flex justify-between items-center">
@@ -875,6 +916,13 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRoute: propSelecte
         </div>
         <div className="flex gap-2">
           {/* Export Buttons */}
+          <button
+            onClick={exportCustomersPDF}
+            className="px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm"
+            title="Export as PDF"
+          >
+            📄 PDF
+          </button>
           <button
             onClick={() => exportCustomers(filteredCustomers, 'csv')}
             className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"

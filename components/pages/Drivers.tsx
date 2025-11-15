@@ -9,6 +9,7 @@ import { COMPANY_DETAILS } from '../../constants';
 import { supabase } from '../../supabaseClient';
 import html2pdf from 'html2pdf.js';
 import { exportDriverAllocations, exportDriverSales } from '../../utils/exportUtils';
+import { exportToPDF } from '../../utils/pdfExport';
 import { LoadingSpinner } from '@/hooks/useLoading';
 
 const formatCurrency = (amount: number, currency: string) => {
@@ -411,6 +412,43 @@ export const Drivers: React.FC = () => {
         });
     }, [availableProducts, allocationSupplier, isEditMode, selectedDriver, todayAllocations]);
 
+    // PDF Export function for driver allocations
+    const exportDriverAllocationsPDF = () => {
+        const columns = [
+            { key: 'driverName', title: 'Driver' },
+            { key: 'date', title: 'Date' },
+            { key: 'products', title: 'Products Allocated' },
+            { key: 'totalValue', title: 'Total Value' },
+            { key: 'salesTotal', title: 'Sales Total' },
+            { key: 'status', title: 'Status' }
+        ];
+
+        const data = driverAllocations.map(allocation => {
+            const driver = users?.find(u => u.id === allocation.driverId);
+            const allocatedItems = allocation.allocatedItems || [];
+            
+            const productsList = allocatedItems.map(item => {
+                const product = products.find(p => p.id === item.productId);
+                return `${product?.name || 'Unknown'} (${item.quantity})`;
+            }).join(', ');
+
+            const totalValue = allocatedItems.reduce((sum, item) => {
+                const product = products.find(p => p.id === item.productId);
+                return sum + (item.quantity * (product?.price || 0));
+            }, 0);
+
+            return {
+                driverName: driver?.name || 'Unknown Driver',
+                date: new Date(allocation.date).toLocaleDateString(),
+                products: productsList || 'No products',
+                totalValue: formatCurrency(totalValue, currentUser?.settings.currency || 'LKR'),
+                salesTotal: formatCurrency(allocation.salesTotal || 0, currentUser?.settings.currency || 'LKR'),
+                status: allocation.salesTotal ? 'Completed' : 'Pending'
+            };
+        });
+
+        exportToPDF('Driver Allocations Report', columns, data);
+    };
 
     return fallbackUI ? fallbackUI : (
         <div className="p-3 sm:p-4 lg:p-6 space-y-6 sm:space-y-8">
@@ -427,6 +465,14 @@ export const Drivers: React.FC = () => {
                 <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
                     {/* Export Buttons */}
                     <div className="flex gap-2 order-2 sm:order-1">
+                        <button
+                            onClick={exportDriverAllocationsPDF}
+                            className="px-2 sm:px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-xs sm:text-sm flex-1 sm:flex-none"
+                            title="Export Allocations as PDF"
+                        >
+                            <span className="hidden sm:inline">📄 PDF</span>
+                            <span className="sm:hidden">PDF</span>
+                        </button>
                         <button
                             onClick={() => exportDriverAllocations(driverAllocations, 'csv')}
                             className="px-2 sm:px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm flex-1 sm:flex-none"

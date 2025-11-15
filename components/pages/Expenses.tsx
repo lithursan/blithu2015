@@ -4,6 +4,7 @@ import { supabase } from '../../supabaseClient';
 // lightweight formatting without new dependency
 import { useAuth } from '../../contexts/AuthContext';
 import { UserRole } from '../../types';
+import { exportToPDF } from '../../utils/pdfExport';
 
 const categories = ['Fuel', 'Driver Salaries', 'Worker Salaries', 'Vehicle Rent', 'Common Expenses', 'Other'];
 
@@ -221,6 +222,35 @@ const Expenses: React.FC = () => {
         return v.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
     };
 
+    // PDF Export function
+    const exportExpensesPDF = () => {
+        const columns = [
+            { key: 'date', title: 'Date' },
+            { key: 'category', title: 'Category' },
+            { key: 'amount', title: 'Amount' },
+            { key: 'note', title: 'Note' },
+            { key: 'createdBy', title: 'Added By' }
+        ];
+
+        const data = filteredExpenses.map(expense => ({
+            date: new Date(expense.date).toLocaleDateString(),
+            category: expense.category,
+            amount: `${currentUser?.settings.currency || 'LKR'} ${formatCurrency(expense.amount)}`,
+            note: expense.note || 'No note',
+            createdBy: expense.created_by || 'System'
+        }));
+
+        const totalAmount = filteredExpenses.reduce((sum, expense) => sum + expense.amount, 0);
+
+        exportToPDF('Expenses Report', columns, data, {
+            summary: {
+                'Total Expenses': `${currentUser?.settings.currency || 'LKR'} ${formatCurrency(totalAmount)}`,
+                'Number of Entries': filteredExpenses.length.toString(),
+                'Period': monthFilter ? `${monthFilter}` : 'All Time'
+            }
+        });
+    };
+
     return (
         <div className="p-4 sm:p-6 lg:p-8">
             {fallbackMode && !dismissBanner && (
@@ -269,6 +299,12 @@ const Expenses: React.FC = () => {
                                 URL.revokeObjectURL(url);
                             }} className="ml-3 px-3 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition-colors">Export CSV</button>
                         )}
+                        <button 
+                            onClick={exportExpensesPDF}
+                            className="ml-3 px-3 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+                        >
+                            📄 Export PDF
+                        </button>
                         <div className="ml-auto text-sm text-slate-400">Pro tip: use categories to color-code expenses</div>
                     </div>
                 </CardContent>
