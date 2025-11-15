@@ -1864,7 +1864,14 @@ export const Orders: React.FC = () => {
 
     const data = filteredOrders.map(order => {
       const customer = customers.find(c => c.id === order.customerId);
-      const assignedUser = order.assignedUserId ? users?.find(u => u.id === order.assignedUserId) : null;
+      
+      // Enhanced user assignment lookup with debugging
+      let assignedUser = null;
+      if (order.assignedUserId && users && users.length > 0) {
+        assignedUser = users.find(u => u.id === order.assignedUserId);
+        console.log('Order:', order.id, 'AssignedUserId:', order.assignedUserId, 'Found User:', assignedUser?.name);
+      }
+      
       const orderTotal = order.orderItems.reduce((sum, item) => {
         const product = products.find(p => p.id === item.productId);
         return sum + (item.quantity * (product?.price || 0));
@@ -1893,7 +1900,7 @@ export const Orders: React.FC = () => {
         items: itemsList,
         total: `${currency} ${orderTotal.toFixed(2)}`,
         status: order.status,
-        assignedTo: assignedUser?.name || 'Unassigned',
+        assignedTo: assignedUser?.name || (order.assignedUserId ? `User ID: ${order.assignedUserId}` : 'Unassigned'),
         deliveryDate: formatDate(order.expectedDeliveryDate || order.date),
         createdAt: formatDate(order.created_at || order.date)
       };
