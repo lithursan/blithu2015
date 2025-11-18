@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../ui/Card';
 import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
@@ -35,6 +35,11 @@ const ChequeManagement: React.FC = () => {
   const [showForm, setShowForm] = useState(false);
   const [editingCheque, setEditingCheque] = useState<any>(null);
   const [isEditing, setIsEditing] = useState(false);
+  
+  // Date filter states
+  const [dateFrom, setDateFrom] = useState<string>('');
+  const [dateTo, setDateTo] = useState<string>('');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
 
   useEffect(() => {
     if (!currentUser) return;
@@ -90,6 +95,43 @@ const ChequeManagement: React.FC = () => {
       setLoading(false);
     }
   };
+
+  // Filter cheques based on date range and status
+  const filteredCheques = React.useMemo(() => {
+    let filtered = [...cheques];
+    
+    // Status filter
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter(c => {
+        const status = (c.status || '').toLowerCase();
+        return status === statusFilter.toLowerCase();
+      });
+    }
+    
+    // Date filter (using deposit_date)
+    if (dateFrom) {
+      const fromDate = new Date(dateFrom);
+      fromDate.setHours(0, 0, 0, 0);
+      filtered = filtered.filter(c => {
+        if (!c.deposit_date) return false;
+        const depositDate = new Date(c.deposit_date);
+        depositDate.setHours(0, 0, 0, 0);
+        return depositDate >= fromDate;
+      });
+    }
+    
+    if (dateTo) {
+      const toDate = new Date(dateTo);
+      toDate.setHours(23, 59, 59, 999);
+      filtered = filtered.filter(c => {
+        if (!c.deposit_date) return false;
+        const depositDate = new Date(c.deposit_date);
+        return depositDate <= toDate;
+      });
+    }
+    
+    return filtered;
+  }, [cheques, statusFilter, dateFrom, dateTo]);
 
   const isChequeUpcoming = (c: any) => {
     try {
@@ -426,11 +468,19 @@ const ChequeManagement: React.FC = () => {
 
   const deleteCheque = async (id: any) => {
     if (!id) return;
-    // simple confirmation — keeps implementation small and familiar
-    // (can be replaced with a modal component later)
+    
+    // Password protection for delete operation
+    const password = prompt('Enter admin password to delete this cheque:');
+    if (password !== '1234') {
+      alert('Incorrect password. Delete operation cancelled.');
+      return;
+    }
+    
+    // Confirmation after password verification
     // eslint-disable-next-line no-restricted-globals
     const ok = window.confirm('Are you sure you want to delete this cheque? This action cannot be undone.');
     if (!ok) return;
+    
     setLoading(true);
     try {
       const { data, error } = await supabase.from('cheques').delete().eq('id', id).select();
@@ -443,6 +493,7 @@ const ChequeManagement: React.FC = () => {
         // refresh related lists
         if (refetchData) await refetchData();
         await fetchPendingCollections();
+        alert('Cheque deleted successfully.');
       }
     } catch (err) {
       console.error('Unexpected delete error', err);
@@ -616,6 +667,17 @@ const ChequeManagement: React.FC = () => {
           </p>
         </div>
         <div className="mt-4 sm:mt-0 flex space-x-2">
+          <button
+            onClick={exportChequesPDF}
+            className="flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors text-sm"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            Export PDF
+          </button>
+        </div>
+        <div className="mt-4 sm:mt-0 flex space-x-2">
           {!isManager && (
             <button
               onClick={() => setShowForm(s => !s)}
@@ -708,49 +770,94 @@ const ChequeManagement: React.FC = () => {
       })()}
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
         <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center">
-              <div className="p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
-                <span className="text-2xl">🏦</span>
+          <CardContent className="p-3">
+            <div className="text-center space-y-2">
+              <div className="flex justify-center">
+                <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
+                  <span className="text-xl">🏦</span>
+                </div>
               </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-slate-600 dark:text-slate-400">Total Cheques</p>
-                <p className="text-2xl font-bold text-blue-600">{cheques.length}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center">
-              <div className="p-3 bg-green-100 dark:bg-green-900/30 rounded-lg">
-                <span className="text-2xl">✅</span>
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-slate-600 dark:text-slate-400">Cleared</p>
-                <p className="text-2xl font-bold text-green-600">
-                  {cheques.filter(c => c.status === 'Cleared').length}
-                </p>
-              </div>
+              <p className="text-xs font-medium text-slate-600 dark:text-slate-400 leading-tight">Total Cheques</p>
+              <p className="text-sm font-bold text-blue-600 break-words">{filteredCheques.length}</p>
             </div>
           </CardContent>
         </Card>
 
         <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center">
-              <div className="p-3 bg-orange-100 dark:bg-orange-900/30 rounded-lg">
-                <span className="text-2xl">⏳</span>
+          <CardContent className="p-3">
+            <div className="text-center space-y-2">
+              <div className="flex justify-center">
+                <div className="p-2 bg-green-100 dark:bg-green-900/30 rounded-lg">
+                  <span className="text-xl">✅</span>
+                </div>
               </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-slate-600 dark:text-slate-400">Pending</p>
-                <p className="text-2xl font-bold text-orange-600">
-                  {cheques.filter(c => c.status !== 'Cleared' && c.status !== 'Bounced').length}
-                </p>
+              <p className="text-xs font-medium text-slate-600 dark:text-slate-400 leading-tight">Cleared</p>
+              <p className="text-sm font-bold text-green-600 break-words">{filteredCheques.filter(c => c.status === 'Cleared').length}</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-3">
+            <div className="text-center space-y-2">
+              <div className="flex justify-center">
+                <div className="p-2 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg">
+                  <span className="text-xl">⏳</span>
+                </div>
               </div>
+              <p className="text-xs font-medium text-slate-600 dark:text-slate-400 leading-tight">Pending</p>
+              <p className="text-sm font-bold text-yellow-600 break-words">{filteredCheques.filter(c => c.status !== 'Cleared' && c.status !== 'Bounced').length}</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-3">
+            <div className="text-center space-y-2">
+              <div className="flex justify-center">
+                <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-lg">
+                  <span className="text-xl">❌</span>
+                </div>
+              </div>
+              <p className="text-xs font-medium text-slate-600 dark:text-slate-400 leading-tight">Bounced</p>
+              <p className="text-sm font-bold text-red-600 break-words">{filteredCheques.filter(c => c.status === 'Bounced').length}</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-3">
+            <div className="text-center space-y-2">
+              <div className="flex justify-center">
+                <div className="p-2 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg">
+                  <span className="text-xl">📅</span>
+                </div>
+              </div>
+              <p className="text-xs font-medium text-slate-600 dark:text-slate-400 leading-tight">Date Groups</p>
+              <p className="text-sm font-bold text-indigo-600 break-words">
+                {Object.keys(filteredCheques.reduce((groups: Record<string, any[]>, c) => {
+                  const key = c.deposit_date ? c.deposit_date.slice(0,10) : 'Unscheduled';
+                  if (!groups[key]) groups[key] = [];
+                  groups[key].push(c);
+                  return groups;
+                }, {})).length}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-3">
+            <div className="text-center space-y-2">
+              <div className="flex justify-center">
+                <div className="p-2 bg-purple-100 dark:bg-purple-900/30 rounded-lg">
+                  <span className="text-xl">💰</span>
+                </div>
+              </div>
+              <p className="text-xs font-medium text-slate-600 dark:text-slate-400 leading-tight">Total Value</p>
+              <p className="text-sm font-bold text-purple-600 break-words">{formatCurrency(filteredCheques.reduce((sum, c) => sum + (c.amount || 0), 0))}</p>
             </div>
           </CardContent>
         </Card>
@@ -858,18 +965,76 @@ const ChequeManagement: React.FC = () => {
       )}
 
       {/* Cheques List */}
+      {/* Filters */}
+      <Card className="border border-slate-200 dark:border-slate-700">
+        <CardContent className="p-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">
+                Status Filter
+              </label>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              >
+                <option value="all">All Status</option>
+                <option value="received">Received</option>
+                <option value="cleared">Cleared</option>
+                <option value="bounced">Bounced</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">
+                From Date
+              </label>
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">
+                To Date
+              </label>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              />
+            </div>
+            <div className="flex items-end">
+              <button
+                onClick={() => {
+                  setStatusFilter('all');
+                  setDateFrom('');
+                  setDateTo('');
+                }}
+                className="w-full px-3 py-2 text-sm bg-slate-500 hover:bg-slate-600 text-white rounded-lg transition-colors font-medium"
+              >
+                Clear Filters
+              </button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
               <CardTitle>Received Cheques</CardTitle>
               <CardDescription>
-                {cheques.length} cheque(s) recorded • Total Value: {formatCurrency(cheques.reduce((sum, c) => sum + (c.amount || 0), 0))}
+                {filteredCheques.length} cheque(s) found • Total Value: {formatCurrency(filteredCheques.reduce((sum, c) => sum + (c.amount || 0), 0))}
               </CardDescription>
             </div>
-            {cheques.length > 0 && (
+            {filteredCheques.length > 0 && (
               <div className="text-sm text-slate-500">
-                Total Value: {formatCurrency(cheques.reduce((sum, c) => sum + (c.amount || 0), 0))}
+                Total Value: {formatCurrency(filteredCheques.reduce((sum, c) => sum + (c.amount || 0), 0))}
               </div>
             )}
           </div>
@@ -879,18 +1044,18 @@ const ChequeManagement: React.FC = () => {
             <div className="flex items-center justify-center py-8">
               <div className="text-slate-500">Loading cheques...</div>
             </div>
-          ) : cheques.length === 0 ? (
+          ) : filteredCheques.length === 0 ? (
             <div className="text-center py-8">
               <div className="text-4xl mb-2">🏦</div>
-              <p className="text-slate-500 mb-2">No cheques recorded yet</p>
-              {!isManager && <p className="text-sm text-slate-400">Click "Record Cheque" to add your first cheque</p>}
+              <p className="text-slate-500 mb-2">{cheques.length === 0 ? 'No cheques recorded yet' : 'No cheques match the selected filters'}</p>
+              {!isManager && cheques.length === 0 && <p className="text-sm text-slate-400">Click "Record Cheque" to add your first cheque</p>}
             </div>
           ) : (
             <>
               {/* Group cheques by deposit_date */}
               {(() => {
                 const groups: Record<string, any[]> = {};
-                for (const c of cheques) {
+                for (const c of filteredCheques) {
                   const key = c.deposit_date ? (c.deposit_date.slice ? c.deposit_date.slice(0,10) : String(c.deposit_date)) : 'Unscheduled';
                   if (!groups[key]) groups[key] = [];
                   groups[key].push(c);
@@ -903,12 +1068,18 @@ const ChequeManagement: React.FC = () => {
                 return (
                   <div className="space-y-6">
                     {keys.map(k => (
-                      <div key={k} className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
-                        <div className="bg-slate-50 dark:bg-slate-800 px-4 py-3 border-b border-slate-200 dark:border-slate-700">
-                          <div className="flex items-center justify-between">
-                            <h3 className="font-medium text-slate-900 dark:text-slate-100">
-                              {k === 'Unscheduled' ? '📅 Unscheduled Deposits' : `📅 ${new Date(k).toLocaleDateString('en-GB', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}`}
-                            </h3>
+                      <div key={k} className="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden bg-white dark:bg-slate-800">
+                        {/* Date Header */}
+                        <div className="bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-slate-700 dark:to-slate-600 px-6 py-4 border-b border-slate-200 dark:border-slate-600">
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+                                {k === 'Unscheduled' ? '📅 Unscheduled Deposits' : `📅 ${new Date(k).toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}`}
+                              </h3>
+                              <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
+                                {groups[k].length} cheque(s) • Total: {formatCurrency(groups[k].reduce((sum, c) => sum + (c.amount || 0), 0))}
+                              </p>
+                            </div>
                             <div className="text-sm text-slate-500">
                               {groups[k].length} cheque(s) • {formatCurrency(groups[k].reduce((sum, c) => sum + (c.amount || 0), 0))}
                             </div>

@@ -32,6 +32,8 @@ interface DataContextType {
     // Cheque alert hooks
     upcomingCheques?: any[];
     upcomingChequesCount?: number;
+    // Overdue credits
+    overdueCreditsCount?: number;
   calculateCustomerOutstanding?: (customerId: string) => number;
     // Aggregated delivery products keyed by date (YYYY-MM-DD) produced by the Deliveries page
     deliveryAggregatedProducts?: Record<string, { productId: string; qty: number }[]>;
@@ -59,6 +61,36 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const [deliveryAggregatedProducts, setDeliveryAggregatedProducts] = useState<Record<string, { productId: string; qty: number }[]>>({});
     const [alertedChequeIds, setAlertedChequeIds] = useState<Set<string>>(new Set());
     const [upcomingCheques, setUpcomingCheques] = useState<any[]>([]);
+    const [overdueCreditsCount, setOverdueCreditsCount] = useState<number>(0);
+
+    // Helper to populate overdue credits count for UI badges
+    const fetchOverdueCredits = React.useCallback(async () => {
+        try {
+            const { data: collections, error } = await supabase
+                .from('collections')
+                .select('*')
+                .eq('collection_type', 'credit')
+                .eq('status', 'pending');
+            
+            if (error) {
+                console.error('Error fetching overdue credits:', error);
+                return;
+            }
+            
+            if (collections) {
+                const now = new Date();
+                const overdueCount = collections.filter(collection => {
+                    const createdAt = new Date(collection.created_at || collection.collected_at || new Date());
+                    const daysDifference = Math.floor((now.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24));
+                    return daysDifference > 10;
+                }).length;
+                
+                setOverdueCreditsCount(overdueCount);
+            }
+        } catch (err) {
+            console.error('Error fetching overdue credits:', err);
+        }
+    }, []);
 
     // Helper to populate upcoming cheques used for UI badges
     const fetchUpcomingCheques = React.useCallback(async () => {
@@ -402,6 +434,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     React.useEffect(() => {
         // populate upcoming cheques on mount
         fetchUpcomingCheques().catch(err => console.error('Failed to fetch upcoming cheques on mount', err));
+        fetchOverdueCredits().catch(err => console.error('Failed to fetch overdue credits on mount', err));
     }, [fetchUpcomingCheques]);
 
     // Function to calculate real-time customer outstanding balance
@@ -606,6 +639,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             } catch (err) {
                 console.error('Error fetching upcoming cheques after refetch:', err);
             }
+            // Refresh overdue credits count after refetch
+            try {
+                await fetchOverdueCredits();
+            } catch (err) {
+                console.error('Error fetching overdue credits after refetch:', err);
+            }
     }, []);
 
     const value = {
@@ -617,6 +656,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         driverSales, setDriverSales,
         suppliers, setSuppliers,
         upcomingCheques, upcomingChequesCount: upcomingCheques.length,
+        overdueCreditsCount,
         deliveryAggregatedProducts,
         setDeliveryAggregatedProducts,
         refetchData,

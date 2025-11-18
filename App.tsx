@@ -16,8 +16,12 @@ import { Collections } from './components/pages/Collections';
 import ChequeManagement from './components/pages/ChequeManagement';
 import IssuedCheques from './components/pages/IssuedCheques';
 import Expenses from './components/pages/Expenses';
-import { LiveTracking } from './components/pages/LiveTracking';
+import AccountingDashboard from './components/pages/AccountingDashboard';
+import ChartOfAccounts from './components/pages/ChartOfAccounts';
+import JournalEntries from './components/pages/JournalEntries';
+
 import { MyLocation } from './components/pages/MyLocation';
+import { Map } from './components/pages/Map';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { DataProvider } from './contexts/DataContext';
@@ -92,8 +96,15 @@ const MainLayout = () => {
                         <Route path="/issued-cheques" element={<RoleProtectedRoute allowedRoles={["Admin", "Secretary", "Manager"]} element={<IssuedCheques />} />} />
                         <Route path="/drivers" element={<Drivers />} />
                         <Route path="/expenses" element={<RoleProtectedRoute allowedRoles={["Admin", "Secretary", "Manager"]} element={<Expenses />} />} />
-                        <Route path="/live-tracking" element={<RoleProtectedRoute allowedRoles={["Admin", "Secretary", "Manager"]} element={<LiveTracking />} />} />
+
                         <Route path="/my-location" element={<RoleProtectedRoute allowedRoles={["Sales Rep", "Driver"]} element={<MyLocation />} />} />
+                        <Route path="/map" element={<Map />} />
+                        
+                        {/* Accounting System - Admin Only */}
+                        <Route path="/accounting" element={<RoleProtectedRoute allowedRoles={["Admin"]} element={<AccountingDashboard />} />} />
+                        <Route path="/chart-of-accounts" element={<RoleProtectedRoute allowedRoles={["Admin"]} element={<ChartOfAccounts />} />} />
+                        <Route path="/journal-entries" element={<RoleProtectedRoute allowedRoles={["Admin"]} element={<JournalEntries />} />} />
+                        
                         <Route path="/users" element={<UserManagement />} />
                         <Route path="/settings" element={<Settings />} />
                         {/* Redirect any other nested routes to dashboard */}

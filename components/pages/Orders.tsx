@@ -1294,39 +1294,44 @@ export const Orders: React.FC = () => {
       amountpaid: editableAmountPaid === '' ? 0 : editableAmountPaid
     }).eq('id', viewingOrder.id).then(async ({ error }) => {
       if (!error) {
-        // Upsert collection records for cheque/credit balances
-        const collectionRecords = [];
-        // Find assigned user name for this order
-        let assignedUserName = '';
-        if (viewingOrder.assignedUserId && users && users.length > 0) {
-          const assignedUser = users.find(u => u.id === viewingOrder.assignedUserId);
-          if (assignedUser) assignedUserName = assignedUser.name;
-        }
-        if (editableChequeBalance > 0) {
-          collectionRecords.push({
-            order_id: viewingOrder.id,
-            customer_id: viewingOrder.customerId,
-            collection_type: 'cheque',
-            amount: editableChequeBalance,
-            status: 'pending',
-            collected_by: assignedUserName,
-            created_at: new Date().toISOString(),
-          });
-        }
-        if (editableCreditBalance > 0) {
-          collectionRecords.push({
-            order_id: viewingOrder.id,
-            customer_id: viewingOrder.customerId,
-            collection_type: 'credit',
-            amount: editableCreditBalance,
-            status: 'pending',
-            collected_by: assignedUserName,
-            created_at: new Date().toISOString(),
-          });
-        }
-        if (collectionRecords.length > 0) {
-          // Only use 'order_id,collection_type' in onConflict
-          await supabase.from('collections').upsert(collectionRecords, { onConflict: 'order_id,collection_type' });
+        // Upsert collection records for cheque/credit balances - ONLY for delivered orders
+        if (viewingOrder.status === OrderStatus.Delivered) {
+          const collectionRecords = [];
+          // Find assigned user name for this order
+          let assignedUserName = '';
+          if (viewingOrder.assignedUserId && users && users.length > 0) {
+            const assignedUser = users.find(u => u.id === viewingOrder.assignedUserId);
+            if (assignedUser) assignedUserName = assignedUser.name;
+          }
+          // Use order's delivery date for collection creation
+          const collectionDate = viewingOrder.expectedDeliveryDate || viewingOrder.date || new Date().toISOString();
+          
+          if (editableChequeBalance > 0) {
+            collectionRecords.push({
+              order_id: viewingOrder.id,
+              customer_id: viewingOrder.customerId,
+              collection_type: 'cheque',
+              amount: editableChequeBalance,
+              status: 'pending',
+              collected_by: assignedUserName,
+              created_at: collectionDate,
+            });
+          }
+          if (editableCreditBalance > 0) {
+            collectionRecords.push({
+              order_id: viewingOrder.id,
+              customer_id: viewingOrder.customerId,
+              collection_type: 'credit',
+              amount: editableCreditBalance,
+              status: 'pending',
+              collected_by: assignedUserName,
+              created_at: collectionDate,
+            });
+          }
+          if (collectionRecords.length > 0) {
+            // Only use 'order_id,collection_type' in onConflict
+            await supabase.from('collections').upsert(collectionRecords, { onConflict: 'order_id,collection_type' });
+          }
         }
         // Refetch orders to persist changes after refresh
         const { data: freshOrders, error: fetchError } = await supabase.from('orders').select('*');
@@ -1528,6 +1533,49 @@ export const Orders: React.FC = () => {
 
     // 2. Update order status
     const updatedOrder: Order = { ...targetOrder, status: OrderStatus.Delivered };
+    
+    // 3. Create collection records for delivered order if it has outstanding balances
+    const collectionRecords = [];
+    // Find assigned user name for this order
+    let assignedUserName = '';
+    if (targetOrder.assignedUserId && users && users.length > 0) {
+      const assignedUser = users.find(u => u.id === targetOrder.assignedUserId);
+      if (assignedUser) assignedUserName = assignedUser.name;
+    }
+    
+    // Use order's delivery date for collection creation (never changes)
+    const collectionDate = targetOrder.expectedDeliveryDate || targetOrder.date || new Date().toISOString();
+    
+    if (targetOrder.chequeBalance && targetOrder.chequeBalance > 0) {
+      collectionRecords.push({
+        order_id: targetOrder.id,
+        customer_id: targetOrder.customerId,
+        collection_type: 'cheque',
+        amount: targetOrder.chequeBalance,
+        status: 'pending',
+        collected_by: assignedUserName,
+        created_at: collectionDate,
+      });
+    }
+    if (targetOrder.creditBalance && targetOrder.creditBalance > 0) {
+      collectionRecords.push({
+        order_id: targetOrder.id,
+        customer_id: targetOrder.customerId,
+        collection_type: 'credit',
+        amount: targetOrder.creditBalance,
+        status: 'pending',
+        collected_by: assignedUserName,
+        created_at: collectionDate,
+      });
+    }
+    if (collectionRecords.length > 0) {
+      try {
+        await supabase.from('collections').upsert(collectionRecords, { onConflict: 'order_id,collection_type' });
+      } catch (error) {
+        console.error('Error creating collections for delivered order:', error);
+      }
+    }
+    
     // End of handleConfirmFinalize function
     return true;
   }

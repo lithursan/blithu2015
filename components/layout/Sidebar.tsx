@@ -20,19 +20,26 @@ const Logo = () => (
 
 export const Sidebar: React.FC<SidebarProps> = ({ isSidebarOpen, closeSidebar }) => {
   const { currentUser } = useAuth();
-  const { upcomingChequesCount = 0 } = useData();
+  const { upcomingChequesCount = 0, overdueCreditsCount = 0 } = useData();
 
   const accessibleNavItems = NAV_ITEMS.filter(item => {
     // Allow cheques access for Admin, Secretary and Manager
     if (item.path === '/cheques' || item.path === '/issued-cheques') {
       return currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Secretary || currentUser?.role === UserRole.Manager;
     }
+
     if (item.path === '/users') {
       // Only allow Admins to see User Management (Secretary excluded)
       return currentUser?.role === UserRole.Admin;
     }
-    // Allow deliveries, expenses, and live tracking to Admin, Secretary and Manager
-    if (item.path === '/deliveries' || item.path === '/expenses' || item.path === '/live-tracking') {
+    
+    // Accounting system - Admin only access
+    if (item.path === '/accounting' || item.path === '/chart-of-accounts' || item.path === '/journal-entries') {
+      return currentUser?.role === UserRole.Admin;
+    }
+    
+    // Allow deliveries and expenses to Admin, Secretary and Manager
+    if (item.path === '/deliveries' || item.path === '/expenses') {
       return currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Secretary || currentUser?.role === UserRole.Manager;
     }
     // My Location is only for Sales Reps and Drivers
@@ -53,8 +60,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ isSidebarOpen, closeSidebar })
 
 
   return (
-  <aside className={`fixed inset-y-0 left-0 z-30 w-64 sm:w-72 lg:w-64 bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 transform transition-transform duration-300 ease-in-out ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 lg:fixed lg:inset-y-0 lg:left-0`}> 
-      <div className="flex items-center justify-center h-16 sm:h-20 border-b border-slate-200 dark:border-slate-700 px-3 sm:px-4">
+  <aside className={`fixed inset-y-0 left-0 z-30 w-64 sm:w-72 lg:w-64 bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 transform transition-transform duration-300 ease-in-out ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 lg:fixed lg:inset-y-0 lg:left-0 flex flex-col`}> 
+      <div className="flex items-center justify-center h-16 sm:h-20 border-b border-slate-200 dark:border-slate-700 px-3 sm:px-4 flex-shrink-0">
         <div className="relative w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-blue-500 to-blue-700 dark:from-blue-400 dark:to-blue-600 rounded-xl shadow-lg flex items-center justify-center">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-6 w-6 sm:h-7 sm:w-7 text-white">
             <path d="M7.5 6.5C7.5 8.981 9.519 11 12 11s4.5-2.019 4.5-4.5S14.481 2 12 2 7.5 4.019 7.5 6.5zM20 21h1v-1c0-3.859-3.141-7-7-7h-4c-3.859 0-7 3.141-7 7v1h17z"/>
@@ -69,8 +76,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ isSidebarOpen, closeSidebar })
           <p className="text-xs font-medium text-blue-600 dark:text-blue-400 tracking-wider truncate">DISTRIBUTORS (PVT) LTD</p>
         </div>
       </div>
-      <nav className="p-2 sm:p-2 flex-1">
-        <ul className="space-y-0 pr-1">
+      <nav className="flex-1 overflow-y-auto scrollbar-hide">
+        <div className="p-2 sm:p-2 pb-4">
+          <ul className="space-y-0 pr-1">
           {accessibleNavItems.map((item) => (
             <li key={item.path}>
               <NavLink
@@ -89,10 +97,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ isSidebarOpen, closeSidebar })
                 {item.path === '/cheques' && upcomingChequesCount > 0 && (
                   <span className="ml-2 inline-flex items-center justify-center px-2 py-0.5 text-xs font-medium leading-none text-red-700 bg-red-100 rounded-full">{upcomingChequesCount}</span>
                 )}
+                {item.path === '/collections' && overdueCreditsCount > 0 && (
+                  <span className="ml-2 inline-flex items-center justify-center px-2 py-0.5 text-xs font-medium leading-none text-red-700 bg-red-100 rounded-full">{overdueCreditsCount}</span>
+                )}
               </NavLink>
             </li>
           ))}
         </ul>
+        </div>
       </nav>
     </aside>
   );

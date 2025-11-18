@@ -651,12 +651,13 @@ export const Dashboard: React.FC = () => {
         return ((current - previous) / previous) * 100;
     };
     
-    // Financial stats for current filtered period
-  // Sum of cheque and credit for the current filtered orders
-  const currentChequeBalance = filteredOrders.reduce((sum, order) => sum + (order.chequeBalance || 0), 0);
-  const currentCreditBalance = filteredOrders.reduce((sum, order) => sum + (order.creditBalance || 0), 0);
-  // Sum of return amounts for filtered orders
-  const currentReturnAmount = filteredOrders.reduce((sum, order) => sum + (order.returnAmount || 0), 0);
+    // Financial stats for current filtered period - ONLY from delivered orders
+  // Sum of cheque and credit for the current filtered DELIVERED orders only
+  const deliveredFilteredOrders = filteredOrders.filter(order => order.status === OrderStatus.Delivered);
+  const currentChequeBalance = deliveredFilteredOrders.reduce((sum, order) => sum + (order.chequeBalance || 0), 0);
+  const currentCreditBalance = deliveredFilteredOrders.reduce((sum, order) => sum + (order.creditBalance || 0), 0);
+  // Sum of return amounts for filtered DELIVERED orders
+  const currentReturnAmount = deliveredFilteredOrders.reduce((sum, order) => sum + (order.returnAmount || 0), 0);
   // Total paid calculated from components per requirement:
   // totalPaid = totalSales - totalCheque - totalCredit - totalReturn
   // Use the filtered period's totalSales (delivered orders) for current period
@@ -664,10 +665,11 @@ export const Dashboard: React.FC = () => {
   // Reconciled total sales computed from components: paid + cheque + credit + returns
   const reconciledTotalSales = currentPaid + currentChequeBalance + currentCreditBalance + currentReturnAmount;
     
-    // Financial stats for previous period
-  const prevChequeBalance = previousPeriodOrders.reduce((sum, order) => sum + (order.chequeBalance || 0), 0);
-  const prevCreditBalance = previousPeriodOrders.reduce((sum, order) => sum + (order.creditBalance || 0), 0);
-  const prevReturnAmount = previousPeriodOrders.reduce((sum, order) => sum + (order.returnAmount || 0), 0);
+    // Financial stats for previous period - ONLY from delivered orders
+  const deliveredPreviousPeriodOrders = previousPeriodOrders.filter(order => order.status === OrderStatus.Delivered);
+  const prevChequeBalance = deliveredPreviousPeriodOrders.reduce((sum, order) => sum + (order.chequeBalance || 0), 0);
+  const prevCreditBalance = deliveredPreviousPeriodOrders.reduce((sum, order) => sum + (order.creditBalance || 0), 0);
+  const prevReturnAmount = deliveredPreviousPeriodOrders.reduce((sum, order) => sum + (order.returnAmount || 0), 0);
   const prevPaid = prevTotalSales - prevChequeBalance - prevCreditBalance - prevReturnAmount;
   const reconciledPrevTotalSales = prevPaid + prevChequeBalance + prevCreditBalance + prevReturnAmount;
     
@@ -680,12 +682,13 @@ export const Dashboard: React.FC = () => {
   const currentOutstanding = currentChequeBalance + currentCreditBalance;
   const prevOutstanding = prevChequeBalance + prevCreditBalance;
   const outstandingChange = calculateChange(currentOutstanding, prevOutstanding);
-    // Financial stats calculations (overall totals)
-  const totalChequeBalance = orders.reduce((sum, order) => sum + (order.chequeBalance || 0), 0);
-  const totalCreditBalance = orders.reduce((sum, order) => sum + (order.creditBalance || 0), 0);
-  const totalReturnAmount = orders.reduce((sum, order) => sum + (order.returnAmount || 0), 0);
-  const overallTotalSales = orders.reduce((sum, order) => order.status === 'Delivered' ? sum + order.total : sum, 0);
-  // Overall paid derived from components across all orders (delivered totals used for overallTotalSales)
+    // Financial stats calculations (overall totals) - ONLY from delivered orders
+  const deliveredOrders = orders.filter(order => order.status === OrderStatus.Delivered);
+  const totalChequeBalance = deliveredOrders.reduce((sum, order) => sum + (order.chequeBalance || 0), 0);
+  const totalCreditBalance = deliveredOrders.reduce((sum, order) => sum + (order.creditBalance || 0), 0);
+  const totalReturnAmount = deliveredOrders.reduce((sum, order) => sum + (order.returnAmount || 0), 0);
+  const overallTotalSales = deliveredOrders.reduce((sum, order) => sum + order.total, 0);
+  // Overall paid derived from components across all delivered orders
   const totalPaid = overallTotalSales - totalChequeBalance - totalCreditBalance - totalReturnAmount;
   const reconciledOverallTotalSales = totalPaid + totalChequeBalance + totalCreditBalance + totalReturnAmount;
     
@@ -778,16 +781,65 @@ export const Dashboard: React.FC = () => {
       }
     ];
 
+    // Add financial metrics for comprehensive report
+    const financialData = [
+      {
+        metric: 'Total Order Cost',
+        value: formatCurrency(totalOrderCost, currency),
+        description: 'Cost for all orders in period (all statuses)'
+      },
+      {
+        metric: 'Total Paid',
+        value: formatCurrency(currentPaid, currency),
+        description: 'Cash/Bank payments received'
+      },
+      {
+        metric: 'Total Cheque Balance',
+        value: formatCurrency(currentChequeBalance, currency),
+        description: 'Outstanding cheque amounts from delivered orders only'
+      },
+      {
+        metric: 'Total Credit Balance',
+        value: formatCurrency(currentCreditBalance, currency),
+        description: 'Outstanding credit amounts from delivered orders only'
+      },
+      {
+        metric: 'Total Outstanding',
+        value: formatCurrency(currentChequeBalance + currentCreditBalance, currency),
+        description: 'Total cheque + credit balance'
+      },
+      {
+        metric: 'Total Inventory Value',
+        value: formatCurrency(totalInventoryValue, currency),
+        description: 'Value of products in stock'
+      }
+    ];
+
+    // Add returns data for Admin/Manager
+    if (isAdmin || isManager) {
+      financialData.push({
+        metric: 'Total Returns',
+        value: formatCurrency(currentReturnAmount, currency),
+        description: 'Product returns in period'
+      });
+    }
+
+    // Combine all data
+    const allData = [...data, ...financialData];
+
     const title = `Dashboard Summary Report - ${isAdmin || isManager ? 'Admin' : 'Manager'} View`;
     
-    exportToPDF(title, columns, data, {
+    exportToPDF(title, columns, allData, {
       summary: {
         'Report Period': dateRange.start && dateRange.end 
           ? `${dateRange.start} to ${dateRange.end}` 
           : 'All Time',
-        'Generated By': currentUser?.name || 'Unknown User',
+        'Generated By': currentUser?.name || 'Balasingam Lithurshan',
         'User Role': currentUser?.role || 'Unknown Role',
-        'Currency': currency
+        'Currency': currency,
+        'Filter - Supplier': selectedSupplier === 'all' ? 'All Suppliers' : selectedSupplier,
+        'Filter - Customer': selectedCustomer === 'all' ? 'All Customers' : customers.find(c => c.id === selectedCustomer)?.name || 'All Customers',
+        'Filter - Category': selectedCategory === 'all' ? 'All Categories' : selectedCategory
       }
     });
   };
@@ -1115,7 +1167,7 @@ export const Dashboard: React.FC = () => {
             <div className="flex justify-between items-start">
               <div>
                 <p className={`${getFontSizeClass(formatCurrency(currentPaid, currency))} font-bold text-green-600 dark:text-green-400`}>{formatCurrency(currentPaid, currency)}</p>
-                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Paid = Total Sales - Cheque Balance - Credit Balance - Returns (for filtered period)</p>
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Paid = Total Sales - Cheque Balance - Credit Balance - Returns (from delivered orders in filtered period)</p>
               </div>
             </div>
             <div className="flex justify-end mt-4">
@@ -1131,7 +1183,7 @@ export const Dashboard: React.FC = () => {
             <div className="flex justify-between items-start">
               <div>
                 <p className={`${getFontSizeClass(formatCurrency(currentChequeBalance, currency))} font-bold text-orange-600 dark:text-orange-400`}>{formatCurrency(currentChequeBalance, currency)}</p>
-                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Cheque = sum(order.chequeBalance) across orders</p>
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Cheque = sum(order.chequeBalance) across delivered orders only</p>
               </div>
             </div>
               <div className="flex justify-end mt-4">
@@ -1150,7 +1202,7 @@ export const Dashboard: React.FC = () => {
               <div className="flex justify-between items-start">
                 <div>
                   <p className={`${getFontSizeClass(formatCurrency(currentReturnAmount, currency))} font-bold text-sky-600 dark:text-sky-400`}>{formatCurrency(currentReturnAmount, currency)}</p>
-                  <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Returns = sum(order.returnAmount)</p>
+                  <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Returns = sum(order.returnAmount) from delivered orders only</p>
                 </div>
               </div>
               <div className="flex justify-end mt-4">
@@ -1167,7 +1219,7 @@ export const Dashboard: React.FC = () => {
             <div className="flex justify-between items-start">
               <div>
                 <p className={`${getFontSizeClass(formatCurrency(currentCreditBalance, currency))} font-bold text-red-600 dark:text-red-400`}>{formatCurrency(currentCreditBalance, currency)}</p>
-                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Credit = sum(order.creditBalance)</p>
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Credit = sum(order.creditBalance) from delivered orders only</p>
               </div>
             </div>
             <div className="flex justify-end mt-4">

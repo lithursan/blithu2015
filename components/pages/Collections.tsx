@@ -53,6 +53,7 @@ export const Collections: React.FC = () => {
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'complete'>('all');
   const [typeFilter, setTypeFilter] = useState<'all' | 'credit' | 'cheque'>('all');
+  const [showOverdueOnly, setShowOverdueOnly] = useState<boolean>(false);
   const [selectedCollection, setSelectedCollection] = useState<CollectionRecord | null>(null);
   const [verificationNotes, setVerificationNotes] = useState('');
   const [chequeForms, setChequeForms] = useState<any[]>([]);
@@ -63,6 +64,7 @@ export const Collections: React.FC = () => {
   const [dateTo, setDateTo] = useState<string>('');
   const [isPartialPayment, setIsPartialPayment] = useState(false);
   const [partialAmount, setPartialAmount] = useState<number>(0);
+  const [partialPaymentLoading, setPartialPaymentLoading] = useState(false);
 
   // Fetch collections from Supabase on mount
   useEffect(() => {
@@ -142,28 +144,34 @@ export const Collections: React.FC = () => {
     if (typeFilter !== 'all') {
       filtered = filtered.filter(c => c.collection_type === typeFilter);
     }
-    // Date filter
-    if (dateFrom) {
-      const fromDate = new Date(dateFrom);
-      filtered = filtered.filter(c => {
-        const d = new Date(c.collected_at || c.created_at || '');
-        return d >= fromDate;
-      });
-    }
-    if (dateTo) {
-      const toDate = new Date(dateTo);
-      filtered = filtered.filter(c => {
-        const d = new Date(c.collected_at || c.created_at || '');
-        // Add 1 day to include the end date
-        return d <= new Date(toDate.getTime() + 24*60*60*1000);
-      });
+    // Overdue filter - only show overdue credits if checkbox is checked
+    // When overdue filter is active, ignore date filters to show all overdue collections
+    if (showOverdueOnly) {
+      filtered = filtered.filter(c => isCollectionOverdue(c));
+    } else {
+      // Apply date filters only when overdue filter is not active
+      if (dateFrom) {
+        const fromDate = new Date(dateFrom);
+        filtered = filtered.filter(c => {
+          const d = new Date(c.collected_at || c.created_at || '');
+          return d >= fromDate;
+        });
+      }
+      if (dateTo) {
+        const toDate = new Date(dateTo);
+        filtered = filtered.filter(c => {
+          const d = new Date(c.collected_at || c.created_at || '');
+          // Add 1 day to include the end date
+          return d <= new Date(toDate.getTime() + 24*60*60*1000);
+        });
+      }
     }
     return filtered.sort((a, b) => {
       const dateA = a.collected_at || a.created_at || '';
       const dateB = b.collected_at || b.created_at || '';
       return new Date(dateB).getTime() - new Date(dateA).getTime();
     });
-  }, [collections, statusFilter, typeFilter, dateFrom, dateTo]);
+  }, [collections, statusFilter, typeFilter, dateFrom, dateTo, showOverdueOnly]);
 
   // Group collections by date
   const groupedCollections = useMemo(() => {
@@ -243,6 +251,26 @@ export const Collections: React.FC = () => {
     }
   }, [selectedCollection, customerMap]);
 
+  // Helper function to check if a collection is overdue
+  const isCollectionOverdue = (collection: CollectionRecord) => {
+    // Check both credits and cheques with pending status
+    if ((collection.status || '').toLowerCase() !== 'pending') {
+      return false;
+    }
+    
+    const now = new Date();
+    // Set to start of day for accurate comparison
+    now.setHours(0, 0, 0, 0);
+    
+    // Try created_at first, then collected_at as fallback
+    const createdAt = new Date(collection.created_at || collection.collected_at || new Date());
+    createdAt.setHours(0, 0, 0, 0);
+    
+    const daysDifference = Math.floor((now.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24));
+    
+    return daysDifference > 10;
+  };
+
   // Always use the full collections array for stats, not filteredCollections
   const totalStats = useMemo(() => {
     const pending = collections.filter(c => (c.status || '').toLowerCase() === 'pending');
@@ -251,11 +279,16 @@ export const Collections: React.FC = () => {
       const status = (c.status || '').toLowerCase();
       return status === 'complete' || status === 'collected';
     });
+    
+    // Calculate overdue credits
+    const overdueCredits = pending.filter(c => isCollectionOverdue(c));
+    
     return {
       totalPendingAmount: pending.reduce((sum, c) => sum + c.amount, 0),
       totalCompletedAmount: completed.reduce((sum, c) => sum + c.amount, 0),
       pendingCredit: pending.filter(c => c.collection_type === 'credit').reduce((sum, c) => sum + c.amount, 0),
       pendingCheque: pending.filter(c => c.collection_type === 'cheque').reduce((sum, c) => sum + c.amount, 0),
+      overdueCredit: overdueCredits.reduce((sum, c) => sum + c.amount, 0),
       totalCollections: collections.length
     };
   }, [collections]);
@@ -360,13 +393,14 @@ export const Collections: React.FC = () => {
   };
 
   const handlePartialPayment = async () => {
-    if (!selectedCollection || !isPartialPayment) return;
+    if (!selectedCollection || !isPartialPayment || partialPaymentLoading) return;
     
     if (!partialAmount || partialAmount <= 0 || partialAmount >= selectedCollection.amount) {
       alert('Please enter a valid partial amount (greater than 0 and less than total amount)');
       return;
     }
 
+    setPartialPaymentLoading(true);
     try {
       // Update the current collection amount to remaining amount
       const remainingAmount = selectedCollection.amount - partialAmount;
@@ -381,6 +415,50 @@ export const Collections: React.FC = () => {
       
       if (updateError) throw updateError;
 
+      // Update the order's outstanding balance and increase amount paid
+      if (selectedCollection.order_id) {
+        try {
+          // Fetch the current order to get the latest amounts
+          const { data: orderData, error: fetchOrderError } = await supabase
+            .from('orders')
+            .select('amountpaid, creditbalance, chequebalance')
+            .eq('id', selectedCollection.order_id)
+            .single();
+          
+          if (fetchOrderError) throw fetchOrderError;
+          
+          const prevAmountPaid = orderData?.amountpaid || 0;
+          const prevCreditBalance = orderData?.creditbalance || 0;
+          const prevChequeBalance = orderData?.chequebalance || 0;
+          
+          // Update order amounts
+          const updatedOrderData: any = {
+            amountpaid: prevAmountPaid + partialAmount,
+            notes: `Partial ${selectedCollection.collection_type.toUpperCase()} payment of ${formatCurrency(partialAmount)} received by ${currentUser?.name}. ${verificationNotes ? 'Notes: ' + verificationNotes : ''}`
+          };
+          
+          // Reduce the appropriate balance based on collection type
+          if (selectedCollection.collection_type === 'credit') {
+            updatedOrderData.creditbalance = Math.max(0, prevCreditBalance - partialAmount);
+          } else if (selectedCollection.collection_type === 'cheque') {
+            updatedOrderData.chequebalance = Math.max(0, prevChequeBalance - partialAmount);
+          }
+          
+          // Update order in database
+          const { error: orderError } = await supabase
+            .from('orders')
+            .update(updatedOrderData)
+            .eq('id', selectedCollection.order_id);
+          
+          if (orderError) {
+            console.error('Failed to update order amounts:', orderError);
+          }
+          
+        } catch (err) {
+          console.error('Error updating order:', err);
+        }
+      }
+
       // Update local state
       setCollections(prev =>
         prev.map(c =>
@@ -390,7 +468,7 @@ export const Collections: React.FC = () => {
         )
       );
 
-      // Refresh data
+      // Refresh data to ensure order card updates
       await refetchData();
 
       alert(`Partial payment of ${formatCurrency(partialAmount)} recorded successfully. Remaining amount: ${formatCurrency(remainingAmount)}`);
@@ -402,6 +480,8 @@ export const Collections: React.FC = () => {
     } catch (error) {
       console.error('Error recording partial payment:', error);
       alert('Failed to record partial payment. Please try again.');
+    } finally {
+      setPartialPaymentLoading(false);
     }
   };
 
@@ -431,6 +511,22 @@ export const Collections: React.FC = () => {
       
       if (invalidForms.length > 0) {
         alert('Please fill in all required fields: Payer, Amount, Bank, Cheque Number, and Cheque Date. Only Notes field is optional.');
+        setChequeSaving(false);
+        return;
+      }
+
+      // Validate individual cheque amounts don't exceed collection amount
+      const invalidAmounts = (chequeForms || []).filter(cf => cf.amount > selectedCollection.amount);
+      if (invalidAmounts.length > 0) {
+        alert(`Individual cheque amount cannot exceed the collection amount of ${formatCurrency(selectedCollection.amount)}`);
+        setChequeSaving(false);
+        return;
+      }
+
+      // Validate total amount of all cheques equals collection amount
+      const totalChequeAmount = (chequeForms || []).reduce((sum, cf) => sum + (cf.amount || 0), 0);
+      if (Math.abs(totalChequeAmount - selectedCollection.amount) > 0.01) {
+        alert(`Total cheque amount (${formatCurrency(totalChequeAmount)}) must equal the collection amount (${formatCurrency(selectedCollection.amount)})`);
         setChequeSaving(false);
         return;
       }
@@ -476,22 +572,31 @@ export const Collections: React.FC = () => {
   // Mark the collection as complete after cheque details are provided and confirmed
   const updatedNotes = verificationNotes ? verificationNotes + ' | Cheque recorded.' : 'Cheque recorded.';
   
-  // Update the order's amountpaid when completing the cheque collection
+  // Update the order's balance fields when completing the cheque collection
   if (selectedCollection.order_id) {
     try {
-      // Fetch the current order to get the latest amountpaid
+      // Fetch the current order to get the latest balance fields
       const { data: orderData, error: fetchOrderError } = await supabase
         .from('orders')
-        .select('amountpaid')
+        .select('amountpaid, creditbalance, chequebalance')
         .eq('id', selectedCollection.order_id)
         .single();
       if (fetchOrderError) throw fetchOrderError;
       
       const prevAmountPaid = orderData?.amountpaid || 0;
-      const updatedOrderData = {
+      const prevCreditBalance = orderData?.creditbalance || 0;
+      const prevChequeBalance = orderData?.chequebalance || 0;
+      
+      const updatedOrderData: any = {
         notes: `CHEQUE collection of ${formatCurrency(selectedCollection.amount)} completed by ${currentUser?.name}. ${updatedNotes}`,
         amountpaid: prevAmountPaid + selectedCollection.amount
       };
+      
+      // If converting from credit to cheque, transfer the balance
+      if (isConvertingCredit && selectedCollection.collection_type === 'credit') {
+        updatedOrderData.creditbalance = Math.max(0, prevCreditBalance - selectedCollection.amount);
+        updatedOrderData.chequebalance = prevChequeBalance + selectedCollection.amount;
+      }
       
       // Update order in database
       const { error: orderError } = await supabase
@@ -535,8 +640,42 @@ export const Collections: React.FC = () => {
   // Update verification notes
   setVerificationNotes(updatedNotes);
   
-  // Reset forms and close modal
+  // Reset forms
   setChequeForms([]);
+  
+  // For non-conversion cases, close modal immediately after successful processing
+  if (!isConvertingCredit) {
+    // Refresh collections data from database to ensure latest status
+    const { data: refreshedCollections, error: refreshError } = await supabase
+      .from('collections')
+      .select('*')
+      .order('created_at', { ascending: false });
+    
+    if (!refreshError && refreshedCollections) {
+      setCollections(refreshedCollections);
+    }
+    
+    // Refresh global data to ensure all components show updated status
+    await refetchData();
+    
+    // Close modal for regular cheque recording
+    setSelectedCollection(null);
+    return; // Exit early for non-conversion cases
+  }
+  
+  // Refresh collections data from database to ensure latest status
+  const { data: refreshedCollections, error: refreshError } = await supabase
+    .from('collections')
+    .select('*')
+    .order('created_at', { ascending: false });
+  
+  if (!refreshError && refreshedCollections) {
+    setCollections(refreshedCollections);
+  }
+  
+  // Refresh global data to ensure all components show updated status
+  await refetchData();
+  
   // If we were converting a credit collection, handle conversion safely (avoid 409)
   if (isConvertingCredit && selectedCollection?.id) {
     try {
@@ -566,20 +705,79 @@ export const Collections: React.FC = () => {
         const { error: mergeErr } = await supabase.from('collections').update({ amount: mergedAmount, notes: mergedNotes }).eq('id', existingCol.id);
         if (mergeErr) console.error('Failed to merge collection amounts/notes:', mergeErr);
 
-        // Mark the original credit collection as completed/merged
-        const { error: finishErr } = await supabase.from('collections').update({ status: 'complete', notes: `Merged into ${existingCol.id}`, completed_by: currentUser?.name || '', completed_at: new Date().toISOString() }).eq('id', selectedCollection.id);
+        // Mark the original credit collection as completed/merged and update order balance
+        const { error: finishErr } = await supabase.from('collections').update({ status: 'complete', notes: `Converted to cheque and merged into ${existingCol.id}`, completed_by: currentUser?.name || '', completed_at: new Date().toISOString() }).eq('id', selectedCollection.id);
         if (finishErr) console.error('Failed to mark original collection as merged:', finishErr);
+
+        // Update order balance fields to transfer from credit to cheque
+        if (selectedCollection.order_id) {
+          try {
+            const { data: orderData, error: fetchErr } = await supabase
+              .from('orders')
+              .select('creditbalance, chequebalance')
+              .eq('id', selectedCollection.order_id)
+              .single();
+            if (!fetchErr && orderData) {
+              const newCreditBalance = Math.max(0, (orderData.creditbalance || 0) - selectedCollection.amount);
+              const newChequeBalance = (orderData.chequebalance || 0) + selectedCollection.amount;
+              
+              await supabase
+                .from('orders')
+                .update({ 
+                  creditbalance: newCreditBalance, 
+                  chequebalance: newChequeBalance,
+                  notes: `Credit of ${formatCurrency(selectedCollection.amount)} converted to cheque` 
+                })
+                .eq('id', selectedCollection.order_id);
+            }
+          } catch (err) {
+            console.error('Failed to update order balance during conversion:', err);
+          }
+        }
 
         // Update local state to reflect changes
         setCollections(prev => prev.map(c => {
           if (c.id === existingCol.id) return { ...c, amount: mergedAmount, notes: mergedNotes };
-          if (c.id === selectedCollection.id) return { ...c, status: 'complete', notes: `Merged into ${existingCol.id}` };
+          if (c.id === selectedCollection.id) return { ...c, status: 'complete' as const, notes: `Converted to cheque and merged into ${existingCol.id}`, completed_by: currentUser?.name || '', completed_at: new Date().toISOString() };
           return c;
         }));
         if (optimisticConvertedId === selectedCollection.id) setOptimisticConvertedId(null);
       } else {
-        // No existing cheque collection — safe to update type
-        const { error: updateErr } = await supabase.from('collections').update({ collection_type: 'cheque' }).eq('id', selectedCollection.id);
+        // No existing cheque collection — safe to update type and mark as complete
+        // Also update order balance to transfer from credit to cheque
+        if (selectedCollection.order_id) {
+          try {
+            const { data: orderData, error: fetchErr } = await supabase
+              .from('orders')
+              .select('creditbalance, chequebalance')
+              .eq('id', selectedCollection.order_id)
+              .single();
+            if (!fetchErr && orderData) {
+              const newCreditBalance = Math.max(0, (orderData.creditbalance || 0) - selectedCollection.amount);
+              const newChequeBalance = (orderData.chequebalance || 0) + selectedCollection.amount;
+              
+              await supabase
+                .from('orders')
+                .update({ 
+                  creditbalance: newCreditBalance, 
+                  chequebalance: newChequeBalance,
+                  notes: `Credit of ${formatCurrency(selectedCollection.amount)} converted to cheque` 
+                })
+                .eq('id', selectedCollection.order_id);
+            }
+          } catch (err) {
+            console.error('Failed to update order balance during conversion:', err);
+          }
+        }
+        
+        const { error: updateErr } = await supabase.from('collections').update({ 
+          collection_type: 'cheque',
+          status: 'complete',
+          notes: `Converted to cheque collection. ${updatedNotes}`,
+          completed_by: currentUser?.name || '',
+          completed_at: new Date().toISOString()
+        }).eq('id', selectedCollection.id);
+        
         if (updateErr) {
           console.error('Failed to update collection type after converting to cheque:', updateErr);
           // Revert optimistic change if update failed
@@ -588,7 +786,14 @@ export const Collections: React.FC = () => {
             setOptimisticConvertedId(null);
           }
         } else {
-          setCollections(prev => prev.map(c => c.id === selectedCollection.id ? { ...c, collection_type: 'cheque' } : c));
+          setCollections(prev => prev.map(c => c.id === selectedCollection.id ? { 
+            ...c, 
+            collection_type: 'cheque',
+            status: 'complete' as const,
+            notes: `Converted to cheque collection. ${updatedNotes}`,
+            completed_by: currentUser?.name || '',
+            completed_at: new Date().toISOString()
+          } : c));
           // Conversion confirmed, clear optimistic id
           if (optimisticConvertedId === selectedCollection.id) setOptimisticConvertedId(null);
         }
@@ -597,8 +802,16 @@ export const Collections: React.FC = () => {
       console.error('Error during credit->cheque conversion handling:', e);
     }
   }
+  
+  // Always reset conversion state and close modal after successful processing
   setIsConvertingCredit(false);
+  
+  // Final data refresh to ensure UI is up to date
+  await refetchData();
+  
+  // Close modal after everything is complete
   setSelectedCollection(null);
+  
     } catch (err) {
       console.error('Error saving cheque from collection:', err);
       alert('Failed to save cheque. See console for details.');
@@ -657,73 +870,88 @@ export const Collections: React.FC = () => {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
         <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center">
-              <div className="p-2 bg-orange-100 dark:bg-orange-900/30 rounded-lg">
-                <span className="text-2xl">⏳</span>
+          <CardContent className="p-3">
+            <div className="text-center space-y-2">
+              <div className="flex justify-center">
+                <div className="p-2 bg-orange-100 dark:bg-orange-900/30 rounded-lg">
+                  <span className="text-xl">⏳</span>
+                </div>
               </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-slate-600 dark:text-slate-400">Pending Collections</p>
-                <p className="text-2xl font-bold text-orange-600">{formatCurrency(totalStats.totalPendingAmount)}</p>
-              </div>
+              <p className="text-xs font-medium text-slate-600 dark:text-slate-400 leading-tight">Pending Collections</p>
+              <p className="text-sm font-bold text-orange-600 break-words">{formatCurrency(totalStats.totalPendingAmount)}</p>
             </div>
           </CardContent>
         </Card>
 
         <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center">
-              <div className="p-2 bg-green-100 dark:bg-green-900/30 rounded-lg">
-                <span className="text-2xl">✅</span>
+          <CardContent className="p-3">
+            <div className="text-center space-y-2">
+              <div className="flex justify-center">
+                <div className="p-2 bg-green-100 dark:bg-green-900/30 rounded-lg">
+                  <span className="text-xl">✅</span>
+                </div>
               </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-slate-600 dark:text-slate-400">Completed Collections</p>
-                <p className="text-2xl font-bold text-green-600">{formatCurrency(totalStats.totalCompletedAmount)}</p>
-              </div>
+              <p className="text-xs font-medium text-slate-600 dark:text-slate-400 leading-tight">Completed Collections</p>
+              <p className="text-sm font-bold text-green-600 break-words">{formatCurrency(totalStats.totalCompletedAmount)}</p>
             </div>
           </CardContent>
         </Card>
 
         <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center">
-              <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
-                <span className="text-2xl">💰</span>
+          <CardContent className="p-3">
+            <div className="text-center space-y-2">
+              <div className="flex justify-center">
+                <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
+                  <span className="text-xl">💰</span>
+                </div>
               </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-slate-600 dark:text-slate-400">Pending Credit</p>
-                <p className="text-2xl font-bold text-blue-600">{formatCurrency(totalStats.pendingCredit)}</p>
-              </div>
+              <p className="text-xs font-medium text-slate-600 dark:text-slate-400 leading-tight">Pending Credit</p>
+              <p className="text-sm font-bold text-blue-600 break-words">{formatCurrency(totalStats.pendingCredit)}</p>
             </div>
           </CardContent>
         </Card>
 
         <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center">
-              <div className="p-2 bg-purple-100 dark:bg-purple-900/30 rounded-lg">
-                <span className="text-2xl">🏦</span>
+          <CardContent className="p-3">
+            <div className="text-center space-y-2">
+              <div className="flex justify-center">
+                <div className="p-2 bg-purple-100 dark:bg-purple-900/30 rounded-lg">
+                  <span className="text-xl">🏦</span>
+                </div>
               </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-slate-600 dark:text-slate-400">Pending Cheques</p>
-                <p className="text-2xl font-bold text-purple-600">{formatCurrency(totalStats.pendingCheque)}</p>
-              </div>
+              <p className="text-xs font-medium text-slate-600 dark:text-slate-400 leading-tight">Pending Cheques</p>
+              <p className="text-sm font-bold text-purple-600 break-words">{formatCurrency(totalStats.pendingCheque)}</p>
             </div>
           </CardContent>
         </Card>
 
         <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center">
-              <div className="p-2 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg">
-                <span className="text-2xl">📅</span>
+          <CardContent className="p-3">
+            <div className="text-center space-y-2">
+              <div className="flex justify-center">
+                <div className="p-2 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg">
+                  <span className="text-xl">📅</span>
+                </div>
               </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-slate-600 dark:text-slate-400">Date Groups</p>
-                <p className="text-2xl font-bold text-indigo-600">{groupedCollections.length}</p>
+              <p className="text-xs font-medium text-slate-600 dark:text-slate-400 leading-tight">Date Groups</p>
+              <p className="text-lg font-bold text-indigo-600">{groupedCollections.length}</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-red-200 dark:border-red-800">
+          <CardContent className="p-3">
+            <div className="text-center space-y-2">
+              <div className="flex justify-center">
+                <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-lg">
+                  <span className="text-xl">🚨</span>
+                </div>
               </div>
+              <p className="text-xs font-medium text-slate-600 dark:text-slate-400 leading-tight">Overdue Credits</p>
+              <p className="text-sm font-bold text-red-600 break-words">{formatCurrency(totalStats.overdueCredit)}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">&gt;10 days old</p>
             </div>
           </CardContent>
         </Card>
@@ -741,57 +969,73 @@ export const Collections: React.FC = () => {
               </CardDescription>
             </div>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mt-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Status Filter</label>
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value as 'all' | 'pending' | 'complete')}
-                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-              >
-                <option value="all">All Status</option>
-                <option value="pending">Pending Verification</option>
-                <option value="complete">Complete</option>
-              </select>
+          <div className="space-y-4 mt-4">
+            {/* First Row - Main Filters */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Status Filter</label>
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value as 'all' | 'pending' | 'complete')}
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                >
+                  <option value="all">All Status</option>
+                  <option value="pending">Pending Verification</option>
+                  <option value="complete">Complete</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Type Filter</label>
+                <select
+                  value={typeFilter}
+                  onChange={(e) => setTypeFilter(e.target.value as 'all' | 'credit' | 'cheque')}
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                >
+                  <option value="all">All Types</option>
+                  <option value="credit">💰 Credit Collections</option>
+                  <option value="cheque">🏦 Cheque Collections</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">From Date</label>
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={e => setDateFrom(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">To Date</label>
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={e => setDateTo(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                />
+              </div>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Type Filter</label>
-              <select
-                value={typeFilter}
-                onChange={(e) => setTypeFilter(e.target.value as 'all' | 'credit' | 'cheque')}
-                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-              >
-                <option value="all">All Types</option>
-                <option value="credit">💰 Credit Collections</option>
-                <option value="cheque">🏦 Cheque Collections</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">From Date</label>
-              <input
-                type="date"
-                value={dateFrom}
-                onChange={e => setDateFrom(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-              />
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">To Date</label>
-              <input
-                type="date"
-                value={dateTo}
-                onChange={e => setDateTo(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-              />
-            </div>
-            
-            <div className="flex items-end">
+            {/* Second Row - Overdue Filter and Clear Button */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pt-2 border-t border-slate-200 dark:border-slate-700">
+              <div className="flex items-center space-x-3">
+                <input
+                  type="checkbox"
+                  id="overdue-filter"
+                  checked={showOverdueOnly}
+                  onChange={(e) => setShowOverdueOnly(e.target.checked)}
+                  className="w-4 h-4 text-red-600 bg-white dark:bg-slate-700 border-slate-300 dark:border-slate-600 rounded focus:ring-red-500 focus:ring-2"
+                />
+                <label htmlFor="overdue-filter" className="text-sm font-medium text-red-600 dark:text-red-400">
+                  🚨 Show Overdue Only (&gt;10 days)
+                </label>
+              </div>
               <button
-                onClick={() => { setStatusFilter('all'); setTypeFilter('all'); setDateFrom(''); setDateTo(''); }}
-                className="w-full px-3 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-lg transition-colors text-sm"
+                onClick={() => { setStatusFilter('all'); setTypeFilter('all'); setDateFrom(''); setDateTo(''); setShowOverdueOnly(false); }}
+                className="px-6 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-lg transition-colors text-sm font-medium"
               >
                 Clear Filters
               </button>
@@ -845,18 +1089,26 @@ export const Collections: React.FC = () => {
                   
                   {/* Collections for this date */}
                   <div className="p-4 space-y-3">
-                    {group.collections.map((collection) => (
-                      <div key={collection.id} className="border border-slate-200 dark:border-slate-600 rounded-lg p-4 hover:shadow-md transition-shadow bg-slate-50 dark:bg-slate-700">
+                    {group.collections.map((collection) => {
+                      const isOverdue = isCollectionOverdue(collection);
+                      return (
+                      <div key={collection.id} className={`border rounded-lg p-4 hover:shadow-md transition-shadow ${
+                        isOverdue 
+                          ? 'border-red-300 dark:border-red-600 bg-red-50 dark:bg-red-900/20' 
+                          : 'border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700'
+                      }`}>
                         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-3 sm:space-y-0">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center space-x-3 mb-2">
                               <div className="flex-shrink-0">
                                 <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                  collection.collection_type === 'credit' 
-                                    ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' 
-                                    : 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400'
+                                  isOverdue
+                                    ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+                                    : collection.collection_type === 'credit' 
+                                      ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' 
+                                      : 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400'
                                 }`}>
-                                  {collection.collection_type === 'credit' ? '💰 Credit' : '🏦 Cheque'}
+                                  {isOverdue ? '🚨 Overdue Credit' : collection.collection_type === 'credit' ? '💰 Credit' : '🏦 Cheque'}
                                 </span>
                               </div>
                               <div className="flex-1 min-w-0">
@@ -954,7 +1206,8 @@ export const Collections: React.FC = () => {
                           </div>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               ))}
@@ -1090,11 +1343,16 @@ export const Collections: React.FC = () => {
                                 />
                               </div>
                               <div>
-                                <label className="block text-xs text-slate-600 dark:text-slate-300 mb-1">Amount *</label>
+                                <label className="block text-xs text-slate-600 dark:text-slate-300 mb-1">
+                                  Amount * (Max: {formatCurrency(selectedCollection.amount)})
+                                </label>
                                 <input 
                                   type="number" 
                                   value={cf.amount ?? selectedCollection.amount ?? 0} 
                                   onChange={e => setChequeForms(prev => prev.map((f, i) => i === idx ? { ...f, amount: Number(e.target.value) } : f))} 
+                                  min="0.01"
+                                  max={selectedCollection.amount}
+                                  step="0.01"
                                   className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-600 border border-slate-300 dark:border-slate-500 text-slate-900 dark:text-slate-100 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" 
                                 />
                               </div>
@@ -1145,7 +1403,7 @@ export const Collections: React.FC = () => {
                           </div>
                         ))}
 
-                        <div>
+                        <div className="flex justify-between items-center">
                           <button
                             type="button"
                             onClick={() => setChequeForms(prev => [...prev, { payerName: '', amount: 0, bank: '', chequeNumber: '', chequeDate: new Date().toISOString().slice(0,10), depositDate: '', notes: '' }])}
@@ -1153,6 +1411,21 @@ export const Collections: React.FC = () => {
                           >
                             + Add Another Cheque
                           </button>
+                          {chequeForms.length > 1 && (
+                            <div className="text-sm">
+                              <span className="text-slate-600 dark:text-slate-400">Total: </span>
+                              <span className={`font-semibold ${
+                                Math.abs(chequeForms.reduce((sum, cf) => sum + (cf.amount || 0), 0) - selectedCollection.amount) < 0.01 
+                                  ? 'text-green-600' 
+                                  : 'text-red-600'
+                              }`}>
+                                {formatCurrency(chequeForms.reduce((sum, cf) => sum + (cf.amount || 0), 0))}
+                              </span>
+                              <span className="text-slate-500 dark:text-slate-400 ml-1">
+                                / {formatCurrency(selectedCollection.amount)}
+                              </span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}
@@ -1174,9 +1447,14 @@ export const Collections: React.FC = () => {
                         <button
                           onClick={handlePartialPayment}
                           type="button"
-                          className="text-white bg-orange-600 hover:bg-orange-700 focus:ring-4 focus:outline-none focus:ring-orange-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center"
+                          disabled={partialPaymentLoading}
+                          className={`text-white font-medium rounded-lg text-sm px-5 py-2.5 text-center focus:ring-4 focus:outline-none ${
+                            partialPaymentLoading 
+                              ? 'bg-orange-400 cursor-not-allowed' 
+                              : 'bg-orange-600 hover:bg-orange-700 focus:ring-orange-300'
+                          }`}
                         >
-                          💰 Record Partial Payment
+                          {partialPaymentLoading ? '⏳ Processing...' : '💰 Record Partial Payment'}
                         </button>
                       ) : selectedCollection.collection_type === 'cheque' || isConvertingCredit ? (
                         <>
