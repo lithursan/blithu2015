@@ -34,6 +34,7 @@ interface DataContextType {
     upcomingChequesCount?: number;
     // Overdue credits
     overdueCreditsCount?: number;
+    warningCreditsCount?: number;
   calculateCustomerOutstanding?: (customerId: string) => number;
     // Aggregated delivery products keyed by date (YYYY-MM-DD) produced by the Deliveries page
     deliveryAggregatedProducts?: Record<string, { productId: string; qty: number }[]>;
@@ -62,6 +63,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const [alertedChequeIds, setAlertedChequeIds] = useState<Set<string>>(new Set());
     const [upcomingCheques, setUpcomingCheques] = useState<any[]>([]);
     const [overdueCreditsCount, setOverdueCreditsCount] = useState<number>(0);
+    const [warningCreditsCount, setWarningCreditsCount] = useState<number>(0);
 
     // Helper to populate overdue credits count for UI badges
     const fetchOverdueCredits = React.useCallback(async () => {
@@ -79,12 +81,20 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             
             if (collections) {
                 const now = new Date();
+                // Separate warning (10-14 days) and overdue (14+ days) collections for notification
+                const warningCount = collections.filter(collection => {
+                    const createdAt = new Date(collection.created_at || collection.collected_at || new Date());
+                    const daysDifference = Math.floor((now.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24));
+                    return daysDifference >= 10 && daysDifference <= 14; // Warning: 10-14 days
+                }).length;
+                
                 const overdueCount = collections.filter(collection => {
                     const createdAt = new Date(collection.created_at || collection.collected_at || new Date());
                     const daysDifference = Math.floor((now.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24));
-                    return daysDifference > 10;
+                    return daysDifference > 14; // Overdue: >14 days
                 }).length;
                 
+                setWarningCreditsCount(warningCount);
                 setOverdueCreditsCount(overdueCount);
             }
         } catch (err) {
@@ -657,6 +667,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         suppliers, setSuppliers,
         upcomingCheques, upcomingChequesCount: upcomingCheques.length,
         overdueCreditsCount,
+        warningCreditsCount,
         deliveryAggregatedProducts,
         setDeliveryAggregatedProducts,
         refetchData,

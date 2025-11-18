@@ -38,6 +38,8 @@ export const Collections: React.FC = () => {
     const formatted = filteredCollections.map(c => ({
       'Order ID': c.order_id,
       'Customer': customerMap[c.customer_id] || c.customer_id,
+      'Phone': customerPhoneMap[c.customer_id] || 'N/A',
+      'Location': customerLocationMap[c.customer_id] || 'N/A',
       'Type': c.collection_type,
       'Amount': c.amount,
       'Collected By': c.collected_by,
@@ -54,6 +56,7 @@ export const Collections: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'complete'>('all');
   const [typeFilter, setTypeFilter] = useState<'all' | 'credit' | 'cheque'>('all');
   const [showOverdueOnly, setShowOverdueOnly] = useState<boolean>(false);
+  const [showWarningOnly, setShowWarningOnly] = useState<boolean>(false);
   const [selectedCollection, setSelectedCollection] = useState<CollectionRecord | null>(null);
   const [verificationNotes, setVerificationNotes] = useState('');
   const [chequeForms, setChequeForms] = useState<any[]>([]);
@@ -129,6 +132,46 @@ export const Collections: React.FC = () => {
     [currentUser]
   );
 
+  // Helper function to check if a collection is overdue (red - more than 14 days)
+  const isCollectionOverdue = (collection: CollectionRecord) => {
+    // Check both credits and cheques with pending status
+    if ((collection.status || '').toLowerCase() !== 'pending') {
+      return false;
+    }
+    
+    const now = new Date();
+    // Set to start of day for accurate comparison
+    now.setHours(0, 0, 0, 0);
+    
+    // Try created_at first, then collected_at as fallback
+    const createdAt = new Date(collection.created_at || collection.collected_at || new Date());
+    createdAt.setHours(0, 0, 0, 0);
+    
+    const daysDifference = Math.floor((now.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24));
+    
+    return daysDifference > 14;
+  };
+
+  // Helper function to check if a collection is approaching overdue (yellow - 10-14 days)
+  const isCollectionWarning = (collection: CollectionRecord) => {
+    // Check both credits and cheques with pending status
+    if ((collection.status || '').toLowerCase() !== 'pending') {
+      return false;
+    }
+    
+    const now = new Date();
+    // Set to start of day for accurate comparison
+    now.setHours(0, 0, 0, 0);
+    
+    // Try created_at first, then collected_at as fallback
+    const createdAt = new Date(collection.created_at || collection.collected_at || new Date());
+    createdAt.setHours(0, 0, 0, 0);
+    
+    const daysDifference = Math.floor((now.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24));
+    
+    return daysDifference >= 10 && daysDifference <= 14;
+  };
+
   const filteredCollections = useMemo(() => {
     let filtered = collections;
     if (statusFilter !== 'all') {
@@ -144,10 +187,13 @@ export const Collections: React.FC = () => {
     if (typeFilter !== 'all') {
       filtered = filtered.filter(c => c.collection_type === typeFilter);
     }
-    // Overdue filter - only show overdue credits if checkbox is checked
-    // When overdue filter is active, ignore date filters to show all overdue collections
+    // Special filters for overdue and warning collections
+    // When these filters are active, ignore date filters
     if (showOverdueOnly) {
       filtered = filtered.filter(c => isCollectionOverdue(c));
+    } else if (showWarningOnly) {
+      // Show both warning (10-14 days) AND overdue (>14 days) collections together
+      filtered = filtered.filter(c => isCollectionWarning(c) || isCollectionOverdue(c));
     } else {
       // Apply date filters only when overdue filter is not active
       if (dateFrom) {
@@ -171,7 +217,7 @@ export const Collections: React.FC = () => {
       const dateB = b.collected_at || b.created_at || '';
       return new Date(dateB).getTime() - new Date(dateA).getTime();
     });
-  }, [collections, statusFilter, typeFilter, dateFrom, dateTo, showOverdueOnly]);
+  }, [collections, statusFilter, typeFilter, dateFrom, dateTo, showOverdueOnly, showWarningOnly]);
 
   // Group collections by date
   const groupedCollections = useMemo(() => {
@@ -234,6 +280,30 @@ export const Collections: React.FC = () => {
     return map;
   }, [customers]);
 
+  // Map customer id -> phone for quick lookup
+  const customerPhoneMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    (customers || []).forEach(c => {
+      if (c.id) map[c.id] = c.phone || '';
+    });
+    return map;
+  }, [customers]);
+
+  // Map customer id -> location for quick lookup
+  const customerLocationMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    (customers || []).forEach(c => {
+      if (c.id) {
+        // Clean location by removing GPS coordinates for display
+        const cleanLocation = c.location ? 
+          c.location.replace(/GPS:\s*-?\d+\.?\d*,\s*-?\d+\.?\d*\s*\(?\)?/g, '').trim() || 'No address' :
+          'No address';
+        map[c.id] = cleanLocation;
+      }
+    });
+    return map;
+  }, [customers]);
+
   // Initialize chequeForms when a cheque collection is selected
   useEffect(() => {
     if (selectedCollection && (selectedCollection.collection_type === 'cheque' || isConvertingCredit)) {
@@ -251,26 +321,6 @@ export const Collections: React.FC = () => {
     }
   }, [selectedCollection, customerMap]);
 
-  // Helper function to check if a collection is overdue
-  const isCollectionOverdue = (collection: CollectionRecord) => {
-    // Check both credits and cheques with pending status
-    if ((collection.status || '').toLowerCase() !== 'pending') {
-      return false;
-    }
-    
-    const now = new Date();
-    // Set to start of day for accurate comparison
-    now.setHours(0, 0, 0, 0);
-    
-    // Try created_at first, then collected_at as fallback
-    const createdAt = new Date(collection.created_at || collection.collected_at || new Date());
-    createdAt.setHours(0, 0, 0, 0);
-    
-    const daysDifference = Math.floor((now.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24));
-    
-    return daysDifference > 10;
-  };
-
   // Always use the full collections array for stats, not filteredCollections
   const totalStats = useMemo(() => {
     const pending = collections.filter(c => (c.status || '').toLowerCase() === 'pending');
@@ -282,6 +332,7 @@ export const Collections: React.FC = () => {
     
     // Calculate overdue credits
     const overdueCredits = pending.filter(c => isCollectionOverdue(c));
+    const warningCredits = pending.filter(c => isCollectionWarning(c));
     
     return {
       totalPendingAmount: pending.reduce((sum, c) => sum + c.amount, 0),
@@ -289,6 +340,9 @@ export const Collections: React.FC = () => {
       pendingCredit: pending.filter(c => c.collection_type === 'credit').reduce((sum, c) => sum + c.amount, 0),
       pendingCheque: pending.filter(c => c.collection_type === 'cheque').reduce((sum, c) => sum + c.amount, 0),
       overdueCredit: overdueCredits.reduce((sum, c) => sum + c.amount, 0),
+      warningCredit: warningCredits.reduce((sum, c) => sum + c.amount, 0),
+      overdueCount: overdueCredits.length,
+      warningCount: warningCredits.length,
       totalCollections: collections.length
     };
   }, [collections]);
@@ -941,6 +995,22 @@ export const Collections: React.FC = () => {
           </CardContent>
         </Card>
 
+        <Card className="border-yellow-200 dark:border-yellow-800">
+          <CardContent className="p-3">
+            <div className="text-center space-y-2">
+              <div className="flex justify-center">
+                <div className="p-2 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg">
+                  <span className="text-xl">⚠️</span>
+                </div>
+              </div>
+              <p className="text-xs font-medium text-slate-600 dark:text-slate-400 leading-tight">Due Soon</p>
+              <p className="text-sm font-bold text-yellow-600 break-words">{formatCurrency(totalStats.warningCredit)}</p>
+              <p className="text-xs font-semibold text-yellow-700 dark:text-yellow-300">{totalStats.warningCount} collection{totalStats.warningCount !== 1 ? 's' : ''}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">10-14 days old</p>
+            </div>
+          </CardContent>
+        </Card>
+
         <Card className="border-red-200 dark:border-red-800">
           <CardContent className="p-3">
             <div className="text-center space-y-2">
@@ -951,7 +1021,8 @@ export const Collections: React.FC = () => {
               </div>
               <p className="text-xs font-medium text-slate-600 dark:text-slate-400 leading-tight">Overdue Credits</p>
               <p className="text-sm font-bold text-red-600 break-words">{formatCurrency(totalStats.overdueCredit)}</p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">&gt;10 days old</p>
+              <p className="text-xs font-semibold text-red-700 dark:text-red-300">{totalStats.overdueCount} collection{totalStats.overdueCount !== 1 ? 's' : ''}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">&gt;14 days old</p>
             </div>
           </CardContent>
         </Card>
@@ -1021,20 +1092,40 @@ export const Collections: React.FC = () => {
 
             {/* Second Row - Overdue Filter and Clear Button */}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pt-2 border-t border-slate-200 dark:border-slate-700">
-              <div className="flex items-center space-x-3">
-                <input
-                  type="checkbox"
-                  id="overdue-filter"
-                  checked={showOverdueOnly}
-                  onChange={(e) => setShowOverdueOnly(e.target.checked)}
-                  className="w-4 h-4 text-red-600 bg-white dark:bg-slate-700 border-slate-300 dark:border-slate-600 rounded focus:ring-red-500 focus:ring-2"
-                />
-                <label htmlFor="overdue-filter" className="text-sm font-medium text-red-600 dark:text-red-400">
-                  🚨 Show Overdue Only (&gt;10 days)
-                </label>
+              <div className="flex flex-col sm:flex-row items-start sm:items-center space-y-2 sm:space-y-0 sm:space-x-6">
+                <div className="flex items-center space-x-3">
+                  <input
+                    type="checkbox"
+                    id="warning-filter"
+                    checked={showWarningOnly}
+                    onChange={(e) => {
+                      setShowWarningOnly(e.target.checked);
+                      if (e.target.checked) setShowOverdueOnly(false); // Uncheck overdue when warning is checked
+                    }}
+                    className="w-4 h-4 text-yellow-600 bg-white dark:bg-slate-700 border-slate-300 dark:border-slate-600 rounded focus:ring-yellow-500 focus:ring-2"
+                  />
+                  <label htmlFor="warning-filter" className="text-sm font-medium text-yellow-600 dark:text-yellow-400">
+                    ⚠️ Show Due Soon & Overdue (≥10 days)
+                  </label>
+                </div>
+                <div className="flex items-center space-x-3">
+                  <input
+                    type="checkbox"
+                    id="overdue-filter"
+                    checked={showOverdueOnly}
+                    onChange={(e) => {
+                      setShowOverdueOnly(e.target.checked);
+                      if (e.target.checked) setShowWarningOnly(false); // Uncheck warning when overdue is checked
+                    }}
+                    className="w-4 h-4 text-red-600 bg-white dark:bg-slate-700 border-slate-300 dark:border-slate-600 rounded focus:ring-red-500 focus:ring-2"
+                  />
+                  <label htmlFor="overdue-filter" className="text-sm font-medium text-red-600 dark:text-red-400">
+                    🚨 Show Overdue Only (&gt;14 days)
+                  </label>
+                </div>
               </div>
               <button
-                onClick={() => { setStatusFilter('all'); setTypeFilter('all'); setDateFrom(''); setDateTo(''); setShowOverdueOnly(false); }}
+                onClick={() => { setStatusFilter('all'); setTypeFilter('all'); setDateFrom(''); setDateTo(''); setShowOverdueOnly(false); setShowWarningOnly(false); }}
                 className="px-6 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-lg transition-colors text-sm font-medium"
               >
                 Clear Filters
@@ -1091,10 +1182,13 @@ export const Collections: React.FC = () => {
                   <div className="p-4 space-y-3">
                     {group.collections.map((collection) => {
                       const isOverdue = isCollectionOverdue(collection);
+                      const isWarning = isCollectionWarning(collection);
                       return (
                       <div key={collection.id} className={`border rounded-lg p-4 hover:shadow-md transition-shadow ${
                         isOverdue 
                           ? 'border-red-300 dark:border-red-600 bg-red-50 dark:bg-red-900/20' 
+                          : isWarning
+                          ? 'border-yellow-300 dark:border-yellow-600 bg-yellow-50 dark:bg-yellow-900/20'
                           : 'border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700'
                       }`}>
                         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-3 sm:space-y-0">
@@ -1104,11 +1198,13 @@ export const Collections: React.FC = () => {
                                 <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                                   isOverdue
                                     ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+                                    : isWarning
+                                    ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400'
                                     : collection.collection_type === 'credit' 
                                       ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' 
                                       : 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400'
                                 }`}>
-                                  {isOverdue ? '🚨 Overdue Credit' : collection.collection_type === 'credit' ? '💰 Credit' : '🏦 Cheque'}
+                                  {isOverdue ? '🚨 Overdue Credit' : isWarning ? '⚠️ Due Soon' : collection.collection_type === 'credit' ? '💰 Credit' : '🏦 Cheque'}
                                 </span>
                               </div>
                               <div className="flex-1 min-w-0">
@@ -1121,6 +1217,16 @@ export const Collections: React.FC = () => {
                                     collection.notes.split('Payer: ')[1].split(' |')[0].split(')')[0] : 
                                     collection.customer_id || 'Unknown Customer')}
                                 </p>
+                                {customerPhoneMap[collection.customer_id] && (
+                                  <p className="text-xs text-blue-600 dark:text-blue-400 truncate mt-1">
+                                    📞 {customerPhoneMap[collection.customer_id]}
+                                  </p>
+                                )}
+                                {customerLocationMap[collection.customer_id] && customerLocationMap[collection.customer_id] !== 'No address' && (
+                                  <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-1">
+                                    📍 {customerLocationMap[collection.customer_id]}
+                                  </p>
+                                )}
                               </div>
                             </div>
                             
@@ -1243,6 +1349,14 @@ export const Collections: React.FC = () => {
                         <div>
                           <span className="text-slate-600 dark:text-slate-400">Customer:</span>
                           <p className="font-medium">{customerMap[selectedCollection.customer_id] || selectedCollection.customer_id}</p>
+                        </div>
+                        <div>
+                          <span className="text-slate-600 dark:text-slate-400">Phone:</span>
+                          <p className="font-medium text-blue-600">{customerPhoneMap[selectedCollection.customer_id] || 'N/A'}</p>
+                        </div>
+                        <div>
+                          <span className="text-slate-600 dark:text-slate-400">Location:</span>
+                          <p className="font-medium text-slate-600 dark:text-slate-400 text-sm">{customerLocationMap[selectedCollection.customer_id] || 'N/A'}</p>
                         </div>
                         <div>
                           <span className="text-slate-600 dark:text-slate-400">Type:</span>

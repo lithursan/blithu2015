@@ -96,19 +96,11 @@ const ChequeManagement: React.FC = () => {
     }
   };
 
-  // Filter cheques based on date range and status
-  const filteredCheques = React.useMemo(() => {
+  // Filter cheques based on date range and status - separate received from others
+  const { receivedCheques, otherCheques } = React.useMemo(() => {
     let filtered = [...cheques];
     
-    // Status filter
-    if (statusFilter !== 'all') {
-      filtered = filtered.filter(c => {
-        const status = (c.status || '').toLowerCase();
-        return status === statusFilter.toLowerCase();
-      });
-    }
-    
-    // Date filter (using deposit_date)
+    // Date filter first (using deposit_date)
     if (dateFrom) {
       const fromDate = new Date(dateFrom);
       fromDate.setHours(0, 0, 0, 0);
@@ -130,8 +122,35 @@ const ChequeManagement: React.FC = () => {
       });
     }
     
-    return filtered;
+    // Separate received cheques from others
+    const received = filtered.filter(c => {
+      const status = (c.status || '').toLowerCase();
+      return status === 'received';
+    });
+    
+    const others = filtered.filter(c => {
+      const status = (c.status || '').toLowerCase();
+      return status === 'cleared' || status === 'bounced';
+    });
+    
+    // Apply status filter if not 'all'
+    if (statusFilter !== 'all') {
+      if (statusFilter.toLowerCase() === 'received') {
+        return { receivedCheques: received, otherCheques: [] };
+      } else if (statusFilter.toLowerCase() === 'cleared' || statusFilter.toLowerCase() === 'bounced') {
+        const statusFiltered = others.filter(c => {
+          const status = (c.status || '').toLowerCase();
+          return status === statusFilter.toLowerCase();
+        });
+        return { receivedCheques: [], otherCheques: statusFiltered };
+      }
+    }
+    
+    return { receivedCheques: received, otherCheques: others };
   }, [cheques, statusFilter, dateFrom, dateTo]);
+
+  // Keep filteredCheques for backward compatibility
+  const filteredCheques = [...receivedCheques, ...otherCheques];
 
   const isChequeUpcoming = (c: any) => {
     try {
@@ -1023,18 +1042,19 @@ const ChequeManagement: React.FC = () => {
         </CardContent>
       </Card>
 
+      {/* RECEIVED CHEQUES SECTION */}
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle>Received Cheques</CardTitle>
+              <CardTitle className="text-green-700 dark:text-green-400">📋 Received Cheques</CardTitle>
               <CardDescription>
-                {filteredCheques.length} cheque(s) found • Total Value: {formatCurrency(filteredCheques.reduce((sum, c) => sum + (c.amount || 0), 0))}
+                {receivedCheques.length} cheque(s) received • Total Value: {formatCurrency(receivedCheques.reduce((sum, c) => sum + (c.amount || 0), 0))}
               </CardDescription>
             </div>
-            {filteredCheques.length > 0 && (
+            {receivedCheques.length > 0 && (
               <div className="text-sm text-slate-500">
-                Total Value: {formatCurrency(filteredCheques.reduce((sum, c) => sum + (c.amount || 0), 0))}
+                Total Value: {formatCurrency(receivedCheques.reduce((sum, c) => sum + (c.amount || 0), 0))}
               </div>
             )}
           </div>
@@ -1044,18 +1064,17 @@ const ChequeManagement: React.FC = () => {
             <div className="flex items-center justify-center py-8">
               <div className="text-slate-500">Loading cheques...</div>
             </div>
-          ) : filteredCheques.length === 0 ? (
+          ) : receivedCheques.length === 0 ? (
             <div className="text-center py-8">
-              <div className="text-4xl mb-2">🏦</div>
-              <p className="text-slate-500 mb-2">{cheques.length === 0 ? 'No cheques recorded yet' : 'No cheques match the selected filters'}</p>
-              {!isManager && cheques.length === 0 && <p className="text-sm text-slate-400">Click "Record Cheque" to add your first cheque</p>}
+              <div className="text-4xl mb-2">📋</div>
+              <p className="text-slate-500 mb-2">No received cheques match the selected filters</p>
             </div>
           ) : (
             <>
-              {/* Group cheques by deposit_date */}
+              {/* Group received cheques by deposit_date */}
               {(() => {
                 const groups: Record<string, any[]> = {};
-                for (const c of filteredCheques) {
+                for (const c of receivedCheques) {
                   const key = c.deposit_date ? (c.deposit_date.slice ? c.deposit_date.slice(0,10) : String(c.deposit_date)) : 'Unscheduled';
                   if (!groups[key]) groups[key] = [];
                   groups[key].push(c);
@@ -1100,7 +1119,14 @@ const ChequeManagement: React.FC = () => {
                             </thead>
                             <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
                               {groups[k].map((c:any) => (
-                                <tr key={c.id} className={`${isChequeDueToday(c) ? 'bg-yellow-50 dark:bg-yellow-900/20' : isChequeUpcoming(c) ? 'bg-red-50 dark:bg-red-900/20' : 'bg-white dark:bg-slate-800'} hover:bg-slate-50 dark:hover:bg-slate-700/50`}>
+                                <tr key={c.id} className={`
+                                  ${isChequeDueToday(c) 
+                                    ? 'bg-orange-50 dark:bg-orange-900/20 border-l-4 border-orange-500' 
+                                    : isChequeUpcoming(c) 
+                                    ? 'bg-yellow-50 dark:bg-yellow-900/20 border-l-4 border-yellow-500' 
+                                    : 'bg-white dark:bg-slate-800'
+                                  } hover:bg-slate-50 dark:hover:bg-slate-700/50
+                                `}>
                                   <td className="px-4 py-3 text-sm font-medium text-slate-900 dark:text-slate-100">{c.payer_name || '-'}</td>
                                   <td className="px-4 py-3 text-sm font-semibold text-green-600">{formatCurrency(c.amount || 0)}</td>
                                   <td className="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">{c.bank || '-'}</td>
@@ -1191,6 +1217,130 @@ const ChequeManagement: React.FC = () => {
         </CardContent>
       </Card>
 
+      {/* OTHER CHEQUES SECTION (Cleared & Bounced) */}
+      {otherCheques.length > 0 && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-slate-600 dark:text-slate-400">📁 Processed Cheques</CardTitle>
+                <CardDescription>
+                  {otherCheques.length} cheque(s) processed • Total Value: {formatCurrency(otherCheques.reduce((sum, c) => sum + (c.amount || 0), 0))}
+                </CardDescription>
+              </div>
+              {otherCheques.length > 0 && (
+                <div className="text-sm text-slate-500">
+                  Total Value: {formatCurrency(otherCheques.reduce((sum, c) => sum + (c.amount || 0), 0))}
+                </div>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            <>
+              {/* Group other cheques by deposit_date */}
+              {(() => {
+                const groups: Record<string, any[]> = {};
+                for (const c of otherCheques) {
+                  const key = c.deposit_date ? (c.deposit_date.slice ? c.deposit_date.slice(0,10) : String(c.deposit_date)) : 'Unscheduled';
+                  if (!groups[key]) groups[key] = [];
+                  groups[key].push(c);
+                }
+                const keys = Object.keys(groups).sort((a,b) => {
+                  if (a === 'Unscheduled') return 1;
+                  if (b === 'Unscheduled') return -1;
+                  return new Date(a).getTime() - new Date(b).getTime();
+                });
+                return (
+                  <div className="space-y-6">
+                    {keys.map(k => (
+                      <div key={k} className="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden bg-slate-50 dark:bg-slate-700/50 opacity-75">
+                        {/* Date Header */}
+                        <div className="bg-gradient-to-r from-slate-100 to-slate-50 dark:from-slate-600 dark:to-slate-700 px-6 py-4 border-b border-slate-200 dark:border-slate-600">
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <h3 className="text-lg font-semibold text-slate-700 dark:text-slate-300">
+                                {k === 'Unscheduled' ? '📁 Unscheduled Deposits' : `📁 ${new Date(k).toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}`}
+                              </h3>
+                              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                                {groups[k].length} cheque(s) • Total: {formatCurrency(groups[k].reduce((sum, c) => sum + (c.amount || 0), 0))}
+                              </p>
+                            </div>
+                            <div className="text-sm text-slate-500">
+                              {groups[k].length} cheque(s) • {formatCurrency(groups[k].reduce((sum, c) => sum + (c.amount || 0), 0))}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full">
+                            <thead className="bg-slate-200 dark:bg-slate-600">
+                              <tr>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Payer</th>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Amount</th>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Bank</th>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Cheque #</th>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Deposit Date</th>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Status</th>
+                                {!isManager && <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Actions</th>}
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+                              {groups[k].map((c:any) => (
+                                <tr key={c.id} className="bg-slate-50 dark:bg-slate-700/30 hover:bg-slate-100 dark:hover:bg-slate-600/50">
+                                  <td className="px-4 py-3 text-sm font-medium text-slate-700 dark:text-slate-300">{c.payer_name || '-'}</td>
+                                  <td className="px-4 py-3 text-sm font-semibold text-green-600">{formatCurrency(c.amount || 0)}</td>
+                                  <td className="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">{c.bank || '-'}</td>
+                                  <td className="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">{c.cheque_number || '-'}</td>
+                                  <td className="px-4 py-3">
+                                    {isManager ? (
+                                      <span className="px-2 py-1 text-sm text-slate-500 dark:text-slate-400">
+                                        {c.deposit_date ? new Date(c.deposit_date).toLocaleDateString('en-GB') : '-'}
+                                      </span>
+                                    ) : (
+                                      <input
+                                        type="date"
+                                        value={c.deposit_date || ''}
+                                        onChange={(e) => updateDepositDate(c.id, e.target.value)}
+                                        className="px-2 py-1 text-sm border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+                                      />
+                                    )}
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                                      (c.status || '').toLowerCase() === 'cleared' 
+                                        ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' 
+                                        : (c.status || '').toLowerCase() === 'bounced' 
+                                        ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' 
+                                        : 'bg-slate-100 text-slate-800 dark:bg-slate-700 dark:text-slate-300'
+                                    }`}>
+                                      {c.status || 'Unknown'}
+                                    </span>
+                                  </td>
+                                  {!isManager && (
+                                    <td className="px-4 py-3">
+                                      <div className="flex space-x-2">
+                                        <button 
+                                          onClick={() => deleteCheque(c.id)} 
+                                          className="px-3 py-1 text-xs bg-slate-600 hover:bg-slate-700 text-white rounded transition-colors"
+                                        >
+                                          Delete
+                                        </button>
+                                      </div>
+                                    </td>
+                                  )}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </>
+          </CardContent>
+        </Card>
+      )}
 
     </div>
   );

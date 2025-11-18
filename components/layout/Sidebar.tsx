@@ -20,7 +20,7 @@ const Logo = () => (
 
 export const Sidebar: React.FC<SidebarProps> = ({ isSidebarOpen, closeSidebar }) => {
   const { currentUser } = useAuth();
-  const { upcomingChequesCount = 0, overdueCreditsCount = 0 } = useData();
+  const { upcomingChequesCount = 0, overdueCreditsCount = 0, warningCreditsCount = 0 } = useData();
 
   const accessibleNavItems = NAV_ITEMS.filter(item => {
     // Allow cheques access for Admin, Secretary and Manager
@@ -45,6 +45,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ isSidebarOpen, closeSidebar })
     // My Location is only for Sales Reps and Drivers
     if (item.path === '/my-location') {
       return currentUser?.role === UserRole.Sales || currentUser?.role === UserRole.Driver;
+    }
+    // Map View access for Drivers, Sales Reps, Admin, Secretary and Manager
+    if (item.path === '/map') {
+      return currentUser?.role === UserRole.Driver || currentUser?.role === UserRole.Sales || currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Secretary || currentUser?.role === UserRole.Manager;
     }
     // Make Settings visible to Admins, Secretary and Managers
     if (item.path === '/settings') {
@@ -97,8 +101,19 @@ export const Sidebar: React.FC<SidebarProps> = ({ isSidebarOpen, closeSidebar })
                 {item.path === '/cheques' && upcomingChequesCount > 0 && (
                   <span className="ml-2 inline-flex items-center justify-center px-2 py-0.5 text-xs font-medium leading-none text-red-700 bg-red-100 rounded-full">{upcomingChequesCount}</span>
                 )}
-                {item.path === '/collections' && overdueCreditsCount > 0 && (
-                  <span className="ml-2 inline-flex items-center justify-center px-2 py-0.5 text-xs font-medium leading-none text-red-700 bg-red-100 rounded-full">{overdueCreditsCount}</span>
+                {item.path === '/collections' && (warningCreditsCount > 0 || overdueCreditsCount > 0) && (
+                  <div className="ml-2 flex items-center space-x-1">
+                    {warningCreditsCount > 0 && (
+                      <span className="inline-flex items-center justify-center w-5 h-5 text-xs font-bold text-yellow-800 bg-yellow-200 rounded-full">
+                        {warningCreditsCount}
+                      </span>
+                    )}
+                    {overdueCreditsCount > 0 && (
+                      <span className="inline-flex items-center justify-center w-5 h-5 text-xs font-bold text-red-800 bg-red-200 rounded-full">
+                        {overdueCreditsCount}
+                      </span>
+                    )}
+                  </div>
                 )}
               </NavLink>
             </li>
