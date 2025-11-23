@@ -571,10 +571,11 @@ export const Dashboard: React.FC = () => {
 
       const deliveryCost = data.orders.reduce((sum, order) => {
         if (!order.orderItems) return sum;
-        const orderCost = order.orderItems.reduce((itemSum, item) => {
+          const orderCost = order.orderItems.reduce((itemSum, item) => {
           const product = safeProducts.find(p => p.id === item.productId);
           const costPrice = (typeof product?.costPrice === 'number' && product.costPrice > 0) ? product.costPrice : 0;
-          return itemSum + (costPrice * (item.quantity || 0));
+          const totalQty = (Number(item.quantity) || 0) + (Number(item.free) || 0);
+          return itemSum + (costPrice * totalQty);
         }, 0);
         return sum + orderCost;
       }, 0);
@@ -617,7 +618,8 @@ export const Dashboard: React.FC = () => {
       const orderCost = order.orderItems.reduce((itemSum, item) => {
         const product = safeProducts.find(p => p.id === item.productId);
         const costPrice = (typeof product?.costPrice === 'number' && product.costPrice > 0) ? product.costPrice : 0;
-        return itemSum + (costPrice * (item.quantity || 0));
+        const totalQty = (Number(item.quantity) || 0) + (Number(item.free) || 0);
+        return itemSum + (costPrice * totalQty);
       }, 0);
       return sum + orderCost;
     }, 0);
@@ -628,7 +630,8 @@ export const Dashboard: React.FC = () => {
       const orderCost = order.orderItems.reduce((itemSum, item) => {
         const product = safeProducts.find(p => p.id === item.productId);
         const costPrice = (typeof product?.costPrice === 'number' && product.costPrice > 0) ? product.costPrice : 0;
-        return itemSum + (costPrice * (item.quantity || 0));
+        const totalQty = (Number(item.quantity) || 0) + (Number(item.free) || 0);
+        return itemSum + (costPrice * totalQty);
       }, 0);
       return sum + orderCost;
     }, 0);
@@ -720,7 +723,8 @@ export const Dashboard: React.FC = () => {
     const cost = order.orderItems.reduce((s, item) => {
       const prod = safeProducts.find(p => p.id === item.productId);
       const cp = (prod && typeof prod.costPrice === 'number') ? prod.costPrice : 0;
-      return s + (cp * (item.quantity || 0));
+      const totalQty = (Number(item.quantity) || 0) + (Number(item.free) || 0);
+      return s + (cp * totalQty);
     }, 0);
     return sum + cost;
   }, 0);
@@ -1019,10 +1023,11 @@ export const Dashboard: React.FC = () => {
                       <tbody>
                         {todaysDeliveredOrders.map(order => {
                           const cost = order.orderItems?.reduce((s, item) => {
-                            const prod = safeProducts.find(p => p.id === item.productId);
-                            const cp = (prod && typeof prod.costPrice === 'number') ? prod.costPrice : 0;
-                            return s + (cp * (item.quantity || 0));
-                          }, 0) || 0;
+                                                const prod = safeProducts.find(p => p.id === item.productId);
+                                                const cp = (prod && typeof prod.costPrice === 'number') ? prod.costPrice : 0;
+                                                const totalQty = (Number(item.quantity) || 0) + (Number(item.free) || 0);
+                                                return s + (cp * totalQty);
+                                              }, 0) || 0;
                           return (
                             <tr key={order.id} className="border-b dark:border-slate-700">
                               <td className="px-3 py-2 font-medium">{order.id}</td>
@@ -1062,7 +1067,8 @@ export const Dashboard: React.FC = () => {
                           const cost = order.orderItems?.reduce((s, item) => {
                             const prod = safeProducts.find(p => p.id === item.productId);
                             const cp = (prod && typeof prod.costPrice === 'number') ? prod.costPrice : 0;
-                            return s + (cp * (item.quantity || 0));
+                            const totalQty = (Number(item.quantity) || 0) + (Number(item.free) || 0);
+                            return s + (cp * totalQty);
                           }, 0) || 0;
                           return (
                             <tr key={order.id} className="border-b dark:border-slate-700">
@@ -1114,7 +1120,7 @@ export const Dashboard: React.FC = () => {
             <div className="flex justify-between items-start">
               <div>
                 <p className={`${getFontSizeClass(formatCurrency(totalOrderCost, currency))} font-bold text-indigo-600 dark:text-indigo-400`}>{formatCurrency(totalOrderCost, currency)}</p>
-                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Order Cost = sum(item.costPrice * item.quantity) for ALL orders in the selected period (all statuses)</p>
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Order Cost = sum(item.costPrice * (quantity + free)) for ALL orders in the selected period (all statuses)</p>
               </div>
             </div>
             <div className="flex justify-end mt-4">
@@ -1318,7 +1324,8 @@ export const Dashboard: React.FC = () => {
                           // Calculate order cost (sum of costPrice × quantity for all items) using safeProducts
                           const orderCost = order.orderItems?.reduce((sum, item) => {
                             const product = safeProducts.find(p => p.id === item.productId);
-                            return sum + ((product?.costPrice || 0) * (item.quantity || 0));
+                            const totalQty = (Number(item.quantity) || 0) + (Number(item.free) || 0);
+                            return sum + ((product?.costPrice || 0) * totalQty);
                           }, 0) || 0;
                           return (
                             <tr key={order.id} className="bg-white border-b dark:bg-slate-800 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600">
@@ -1849,7 +1856,8 @@ const SalesRepDashboard: React.FC<{
     const orderCost = order.orderItems.reduce((itemSum, item) => {
       const product = products.find(p => p.id === item.productId);
       const costPrice = (typeof product?.costPrice === 'number' && product.costPrice > 0) ? product.costPrice : 0;
-      return itemSum + (costPrice * (item.quantity || 0));
+      const totalQty = (Number(item.quantity) || 0) + (Number(item.free) || 0);
+      return itemSum + (costPrice * totalQty);
     }, 0);
     return sum + orderCost;
   }, 0);
