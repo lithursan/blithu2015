@@ -100,6 +100,7 @@ const RouteCustomerList: React.FC<RouteCustomerListProps> = ({ selectedRoute, on
   const [searchTerm, setSearchTerm] = useState('');
   const [orderStateFilter, setOrderStateFilter] = useState<'all' | 'delivered' | 'pending' | 'no-orders'>('all');
   const [outstandingFilter, setOutstandingFilter] = useState<'all' | 'withOutstanding' | 'noOutstanding'>('all');
+  const [assignedToMeOnly, setAssignedToMeOnly] = useState<boolean>(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'add' | 'edit'>('add');
   const [currentCustomer, setCurrentCustomer] = useState<Partial<Customer>>({});
@@ -126,6 +127,17 @@ const RouteCustomerList: React.FC<RouteCustomerListProps> = ({ selectedRoute, on
   const canDelete = currentUser?.role === UserRole.Admin;
   const canTransfer = currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Secretary || currentUser?.role === UserRole.Manager;
 
+  // Helper: only include orders visible to current user
+  const orderVisibleToCurrentUser = (o: any) => {
+    if (!currentUser) return true;
+    // For Sales reps, only show orders assigned to them
+    if (currentUser.role === UserRole.Sales) {
+      return !!o.assignedUserId && o.assignedUserId === currentUser.id;
+    }
+    // For drivers, admins, managers, and others show all orders
+    return true;
+  };
+
   // Calculate metrics for each customer from orders table
   const customerOutstandingMap: Record<string, number> = {};
   const customerSalesMap: Record<string, number> = {};
@@ -133,16 +145,18 @@ const RouteCustomerList: React.FC<RouteCustomerListProps> = ({ selectedRoute, on
   
   orders.forEach(order => {
     if (!order.customerId) return;
-    
+    // Respect visibility rules (e.g. Sales reps only see orders assigned to them)
+    if (!orderVisibleToCurrentUser(order)) return;
+
     // Outstanding calculation
     const cheque = order.chequeBalance == null || isNaN(Number(order.chequeBalance)) ? 0 : Number(order.chequeBalance);
     const credit = order.creditBalance == null || isNaN(Number(order.creditBalance)) ? 0 : Number(order.creditBalance);
     customerOutstandingMap[order.customerId] = (customerOutstandingMap[order.customerId] || 0) + cheque + credit;
-    
+
     // Sales calculation
     const orderTotal = order.total == null || isNaN(Number(order.total)) ? 0 : Number(order.total);
     customerSalesMap[order.customerId] = (customerSalesMap[order.customerId] || 0) + orderTotal;
-    
+
     // Order count calculation
     customerOrderCountMap[order.customerId] = (customerOrderCountMap[order.customerId] || 0) + 1;
   });
@@ -161,11 +175,17 @@ const RouteCustomerList: React.FC<RouteCustomerListProps> = ({ selectedRoute, on
 
     if (!(matchesRoute && matchesSearch && matchesSalesRepAccess)) return false;
 
-    // Apply order-state filter
-    const custOrders = orders.filter(o => o.customerId === customer.id);
+    // Apply order-state filter (respect visibility rules for current user)
+    const custOrders = orders.filter(o => o.customerId === customer.id && orderVisibleToCurrentUser(o));
     const hasPending = custOrders.some(o => o.status && o.status !== OrderStatus.Delivered);
     const hasDelivered = custOrders.some(o => o.status === OrderStatus.Delivered);
     const noOrders = custOrders.length === 0;
+
+    // If user wants to see only customers with orders assigned to them, filter here
+    if (assignedToMeOnly) {
+      const isAssignedToMe = custOrders.some(o => o.assignedUserId && currentUser && o.assignedUserId === currentUser.id);
+      if (!isAssignedToMe) return false;
+    }
 
     if (orderStateFilter === 'pending' && !hasPending) return false;
     if (orderStateFilter === 'delivered' && !hasDelivered) return false;
@@ -182,7 +202,7 @@ const RouteCustomerList: React.FC<RouteCustomerListProps> = ({ selectedRoute, on
   // Build a quick map of which customers have pending orders so we can sort
   const customerHasPendingMap: Record<string, boolean> = {};
   filteredCustomers.forEach(customer => {
-    const custOrders = orders.filter(o => o.customerId === customer.id);
+    const custOrders = orders.filter(o => o.customerId === customer.id && orderVisibleToCurrentUser(o));
     customerHasPendingMap[customer.id] = custOrders.some(o => o.status && o.status !== OrderStatus.Delivered);
   });
 
@@ -785,12 +805,25 @@ const RouteCustomerList: React.FC<RouteCustomerListProps> = ({ selectedRoute, on
                     <option value="noOutstanding">No Outstanding</option>
                   </select>
                 </div>
+                
+                <div className="flex items-center gap-2">
+                  <label className="text-sm text-slate-600 dark:text-slate-400">Assigned:</label>
+                  <label className="inline-flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={assignedToMeOnly}
+                      onChange={(e) => setAssignedToMeOnly(e.target.checked)}
+                      className="w-4 h-4 text-blue-600 bg-white border rounded focus:ring-2 focus:ring-blue-500"
+                    />
+                    <span className="text-sm">Only my assigned orders</span>
+                  </label>
+                </div>
               </div>
 
               <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
                 {sortedCustomers.map((customer, index) => {
                     // Determine order state for this customer: pending if any non-Delivered exists, delivered if at least one delivered and no pending
-                    const custOrders = orders.filter(o => o.customerId === customer.id);
+                    const custOrders = orders.filter(o => o.customerId === customer.id && orderVisibleToCurrentUser(o));
                     const hasPending = custOrders.some(o => o.status && o.status !== OrderStatus.Delivered);
                     const hasDelivered = custOrders.some(o => o.status === OrderStatus.Delivered);
 

@@ -442,7 +442,9 @@ export const Orders: React.FC = () => {
       for (const po of pendingOrders) {
         (po.orderItems || []).forEach((it: any) => {
           if (!it || !it.productId) return;
-          map.set(it.productId, (map.get(it.productId) || 0) + (Number(it.quantity) || 0));
+          // Include both regular quantity and free quantity in pending calculation
+          const totalPending = (Number(it.quantity) || 0) + (Number(it.free) || 0);
+          map.set(it.productId, (map.get(it.productId) || 0) + totalPending);
         });
       }
     } catch (err) {
@@ -915,7 +917,9 @@ export const Orders: React.FC = () => {
           if (modalState === 'edit' && currentOrder && po.id === currentOrder.id) continue;
           (po.orderItems || []).forEach((it: any) => {
             if (!it || !it.productId) return;
-            pendingMap.set(it.productId, (pendingMap.get(it.productId) || 0) + (Number(it.quantity) || 0));
+            // Include both regular quantity and free quantity in pending calculation
+            const totalPending = (Number(it.quantity) || 0) + (Number(it.free) || 0);
+            pendingMap.set(it.productId, (pendingMap.get(it.productId) || 0) + totalPending);
           });
         }
       } catch (err) {
@@ -930,8 +934,10 @@ export const Orders: React.FC = () => {
         // For drivers, effective stock is driver's allocated stock; otherwise use warehouse stock
         const baseStock = currentUser?.role === UserRole.Driver ? getEffectiveStock(prod) : (prod.stock || 0);
         const available = (baseStock || 0) - pendingQty;
-        if (available < it.quantity) {
-          insufficient.push({ productId: it.productId, name: prod.name, available, requested: it.quantity });
+        // Check against total required quantity (regular + free)
+        const totalRequired = it.quantity + (it.free || 0);
+        if (available < totalRequired) {
+          insufficient.push({ productId: it.productId, name: prod.name, available, requested: totalRequired });
         }
       }
       if (insufficient.length > 0) {
@@ -1112,7 +1118,9 @@ export const Orders: React.FC = () => {
           if (currentOrder && po.id === currentOrder.id) continue; // exclude current order
           (po.orderItems || []).forEach((it: any) => {
             if (!it || !it.productId) return;
-            pendingMapEdit.set(it.productId, (pendingMapEdit.get(it.productId) || 0) + (Number(it.quantity) || 0));
+            // Include both regular quantity and free quantity in pending calculation
+            const totalPending = (Number(it.quantity) || 0) + (Number(it.free) || 0);
+            pendingMapEdit.set(it.productId, (pendingMapEdit.get(it.productId) || 0) + totalPending);
           });
         }
 
@@ -1123,8 +1131,10 @@ export const Orders: React.FC = () => {
           const pendingQty = pendingMapEdit.get(it.productId) || 0;
           const baseStock = currentUser?.role === UserRole.Driver ? getEffectiveStock(prod) : (prod.stock || 0);
           const available = (baseStock || 0) - pendingQty;
-          if (available < it.quantity) {
-            insufficientEdit.push({ productId: it.productId, name: prod.name, available, requested: it.quantity });
+          // Check against total required quantity (regular + free)
+          const totalRequired = it.quantity + (it.free || 0);
+          if (available < totalRequired) {
+            insufficientEdit.push({ productId: it.productId, name: prod.name, available, requested: totalRequired });
           }
         }
         if (insufficientEdit.length > 0) {
@@ -1444,10 +1454,11 @@ export const Orders: React.FC = () => {
         .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
       if (allocationsForDriver.length > 0) {
-        // Build remaining to deduct per product
+        // Build remaining to deduct per product (include both regular and free quantities)
         const toDeduct: Record<string, number> = {};
         for (const di of targetOrder.orderItems) {
-          toDeduct[di.productId] = (toDeduct[di.productId] || 0) + di.quantity;
+          const totalToDeduct = di.quantity + (di.free || 0);
+          toDeduct[di.productId] = (toDeduct[di.productId] || 0) + totalToDeduct;
         }
 
         const updatedAllocs: typeof allocationsForDriver = allocationsForDriver.map(a => ({ ...a, allocatedItems: a.allocatedItems.map(it => ({...it})) }));
@@ -1513,7 +1524,7 @@ export const Orders: React.FC = () => {
         }));
       }
     }
-  // --- Deduct inventory in UI and Supabase ---
+    // --- Deduct inventory in UI and Supabase ---
     // Deduct stock ONLY when delivering (not at allocation)
     if (targetOrder.status !== OrderStatus.Delivered) {
       for (const item of targetOrder.orderItems) {
@@ -1521,17 +1532,17 @@ export const Orders: React.FC = () => {
         // For non-drivers, reduce from warehouse stock
         // Here, always reduce from warehouse stock only on delivery
         const currentProduct = products.find(p => p.id === item.productId);
-        if (currentProduct && currentProduct.stock >= item.quantity) {
+        // Include both regular quantity and free quantity in inventory reduction
+        const totalQuantityToReduce = item.quantity + (item.free || 0);
+        if (currentProduct && currentProduct.stock >= totalQuantityToReduce) {
           await supabase.from('products').update({ 
-            stock: currentProduct.stock - item.quantity 
+            stock: currentProduct.stock - totalQuantityToReduce 
           }).eq('id', item.productId);
         } else {
-          console.warn(`Insufficient stock for product ${item.productId}: available ${currentProduct?.stock}, required ${item.quantity}`);
+          console.warn(`Insufficient stock for product ${item.productId}: available ${currentProduct?.stock}, required ${totalQuantityToReduce} (${item.quantity} regular + ${item.free || 0} free)`);
         }
       }
-    }
-
-    // 2. Update order status
+    }    // 2. Update order status
     const updatedOrder: Order = { ...targetOrder, status: OrderStatus.Delivered };
     
     // 3. Create collection records for delivered order if it has outstanding balances

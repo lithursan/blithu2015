@@ -266,6 +266,38 @@ export class AccountingService {
     }));
   }
 
+  static async deleteJournalEntry(entryId: string): Promise<void> {
+    try {
+      // First delete all related transactions
+      const { error: transactionError } = await supabase
+        .from('accounting_transactions')
+        .delete()
+        .eq('journal_entry_id', entryId);
+
+      if (transactionError) {
+        console.error('Error deleting transactions:', transactionError);
+        throw new Error(`Failed to delete transactions: ${transactionError.message}`);
+      }
+
+      // Then delete the journal entry
+      const { error: entryError } = await supabase
+        .from('accounting_journal_entries')
+        .delete()
+        .eq('id', entryId);
+
+      if (entryError) {
+        console.error('Error deleting journal entry:', entryError);
+        throw new Error(`Failed to delete journal entry: ${entryError.message}`);
+      }
+
+      // Note: Account balances will be automatically updated by database trigger
+      // when transactions are deleted
+    } catch (error) {
+      console.error('Error in deleteJournalEntry:', error);
+      throw error;
+    }
+  }
+
   // Trial Balance
   static async getTrialBalance(asOfDate?: string): Promise<TrialBalance[]> {
     let query = supabase

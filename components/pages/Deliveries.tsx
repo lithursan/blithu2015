@@ -52,8 +52,10 @@ export const Deliveries: React.FC = () => {
         console.log(`🔍 Processing order ${orderIndex + 1}/${dateOrders.length} (ID: ${order.id}):`, order.orderItems);
         (order.orderItems || []).forEach((item: any) => {
           const prev = map.get(item.productId) || 0;
-          const newTotal = prev + (item.quantity || 0);
-          console.log(`📦 Product ${item.productId}: adding ${item.quantity}, total becomes ${newTotal}`);
+          // Include both regular quantity and free quantity in total
+          const totalQuantity = (item.quantity || 0) + (item.free || 0);
+          const newTotal = prev + totalQuantity;
+          console.log(`📦 Product ${item.productId}: adding ${item.quantity} regular + ${item.free || 0} free = ${totalQuantity}, total becomes ${newTotal}`);
           map.set(item.productId, newTotal);
         });
       });
@@ -76,7 +78,9 @@ export const Deliveries: React.FC = () => {
         dateOrders.forEach(order => {
           (order.orderItems || []).forEach((item: any) => {
             const prev = map.get(item.productId) || 0;
-            map.set(item.productId, prev + (item.quantity || 0));
+            // Include both regular quantity and free quantity in total
+            const totalQuantity = (item.quantity || 0) + (item.free || 0);
+            map.set(item.productId, prev + totalQuantity);
           });
         });
         const key = String(selDate);

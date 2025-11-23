@@ -34,10 +34,20 @@ export const RouteOverview: React.FC<RouteOverviewProps> = ({ onRouteSelect }) =
     [currentUser]
   );
 
+  // Helper: only include orders visible to current user
+  const orderVisibleToCurrentUser = (o: any) => {
+    if (!currentUser) return true;
+    if (currentUser.role === UserRole.Sales) {
+      return !!o.assignedUserId && o.assignedUserId === currentUser.id;
+    }
+    return true;
+  };
+
   // Calculate outstanding for each customer from orders table
   const customerOutstandingMap: Record<string, number> = {};
   orders.forEach(order => {
     if (!order.customerId) return;
+    if (!orderVisibleToCurrentUser(order)) return;
     const cheque = order.chequeBalance == null || isNaN(Number(order.chequeBalance)) ? 0 : Number(order.chequeBalance);
     const credit = order.creditBalance == null || isNaN(Number(order.creditBalance)) ? 0 : Number(order.creditBalance);
     customerOutstandingMap[order.customerId] = (customerOutstandingMap[order.customerId] || 0) + cheque + credit;
@@ -47,6 +57,7 @@ export const RouteOverview: React.FC<RouteOverviewProps> = ({ onRouteSelect }) =
   const customerTotalSpentMap: Record<string, number> = {};
   orders.forEach(order => {
     if (!order.customerId || order.status !== 'Delivered') return;
+    if (!orderVisibleToCurrentUser(order)) return;
     customerTotalSpentMap[order.customerId] = (customerTotalSpentMap[order.customerId] || 0) + (order.total || 0);
   });
 

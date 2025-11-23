@@ -13,6 +13,11 @@ const JournalEntries: React.FC = () => {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [loading, setLoading] = useState(true);
+  
+  // Filter states
+  const [selectedMonth, setSelectedMonth] = useState<string>('');
+  const [dateFrom, setDateFrom] = useState<string>('');
+  const [dateTo, setDateTo] = useState<string>('');
 
   const [form, setForm] = useState({
     date: new Date().toISOString().split('T')[0],
@@ -25,6 +30,33 @@ const JournalEntries: React.FC = () => {
   });
 
   const isAdmin = currentUser?.role === UserRole.Admin;
+
+  // Filter entries based on selected filters
+  const filteredEntries = React.useMemo(() => {
+    let filtered = entries;
+    
+    // Month filter
+    if (selectedMonth) {
+      filtered = filtered.filter(entry => {
+        const entryDate = new Date(entry.date);
+        const entryMonth = entryDate.getFullYear() + '-' + String(entryDate.getMonth() + 1).padStart(2, '0');
+        return entryMonth === selectedMonth;
+      });
+    }
+    
+    // Date range filter
+    if (dateFrom) {
+      const fromDate = new Date(dateFrom);
+      filtered = filtered.filter(entry => new Date(entry.date) >= fromDate);
+    }
+    
+    if (dateTo) {
+      const toDate = new Date(dateTo);
+      filtered = filtered.filter(entry => new Date(entry.date) <= toDate);
+    }
+    
+    return filtered;
+  }, [entries, selectedMonth, dateFrom, dateTo]);
 
   useEffect(() => {
     if (isAdmin) {
@@ -50,7 +82,8 @@ const JournalEntries: React.FC = () => {
 
   const handleDownloadPDF = async () => {
     try {
-      PDFService.generateJournalEntries(entries);
+      const entriesToExport = filteredEntries.length > 0 ? filteredEntries : entries;
+      PDFService.generateJournalEntries(entriesToExport);
     } catch (error) {
       console.error('Error generating PDF:', error);
       alert('Error generating PDF. Please try again.');
@@ -162,6 +195,27 @@ const JournalEntries: React.FC = () => {
     });
   };
 
+  const handleDeleteEntry = async (entryId: string, entryNumber: string) => {
+    // Password protection
+    const password = prompt('Enter admin password to delete this journal entry:');
+    if (password !== '1234') {
+      alert('Incorrect password. Delete operation cancelled.');
+      return;
+    }
+
+    const confirmed = confirm(`Are you sure you want to delete journal entry ${entryNumber}? This action cannot be undone.`);
+    if (!confirmed) return;
+
+    try {
+      await AccountingService.deleteJournalEntry(entryId);
+      alert('Journal entry deleted successfully.');
+      loadData(); // Refresh the list
+    } catch (error) {
+      console.error('Error deleting journal entry:', error);
+      alert('Failed to delete journal entry. Please try again.');
+    }
+  };
+
   const addTransaction = () => {
     setForm({
       ...form,
@@ -239,25 +293,93 @@ const JournalEntries: React.FC = () => {
         </div>
       </div>
 
+      {/* Filters Section */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Filter Options</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                Month Filter
+              </label>
+              <input
+                type="month"
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                From Date
+              </label>
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                To Date
+              </label>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              />
+            </div>
+          </div>
+          
+          <div className="mt-4 flex justify-end">
+            <button
+              onClick={() => {
+                setSelectedMonth('');
+                setDateFrom('');
+                setDateTo('');
+              }}
+              className="px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-lg transition-colors text-sm"
+            >
+              Clear Filters
+            </button>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Journal Entries List */}
       <Card>
         <CardHeader>
-          <CardTitle>All Journal Entries</CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle>Journal Entries</CardTitle>
+            <p className="text-sm text-slate-500">
+              {filteredEntries.length} of {entries.length} entries
+            </p>
+          </div>
         </CardHeader>
         <CardContent>
           {loading ? (
             <div className="text-center py-8">
               <div className="text-slate-500">Loading journal entries...</div>
             </div>
-          ) : entries.length === 0 ? (
+          ) : filteredEntries.length === 0 ? (
             <div className="text-center py-8">
               <div className="text-4xl mb-2">📝</div>
-              <p className="text-slate-500 mb-2">No journal entries yet</p>
-              <p className="text-sm text-slate-400">Create your first journal entry to get started</p>
+              <p className="text-slate-500 mb-2">
+                {entries.length === 0 ? 'No journal entries yet' : 'No entries match the selected filters'}
+              </p>
+              <p className="text-sm text-slate-400">
+                {entries.length === 0 ? 'Create your first journal entry to get started' : 'Try adjusting your filter criteria'}
+              </p>
             </div>
           ) : (
             <div className="space-y-4">
-              {entries.map((entry) => (
+              {filteredEntries.map((entry) => (
                 <div key={entry.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow">
                   <div className="flex justify-between items-start mb-3">
                     <div>
@@ -268,6 +390,17 @@ const JournalEntries: React.FC = () => {
                       )}
                     </div>
                     <div className="text-right">
+                      <div className="flex items-center justify-end gap-2 mb-2">
+                        <button
+                          onClick={() => handleDeleteEntry(entry.id, entry.entryNumber)}
+                          className="p-1 text-red-600 hover:text-red-800 hover:bg-red-50 rounded transition-colors"
+                          title="Delete Journal Entry"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      </div>
                       <div className="text-lg font-medium">{formatCurrency(entry.totalAmount || 0)}</div>
                       <div className="text-sm text-slate-500">{new Date(entry.date).toLocaleDateString()}</div>
                       <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
