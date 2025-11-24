@@ -10,6 +10,7 @@ interface AuthContextType {
   updateCurrentUser: (updatedUser: User) => void;
   refreshAuth: () => Promise<void>;
   isLoading: boolean;
+    supabaseStatus?: string | null;
 }
 
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -25,6 +26,7 @@ export const useAuth = () => {
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     const [currentUser, setCurrentUser] = useState<User | null>(null);
     const [loading, setLoading] = useState(true);
+    const [supabaseStatus, setSupabaseStatus] = useState<string | null>(null);
 
     useEffect(() => {
         const fetchCurrentUser = async () => {
@@ -32,6 +34,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 // First, check Supabase auth session
                 const { data: { session }, error: sessionError } = await supabase.auth.getSession();
                 console.log('Supabase session:', session);
+                if (sessionError) {
+                    console.warn('Supabase getSession error:', sessionError);
+                }
                 
                 // Check localStorage fallback
                 const storedUserId = localStorage.getItem('currentUserId');
@@ -41,6 +46,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     // Fetch user from Supabase users table
                     const { data, error } = await supabase.from('users').select('*').eq('id', storedUserId).single();
                     console.log('User fetch result:', { data, error });
+                    // Update supabaseStatus to indicate connectivity (or the error message)
+                    if (error) {
+                        setSupabaseStatus((error && (error.message || error.details)) ? (error.message || error.details) : String(error));
+                    } else {
+                        setSupabaseStatus('ok');
+                    }
                     
                     if (!error && data) {
                         // Process assignedSupplierNames if it's a JSON string
@@ -70,10 +81,22 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 } else {
                     console.log('No stored user ID found');
                     setCurrentUser(null);
+                    // Even if no stored user, test a lightweight query to assert connectivity
+                    try {
+                        const { data: usersTest, error: usersTestError } = await supabase.from('users').select('id').limit(1);
+                        if (usersTestError) {
+                            setSupabaseStatus((usersTestError && (usersTestError.message || usersTestError.details)) ? (usersTestError.message || usersTestError.details) : String(usersTestError));
+                        } else {
+                            setSupabaseStatus('ok');
+                        }
+                    } catch (err) {
+                        setSupabaseStatus((err && (err as any).message) ? (err as any).message : String(err));
+                    }
                 }
             } catch (fetchError) {
                 console.error('Error fetching current user:', fetchError);
                 setCurrentUser(null);
+                setSupabaseStatus((fetchError && (fetchError as any).message) ? (fetchError as any).message : String(fetchError));
             } finally {
                 setLoading(false);
             }
@@ -138,11 +161,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 return;
             } else {
                 console.error('Login failed:', error);
-                throw new Error("Invalid email or password.");
+                // Surface Supabase error message when available to aid debugging (network/CORS/etc.)
+                const msg = (error && (error.message || error.details)) ? (error.message || error.details) : 'Invalid email or password.';
+                throw new Error(msg);
             }
         } catch (loginError) {
             console.error('Login error:', loginError);
-            throw new Error("Login failed. Please try again.");
+            // Rethrow with original message when possible so the UI can show network/auth details
+            const msg = (loginError && (loginError.message || loginError.toString())) ? (loginError.message || loginError.toString()) : 'Login failed. Please try again.';
+            throw new Error(msg);
         }
     }, []);
 
@@ -212,11 +239,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }, []);
 
     const value = { currentUser, login, logout, updateCurrentUser, refreshAuth, isLoading: loading };
-
+    // Expose supabaseStatus in the context for UI debugging
+    const valueWithStatus = { ...value, supabaseStatus };
     // Don't render children until the initial auth state has been determined
     // to prevent flashing of content.
     return (
-        <AuthContext.Provider value={value}>
+        <AuthContext.Provider value={valueWithStatus}>
             {!loading && children}
         </AuthContext.Provider>
     );

@@ -54,6 +54,12 @@ export const Login: React.FC = () => {
                         </div>
                     </div>
                     <p className="mt-4 text-slate-500 dark:text-slate-400">Welcome back! Please log in to your account.</p>
+                    {/* Show Supabase connectivity status (if present) for debugging */}
+                    {(useAuth() as any).supabaseStatus && (
+                        <div className="mt-3 p-3 text-sm text-amber-800 bg-amber-100 rounded-lg dark:bg-amber-900 dark:text-amber-200" role="status">
+                            <strong>Supabase status:</strong> {(useAuth() as any).supabaseStatus}
+                        </div>
+                    )}
                 </div>
                 <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
                     {error && (
