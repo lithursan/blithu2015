@@ -40,6 +40,7 @@ const ChequeManagement: React.FC = () => {
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [searchTerm, setSearchTerm] = useState<string>('');
 
   useEffect(() => {
     if (!currentUser) return;
@@ -121,6 +122,27 @@ const ChequeManagement: React.FC = () => {
         return depositDate <= toDate;
       });
     }
+
+    // Search filter (payer, cheque number, bank, notes, amount, created_by)
+    if (searchTerm && searchTerm.trim() !== '') {
+      const s = searchTerm.trim().toLowerCase();
+      filtered = filtered.filter(c => {
+        const payer = (c.payer_name || '').toString().toLowerCase();
+        const bank = (c.bank || '').toString().toLowerCase();
+        const chequeNo = (c.cheque_number || '').toString().toLowerCase();
+        const notes = (c.notes || '').toString().toLowerCase();
+        const amountStr = (c.amount || 0).toString();
+        const createdByRaw = (c.created_by || '').toString().toLowerCase();
+        return (
+          payer.includes(s) ||
+          bank.includes(s) ||
+          chequeNo.includes(s) ||
+          notes.includes(s) ||
+          amountStr.includes(s) ||
+          createdByRaw.includes(s)
+        );
+      });
+    }
     
     // Separate received cheques from others
     const received = filtered.filter(c => {
@@ -147,7 +169,7 @@ const ChequeManagement: React.FC = () => {
     }
     
     return { receivedCheques: received, otherCheques: others };
-  }, [cheques, statusFilter, dateFrom, dateTo]);
+  }, [cheques, statusFilter, dateFrom, dateTo, searchTerm]);
 
   // Keep filteredCheques for backward compatibility
   const filteredCheques = [...receivedCheques, ...otherCheques];
@@ -987,7 +1009,7 @@ const ChequeManagement: React.FC = () => {
       {/* Filters */}
       <Card className="border border-slate-200 dark:border-slate-700">
         <CardContent className="p-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
             <div>
               <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">
                 Status Filter
@@ -1037,6 +1059,16 @@ const ChequeManagement: React.FC = () => {
               >
                 Clear Filters
               </button>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">Search</label>
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search by payer, cheque #, bank, notes, amount..."
+                className="w-full px-3 py-2 text-sm border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              />
             </div>
           </div>
         </CardContent>

@@ -42,7 +42,7 @@ export const Collections: React.FC = () => {
       'Location': customerLocationMap[c.customer_id] || 'N/A',
       'Type': c.collection_type,
       'Amount': c.amount,
-      'Collected By': c.collected_by,
+      'Issued By': c.collected_by,
       'Date': c.collected_at || c.created_at,
       'Status': c.status,
       'Notes': c.notes || '',
@@ -65,6 +65,7 @@ export const Collections: React.FC = () => {
   const [chequeSaving, setChequeSaving] = useState(false);
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
+  const [searchTerm, setSearchTerm] = useState<string>('');
   const [isPartialPayment, setIsPartialPayment] = useState(false);
   const [partialAmount, setPartialAmount] = useState<number>(0);
   const [partialPaymentLoading, setPartialPaymentLoading] = useState(false);
@@ -212,12 +213,39 @@ export const Collections: React.FC = () => {
         });
       }
     }
+
+    // Search filter (order id, customer name, phone, notes, collected by, amount)
+    if (searchTerm && searchTerm.trim() !== '') {
+      const s = searchTerm.trim().toLowerCase();
+      filtered = filtered.filter(c => {
+        const orderId = (c.order_id || '').toString().toLowerCase();
+        const notes = (c.notes || '').toString().toLowerCase();
+        const amountStr = (c.amount || 0).toString();
+        const customer = (customers || []).find(ct => ct.id === c.customer_id);
+        const customerName = (customer && (customer.name || customer.customerName)) ? (customer.name || customer.customerName).toString().toLowerCase() : '';
+        const phone = (customer && (customer.phone || '')).toString().toLowerCase();
+        const collectedByUser = (users || []).find(u => u.id === (c.collected_by || ''));
+        const collectedByName = collectedByUser ? (collectedByUser.name || '').toString().toLowerCase() : '';
+        // Sometimes `collected_by` may already contain a display name instead of a user id
+        const collectedByRaw = (c.collected_by || '').toString().toLowerCase();
+
+        return (
+          orderId.includes(s) ||
+          customerName.includes(s) ||
+          phone.includes(s) ||
+          notes.includes(s) ||
+          collectedByName.includes(s) ||
+          collectedByRaw.includes(s) ||
+          amountStr.includes(s)
+        );
+      });
+    }
     return filtered.sort((a, b) => {
       const dateA = a.collected_at || a.created_at || '';
       const dateB = b.collected_at || b.created_at || '';
       return new Date(dateB).getTime() - new Date(dateA).getTime();
     });
-  }, [collections, statusFilter, typeFilter, dateFrom, dateTo, showOverdueOnly, showWarningOnly]);
+  }, [collections, statusFilter, typeFilter, dateFrom, dateTo, showOverdueOnly, showWarningOnly, searchTerm, customers, users]);
 
   // Group collections by date
   const groupedCollections = useMemo(() => {
@@ -354,7 +382,7 @@ export const Collections: React.FC = () => {
       { key: 'collection_type', title: 'Type' },
       { key: 'amount', title: 'Amount' },
       { key: 'status', title: 'Status' },
-      { key: 'collected_by', title: 'Collected By' },
+      { key: 'collected_by', title: 'Issued By' },
       { key: 'collected_at', title: 'Collected At' },
       { key: 'notes', title: 'Notes' }
     ];
@@ -981,19 +1009,7 @@ export const Collections: React.FC = () => {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardContent className="p-3">
-            <div className="text-center space-y-2">
-              <div className="flex justify-center">
-                <div className="p-2 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg">
-                  <span className="text-xl">📅</span>
-                </div>
-              </div>
-              <p className="text-xs font-medium text-slate-600 dark:text-slate-400 leading-tight">Date Groups</p>
-              <p className="text-lg font-bold text-indigo-600">{groupedCollections.length}</p>
-            </div>
-          </CardContent>
-        </Card>
+        {/* Date Groups card removed as requested */}
 
         <Card className="border-yellow-200 dark:border-yellow-800">
           <CardContent className="p-3">
@@ -1042,7 +1058,7 @@ export const Collections: React.FC = () => {
           </div>
           <div className="space-y-4 mt-4">
             {/* First Row - Main Filters */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Status Filter</label>
                 <select
@@ -1085,6 +1101,16 @@ export const Collections: React.FC = () => {
                   type="date"
                   value={dateTo}
                   onChange={e => setDateTo(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Search</label>
+                <input
+                  type="text"
+                  placeholder="Search by order, customer, phone, notes..."
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
                   className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                 />
               </div>
@@ -1236,8 +1262,8 @@ export const Collections: React.FC = () => {
                                 <p className="font-semibold text-green-600">{formatCurrency(collection.amount)}</p>
                               </div>
                               <div>
-                                <p className="text-slate-500 dark:text-slate-400">Collected By</p>
-                                <p className="font-medium text-slate-900 dark:text-slate-100">{collection.collected_by || '-'}</p>
+                                <p className="text-slate-500 dark:text-slate-400">Issued By</p>
+                                  <p className="font-medium text-slate-900 dark:text-slate-100">{collection.collected_by || '-'}</p>
                               </div>
                               <div>
                                 <p className="text-slate-500 dark:text-slate-400">Status</p>
@@ -1367,7 +1393,7 @@ export const Collections: React.FC = () => {
                           <p className="font-bold text-green-600">{formatCurrency(selectedCollection.amount)}</p>
                         </div>
                         <div>
-                          <span className="text-slate-600 dark:text-slate-400">Collected By:</span>
+                          <span className="text-slate-600 dark:text-slate-400">Issued By:</span>
                           <p className="font-medium">{selectedCollection.collected_by || '-'}</p>
                         </div>
                         <div>

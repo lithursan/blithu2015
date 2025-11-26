@@ -37,6 +37,20 @@ const getFontSizeClass = (value: string | number) => {
     }
 };
 
+// StatValue: displays currency label above and amount below with reduced font-size
+const StatValue: React.FC<{ amount: number; currency?: string; colorClass?: string }> = ({ amount, currency = 'LKR', colorClass = '' }) => {
+  const safeAmount = (typeof amount === 'number' && !isNaN(amount)) ? amount : 0;
+  const formattedNumber = safeAmount.toLocaleString('en-IN', { maximumFractionDigits: 0 });
+  const baseClass = getFontSizeClass(formattedNumber);
+  const adjusted = baseClass === 'text-4xl' ? 'text-3xl' : baseClass === 'text-3xl' ? 'text-2xl' : baseClass === 'text-2xl' ? 'text-xl' : baseClass;
+  return (
+    <div>
+      <div className="text-sm font-medium text-slate-600 dark:text-slate-400">{currency}</div>
+      <p className={`${adjusted} font-bold ${colorClass}`}>{formattedNumber}</p>
+    </div>
+  );
+};
+
 // Expenses Card Component
 const ExpensesCard: React.FC<{ currency: string; dateRange: { start: string; end: string } }> = ({ currency, dateRange }) => {
     const [expenses, setExpenses] = useState<any[]>([]);
@@ -148,7 +162,7 @@ const ExpensesCard: React.FC<{ currency: string; dateRange: { start: string; end
                 {loading ? (
                   <p className="text-4xl font-bold text-pink-600 dark:text-pink-400">Loading...</p>
                 ) : (
-                  <p className={`${getFontSizeClass(formatCurrency(totalExpenses, currency))} font-bold text-pink-600 dark:text-pink-400`}>{formatCurrency(totalExpenses, currency)}</p>
+                  <StatValue amount={totalExpenses} currency={currency} colorClass="text-pink-600 dark:text-pink-400" />
                 )}
               </div>
             </div>
@@ -273,9 +287,7 @@ const NetProfitCard: React.FC<{
                 {loading ? (
                   <p className={`text-4xl font-bold ${amountColor}`}>Loading...</p>
                 ) : (
-                  <p className={`${getFontSizeClass(formatCurrency(netProfit, currency))} font-bold ${amountColor}`}>
-                      {formatCurrency(netProfit, currency)}
-                  </p>
+                  <StatValue amount={netProfit} currency={currency} colorClass={amountColor} />
                 )}
               </div>
             </div>
@@ -334,6 +346,7 @@ export const Dashboard: React.FC = () => {
     // Role-based dashboard rendering
     const isAdmin = currentUser.role === UserRole.Admin;
     const isManager = currentUser.role === UserRole.Manager;
+    const isSecretary = currentUser.role === UserRole.Secretary;
     const isSalesRep = currentUser.role === UserRole.Sales;
     const isDriver = currentUser.role === UserRole.Driver;
 
@@ -902,7 +915,7 @@ export const Dashboard: React.FC = () => {
         </Card>
 
       {/* Stat Cards */}
-  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+  <div className={`grid grid-cols-1 sm:grid-cols-2 ${ (isAdmin || isSecretary) ? 'lg:grid-cols-5 xl:grid-cols-5' : 'lg:grid-cols-3 xl:grid-cols-4' } gap-4`}>
         <Card className="bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-950 dark:to-blue-900 border-blue-200 dark:border-blue-800 min-h-[180px] flex flex-col">
           <CardHeader className="flex-shrink-0">
             <CardTitle className="flex items-center justify-between text-blue-700 dark:text-blue-300">
@@ -920,8 +933,8 @@ export const Dashboard: React.FC = () => {
           </CardHeader>
           <CardContent className="flex-1 flex flex-col justify-between">
                 <div className="flex justify-between items-start">
-              <div className="flex-1">
-                <p className={`${getFontSizeClass(formatCurrency(totalSales, currency))} font-bold text-blue-600 dark:text-blue-400`}>{formatCurrency(totalSales, currency)}</p>
+                <div className="flex-1">
+                <StatValue amount={totalSales} currency={currency} colorClass="text-blue-600 dark:text-blue-400" />
                 <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Sales = sum(order.total) for orders with status 'Delivered' (respecting current filters)</p>
                 {/* Reconciliation: Total Paid + Cheque + Credit + Returns */}
                 <div className="mt-2 text-sm text-slate-600 dark:text-slate-400">
@@ -976,6 +989,99 @@ export const Dashboard: React.FC = () => {
             </div>
           </CardContent>
         </Card>
+        {/* For Admin/Secretary, show key financial cards in the top row */}
+        {(isAdmin || isSecretary) && (
+          <>
+            <Card className="bg-gradient-to-br from-green-50 to-green-100 dark:from-green-950 dark:to-green-900 border-green-200 dark:border-green-800 min-h-[180px] flex flex-col">
+              <CardHeader className="flex-shrink-0">
+                <CardTitle className="text-green-700 dark:text-green-300">Total Paid</CardTitle>
+              </CardHeader>
+              <CardContent className="flex-1 flex flex-col justify-between">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <StatValue amount={currentPaid} currency={currency} colorClass="text-green-600 dark:text-green-400" />
+                    <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Paid = Total Sales - Cheque Balance - Credit Balance - Returns (from delivered orders in filtered period)</p>
+                  </div>
+                </div>
+                <div className="flex justify-end mt-4">
+                  <ChangeIndicator change={paidChange} />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-gradient-to-br from-orange-50 to-orange-100 dark:from-orange-950 dark:to-orange-900 border-orange-200 dark:border-orange-800 min-h-[180px] flex flex-col">
+              <CardHeader className="flex-shrink-0">
+                <CardTitle className="text-orange-700 dark:text-orange-300">Total Cheque Balance</CardTitle>
+              </CardHeader>
+              <CardContent className="flex-1 flex flex-col justify-between">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <StatValue amount={currentChequeBalance} currency={currency} colorClass="text-orange-600 dark:text-orange-400" />
+                    <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Cheque = sum(order.chequeBalance) across delivered orders only</p>
+                  </div>
+                </div>
+                <div className="flex justify-end mt-4">
+                  <ChangeIndicator change={chequeChange} />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-gradient-to-br from-red-50 to-red-100 dark:from-red-950 dark:to-red-900 border-red-200 dark:border-red-800 min-h-[180px] flex flex-col">
+              <CardHeader className="flex-shrink-0">
+                <CardTitle className="text-red-700 dark:text-red-300">Total Credit Balance</CardTitle>
+              </CardHeader>
+              <CardContent className="flex-1 flex flex-col justify-between">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <StatValue amount={currentCreditBalance} currency={currency} colorClass="text-red-600 dark:text-red-400" />
+                    <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Credit = sum(order.creditBalance) from delivered orders only</p>
+                  </div>
+                </div>
+                <div className="flex justify-end mt-4">
+                  <ChangeIndicator change={creditChange} />
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Ensure Total Returns shows for Secretary too as requested */}
+            {(isAdmin || isManager || isSecretary) && (
+              <Card className="bg-gradient-to-br from-sky-50 to-sky-100 dark:from-sky-950 dark:to-sky-900 border-sky-200 dark:border-sky-800 min-h-[180px] flex flex-col">
+                <CardHeader className="flex-shrink-0">
+                  <CardTitle className="text-sky-700 dark:text-sky-300">Total Returns</CardTitle>
+                </CardHeader>
+                <CardContent className="flex-1 flex flex-col justify-between">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <StatValue amount={currentReturnAmount} currency={currency} colorClass="text-sky-600 dark:text-sky-400" />
+                      <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Returns = sum(order.returnAmount) from delivered orders only</p>
+                    </div>
+                  </div>
+                  <div className="flex justify-end mt-4">
+                    <ChangeIndicator change={returnChange} />
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </>
+        )}
+        {/* Delivered Cost (only delivered orders) - moved up to appear first on the second row */}
+        <Card className="bg-gradient-to-br from-indigo-50 to-indigo-100 dark:from-indigo-950 dark:to-indigo-900 border-indigo-200 dark:border-indigo-800 min-h-[180px] flex flex-col">
+          <CardHeader className="flex-shrink-0">
+            <CardTitle className="text-indigo-700 dark:text-indigo-300">Delivered Cost</CardTitle>
+          </CardHeader>
+          <CardContent className="flex-1 flex flex-col justify-between">
+            <div className="flex justify-between items-start">
+              <div>
+                <StatValue amount={totalCost} currency={currency} colorClass="text-indigo-600 dark:text-indigo-400" />
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Delivered Cost = sum(item.costPrice * item.quantity) for Delivered orders in the selected period</p>
+              </div>
+            </div>
+            <div className="flex justify-end mt-4">
+              <ChangeIndicator change={calculateChange(totalCost, 0)} />
+            </div>
+          </CardContent>
+        </Card>
+
         <Card className="bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-950 dark:to-purple-900 border-purple-200 dark:border-purple-800 min-h-[180px] flex flex-col">
           <CardHeader className="flex-shrink-0">
             <CardTitle className="text-purple-700 dark:text-purple-300">
@@ -987,8 +1093,8 @@ export const Dashboard: React.FC = () => {
           <CardContent className="flex-1 flex flex-col justify-between">
                 <div className="flex justify-between items-start">
               <div>
-                <button onClick={() => setInventoryModalOpen(true)} className={`${getFontSizeClass(formatCurrency(totalInventoryValue, currency))} font-bold text-purple-600 dark:text-purple-400 text-left`}>
-                  {formatCurrency(totalInventoryValue, currency)}
+                <button onClick={() => setInventoryModalOpen(true)} className="text-left w-full">
+                <StatValue amount={totalInventoryValue} currency={currency} colorClass="text-purple-600 dark:text-purple-400" />
                 </button>
                 <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Inventory = sum(product.costPrice * product.stock) for filtered products</p>
               </div>
@@ -1119,7 +1225,7 @@ export const Dashboard: React.FC = () => {
           <CardContent className="flex-1 flex flex-col justify-between">
             <div className="flex justify-between items-start">
               <div>
-                <p className={`${getFontSizeClass(formatCurrency(totalOrderCost, currency))} font-bold text-indigo-600 dark:text-indigo-400`}>{formatCurrency(totalOrderCost, currency)}</p>
+                <StatValue amount={totalOrderCost} currency={currency} colorClass="text-indigo-600 dark:text-indigo-400" />
                 <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Order Cost = sum(item.costPrice * (quantity + free)) for ALL orders in the selected period (all statuses)</p>
               </div>
             </div>
@@ -1138,7 +1244,7 @@ export const Dashboard: React.FC = () => {
           <CardContent className="flex-1 flex flex-col justify-between">
             <div className="flex justify-between items-start">
               <div>
-                <p className={`${getFontSizeClass(formatCurrency(totalOrdersAmount - totalOrderCost, currency))} font-bold text-stone-600 dark:text-stone-400`}>{formatCurrency(totalOrdersAmount - totalOrderCost, currency)}</p>
+                <StatValue amount={totalOrdersAmount - totalOrderCost} currency={currency} colorClass="text-stone-600 dark:text-stone-400" />
                 <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Difference between total order values and calculated order cost (filtered period)</p>
               </div>
             </div>
@@ -1148,91 +1254,12 @@ export const Dashboard: React.FC = () => {
           </CardContent>
         </Card>
 
-        {/* Delivered Cost (only delivered orders) */}
-        <Card className="bg-gradient-to-br from-indigo-50 to-indigo-100 dark:from-indigo-950 dark:to-indigo-900 border-indigo-200 dark:border-indigo-800 min-h-[180px] flex flex-col">
-          <CardHeader className="flex-shrink-0">
-            <CardTitle className="text-indigo-700 dark:text-indigo-300">Delivered Cost</CardTitle>
-          </CardHeader>
-          <CardContent className="flex-1 flex flex-col justify-between">
-            <div className="flex justify-between items-start">
-              <div>
-                <p className={`${getFontSizeClass(formatCurrency(totalCost, currency))} font-bold text-indigo-600 dark:text-indigo-400`}>{formatCurrency(totalCost, currency)}</p>
-                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Delivered Cost = sum(item.costPrice * item.quantity) for Delivered orders in the selected period</p>
-              </div>
-            </div>
-            <div className="flex justify-end mt-4">
-              <ChangeIndicator change={calculateChange(totalCost, 0)} />
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="bg-gradient-to-br from-green-50 to-green-100 dark:from-green-950 dark:to-green-900 border-green-200 dark:border-green-800 min-h-[180px] flex flex-col">
-          <CardHeader className="flex-shrink-0">
-            <CardTitle className="text-green-700 dark:text-green-300">Total Paid</CardTitle>
-          </CardHeader>
-          <CardContent className="flex-1 flex flex-col justify-between">
-            <div className="flex justify-between items-start">
-              <div>
-                <p className={`${getFontSizeClass(formatCurrency(currentPaid, currency))} font-bold text-green-600 dark:text-green-400`}>{formatCurrency(currentPaid, currency)}</p>
-                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Paid = Total Sales - Cheque Balance - Credit Balance - Returns (from delivered orders in filtered period)</p>
-              </div>
-            </div>
-            <div className="flex justify-end mt-4">
-              <ChangeIndicator change={paidChange} />
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="bg-gradient-to-br from-orange-50 to-orange-100 dark:from-orange-950 dark:to-orange-900 border-orange-200 dark:border-orange-800 min-h-[180px] flex flex-col">
-          <CardHeader className="flex-shrink-0">
-            <CardTitle className="text-orange-700 dark:text-orange-300">Total Cheque Balance</CardTitle>
-          </CardHeader>
-          <CardContent className="flex-1 flex flex-col justify-between">
-            <div className="flex justify-between items-start">
-              <div>
-                <p className={`${getFontSizeClass(formatCurrency(currentChequeBalance, currency))} font-bold text-orange-600 dark:text-orange-400`}>{formatCurrency(currentChequeBalance, currency)}</p>
-                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Cheque = sum(order.chequeBalance) across delivered orders only</p>
-              </div>
-            </div>
-              <div className="flex justify-end mt-4">
-              <ChangeIndicator change={chequeChange} />
-            </div>
-          </CardContent>
-        </Card>
+        {/* Total Paid card moved to top for Admin/Secretary view */}
+        {/* Total Cheque Balance card moved to top for Admin/Secretary view */}
 
         {/* Total Returns - Admin/Manager only */}
-        {(isAdmin || isManager) && (
-          <Card className="bg-gradient-to-br from-sky-50 to-sky-100 dark:from-sky-950 dark:to-sky-900 border-sky-200 dark:border-sky-800 min-h-[180px] flex flex-col">
-            <CardHeader className="flex-shrink-0">
-              <CardTitle className="text-sky-700 dark:text-sky-300">Total Returns</CardTitle>
-            </CardHeader>
-            <CardContent className="flex-1 flex flex-col justify-between">
-              <div className="flex justify-between items-start">
-                <div>
-                  <p className={`${getFontSizeClass(formatCurrency(currentReturnAmount, currency))} font-bold text-sky-600 dark:text-sky-400`}>{formatCurrency(currentReturnAmount, currency)}</p>
-                  <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Returns = sum(order.returnAmount) from delivered orders only</p>
-                </div>
-              </div>
-              <div className="flex justify-end mt-4">
-                <ChangeIndicator change={returnChange} />
-              </div>
-            </CardContent>
-          </Card>
-        )}
-        <Card className="bg-gradient-to-br from-red-50 to-red-100 dark:from-red-950 dark:to-red-900 border-red-200 dark:border-red-800 min-h-[180px] flex flex-col">
-          <CardHeader className="flex-shrink-0">
-            <CardTitle className="text-red-700 dark:text-red-300">Total Credit Balance</CardTitle>
-          </CardHeader>
-          <CardContent className="flex-1 flex flex-col justify-between">
-            <div className="flex justify-between items-start">
-              <div>
-                <p className={`${getFontSizeClass(formatCurrency(currentCreditBalance, currency))} font-bold text-red-600 dark:text-red-400`}>{formatCurrency(currentCreditBalance, currency)}</p>
-                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Credit = sum(order.creditBalance) from delivered orders only</p>
-              </div>
-            </div>
-            <div className="flex justify-end mt-4">
-              <ChangeIndicator change={creditChange} />
-            </div>
-          </CardContent>
-        </Card>
+        {/* Total Returns card moved to top for Admin/Secretary view (rendering adjusted to include Secretary) */}
+        {/* Total Credit Balance card moved to top for Admin/Secretary view */}
         <Card className="bg-gradient-to-br from-amber-50 to-amber-100 dark:from-amber-950 dark:to-amber-900 border-amber-200 dark:border-amber-800 min-h-[180px] flex flex-col">
           <CardHeader className="flex-shrink-0">
             <CardTitle className="text-amber-700 dark:text-amber-300">Total Outstanding</CardTitle>
@@ -1240,7 +1267,7 @@ export const Dashboard: React.FC = () => {
           <CardContent className="flex-1 flex flex-col justify-between">
             <div className="flex justify-between items-start">
               <div>
-                <p className={`${getFontSizeClass(formatCurrency(currentChequeBalance + currentCreditBalance, currency))} font-bold text-amber-600 dark:text-amber-400`}>{formatCurrency(currentChequeBalance + currentCreditBalance, currency)}</p>
+                <StatValue amount={currentChequeBalance + currentCreditBalance} currency={currency} colorClass="text-amber-600 dark:text-amber-400" />
                 <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Outstanding = Total Cheque + Total Credit</p>
               </div>
             </div>
@@ -1259,7 +1286,7 @@ export const Dashboard: React.FC = () => {
             <CardContent className="flex-1 flex flex-col justify-between">
               <div className="flex justify-between items-start">
                 <div>
-                  <p className={`${getFontSizeClass(formatCurrency(totalSales - totalCost, currency))} font-bold text-teal-600 dark:text-teal-400`}>{formatCurrency(totalSales - totalCost, currency)}</p>
+                  <StatValue amount={totalSales - totalCost} currency={currency} colorClass="text-teal-600 dark:text-teal-400" />
                   <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Profit = Total Delivered Sales - Delivered Cost (respecting current filters)</p>
                 </div>
               </div>
@@ -1271,7 +1298,7 @@ export const Dashboard: React.FC = () => {
         )}
         <ExpensesCard currency={currency} dateRange={dateRange} />
         {/* Net Profit Card - Admin Only */}
-        {isAdmin && <NetProfitCard currency={currency} dateRange={dateRange} totalSales={totalSales} totalCost={totalCost} />}
+            {isAdmin && <NetProfitCard currency={currency} dateRange={dateRange} totalSales={totalSales} totalCost={totalCost} />}
       </div>
 
 
@@ -1912,8 +1939,8 @@ const SalesRepDashboard: React.FC<{
             <CardDescription>{totalProfitForRep >= 0 ? 'Profit from your orders (Total - Cost)' : 'Loss from your orders (Total - Cost)'}</CardDescription>
           </CardHeader>
           <CardContent className="flex-1 flex flex-col justify-between">
-            <div>
-              <p className={`${getFontSizeClass(formatCurrency(totalProfitForRep, currency))} font-bold ${totalProfitForRep >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>{formatCurrency(totalProfitForRep, currency)}</p>
+              <div>
+              <StatValue amount={totalProfitForRep} currency={currency} colorClass={totalProfitForRep >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'} />
               <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Order Profit = Total Orders Amount - Total Order Cost (for your assigned suppliers / scope)</p>
             </div>
             <div className="flex justify-end mt-4">
@@ -1922,13 +1949,13 @@ const SalesRepDashboard: React.FC<{
           </CardContent>
         </Card>
         
-        <Card>
+            <Card>
           <CardHeader>
             <CardTitle>Total Orders Amount</CardTitle>
             <CardDescription>Total value of orders for your assigned suppliers</CardDescription>
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-bold text-green-600">{formatCurrency(totalOrdersAmount, currency)}</p>
+            <StatValue amount={totalOrdersAmount} currency={currency} colorClass="text-green-600" />
             <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">From {filteredMyOrders.length} orders</p>
           </CardContent>
         </Card>
