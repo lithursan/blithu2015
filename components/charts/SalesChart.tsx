@@ -64,6 +64,7 @@ export const SalesChart: React.FC<SalesChartProps> = ({ data, maxXTicks = 7 }) =
         <Legend />
         <Line type="monotone" dataKey="sales" stroke="#3b82f6" strokeWidth={2} activeDot={{ r: 6 }} name="Total Sales" />
         <Line type="monotone" dataKey="deliveryCost" stroke="#ef4444" strokeWidth={2} activeDot={{ r: 6 }} name="Delivery Cost" />
+        <Line type="monotone" dataKey="marginCost" stroke="#f59e0b" strokeWidth={2} activeDot={{ r: 6 }} name="Margin Cost" />
         <Line type="monotone" dataKey="grossProfit" stroke="#10b981" strokeWidth={2} activeDot={{ r: 6 }} name="Gross Profit" />
         <Line type="monotone" dataKey="netProfit" stroke="#8b5cf6" strokeWidth={2} activeDot={{ r: 6 }} name="Net Profit" />
       </LineChart>

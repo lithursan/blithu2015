@@ -135,7 +135,7 @@ export const Products: React.FC = () => {
 
   const openModal = (mode: 'add' | 'edit', product?: Product) => {
   setModalMode(mode);
-  setCurrentProduct(product || { name: '', category: '', price: 0, costPrice: 0, stock: 0, sku: '', supplier: '', imageUrl: '' });
+  setCurrentProduct(product || { name: '', category: '', price: 0, costPrice: 0, marginPrice: 0, stock: 0, sku: '', supplier: '', imageUrl: '' });
     clearErrors();
     setIsModalOpen(true);
   };
@@ -162,6 +162,7 @@ export const Products: React.FC = () => {
         category: validationRules.required,
         price: validationRules.price,
         costPrice: validationRules.price, // reuse price validation
+        marginPrice: validationRules.price,
         stock: validationRules.stock,
         sku: validationRules.sku,
         supplier: validationRules.required
@@ -189,6 +190,7 @@ export const Products: React.FC = () => {
           category: currentProduct.category || '',
           price: currentProduct.price || 0,
           costPrice: currentProduct.costPrice || 0,
+          marginPrice: currentProduct.marginPrice || 0,
           stock: currentProduct.stock || 0,
           sku,
           supplier: currentProduct.supplier || '',
@@ -200,6 +202,9 @@ export const Products: React.FC = () => {
           name: newProduct.name,
           category: newProduct.category,
           price: newProduct.price,
+          // Persist marginPrice into new DB column `marginprice` and keep legacy `costprice` for compatibility
+          marginprice: newProduct.marginPrice,
+          // Keep `costprice` as the actual cost input; do not overwrite it with margin
           costprice: newProduct.costPrice,
           stock: newProduct.stock,
           sku: newProduct.sku,
@@ -219,16 +224,21 @@ export const Products: React.FC = () => {
         await refetchData();
       } else {
         // Edit mode: update product in DB
-        const { error } = await supabase.from('products').update({
+        // Update only the fields that changed. Persist margin to `marginprice` but do NOT modify legacy `costprice` here.
+        const updatePayload: any = {
           name: currentProduct.name,
           category: currentProduct.category,
           price: currentProduct.price,
+          marginprice: currentProduct.marginPrice ?? currentProduct.costPrice,
+          // Persist edited cost price when updating product
           costprice: currentProduct.costPrice,
           stock: currentProduct.stock,
           sku: currentProduct.sku,
           supplier: currentProduct.supplier,
           imageurl: currentProduct.imageUrl,
-        }).eq('id', currentProduct.id);
+        };
+
+        const { error } = await supabase.from('products').update(updatePayload).eq('id', currentProduct.id);
         
         if (error) {
           alert(`Error updating product: ${error.message}`);
@@ -584,7 +594,8 @@ export const Products: React.FC = () => {
                               <th scope="col" className="px-6 py-3">Product</th>
                               <th scope="col" className="px-6 py-3">Category</th>
                               <th scope="col" className="px-6 py-3">Price</th>
-                              {canEdit && <th scope="col" className="px-6 py-3">Cost Price</th>}
+                                {canEdit && <th scope="col" className="px-6 py-3">Cost Price</th>}
+                                {canEdit && <th scope="col" className="px-6 py-3">Margin Price</th>}
                               <th scope="col" className="px-6 py-3">Pending</th>
                               <th scope="col" className="px-6 py-3">Stock</th>
                               <th scope="col" className="px-6 py-3">SKU</th>
@@ -609,6 +620,7 @@ export const Products: React.FC = () => {
                                 <td className="px-6 py-4">{product.category}</td>
                                 <td className="px-6 py-4">{formatCurrency(product.price, currency)}</td>
                                 {canEdit && <td className="px-6 py-4">{formatCurrency(product.costPrice || 0, currency)}</td>}
+                                {canEdit && <td className="px-6 py-4">{formatCurrency(product.marginPrice || 0, currency)}</td>}
                                 <td className="px-6 py-4 text-right">
                                   <span className="font-mono text-sm text-rose-600 dark:text-rose-400">{pendingQtyMap.get(product.id) || 0}</span>
                                 </td>
@@ -676,7 +688,8 @@ export const Products: React.FC = () => {
                                 </div>
                                 {canEdit && (
                                   <div className="text-xs sm:text-sm text-slate-600 dark:text-slate-400">
-                                    Cost: {formatCurrency(product.costPrice || 0, currency)}
+                                    <div>Cost: {formatCurrency(product.costPrice || 0, currency)}</div>
+                                    <div>Margin: {formatCurrency(product.marginPrice || 0, currency)}</div>
                                   </div>
                                 )}
                               </div>
@@ -732,6 +745,10 @@ export const Products: React.FC = () => {
             <div>
               <label htmlFor="costPrice" className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">Cost Price ({currency})</label>
               <input type="number" id="costPrice" value={currentProduct.costPrice || ''} onChange={e => handleInputChange('costPrice', parseFloat(e.target.value) || 0)} className="bg-slate-50 border border-slate-300 text-slate-900 text-sm sm:text-base rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-3 sm:p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white min-h-[44px]" required />
+            </div>
+            <div>
+              <label htmlFor="marginPrice" className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">Margin Price ({currency})</label>
+              <input type="number" id="marginPrice" value={currentProduct.marginPrice || ''} onChange={e => handleInputChange('marginPrice', parseFloat(e.target.value) || 0)} className="bg-slate-50 border border-slate-300 text-slate-900 text-sm sm:text-base rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-3 sm:p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white min-h-[44px]" />
             </div>
             <div>
               <label htmlFor="stock" className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">Stock</label>

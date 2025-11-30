@@ -903,7 +903,9 @@ export const Orders: React.FC = () => {
       // compute cost amount from products' costPrice * qty (for inventory cost tracking)
       const costAmount = newOrderItems.reduce((sum, item) => {
         const prod = products.find(p => p.id === item.productId);
-        const cp = prod && typeof prod.costPrice === 'number' ? prod.costPrice : 0;
+        const cp = prod
+          ? (typeof prod.marginPrice === 'number' ? prod.marginPrice : (typeof prod.costPrice === 'number' ? prod.costPrice : 0))
+          : 0;
         return sum + (cp * (item.quantity || 0));
       }, 0);
 
@@ -1102,7 +1104,9 @@ export const Orders: React.FC = () => {
           // update costamount when editing
           costamount: newOrderItems.reduce((sum, item) => {
             const prod = products.find(p => p.id === item.productId);
-            const cp = prod && typeof prod.costPrice === 'number' ? prod.costPrice : 0;
+            const cp = prod
+              ? (typeof prod.marginPrice === 'number' ? prod.marginPrice : (typeof prod.costPrice === 'number' ? prod.costPrice : 0))
+              : 0;
             return sum + (cp * (item.quantity || 0));
           }, 0),
         status: currentOrder.status ?? OrderStatus.Pending,

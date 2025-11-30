@@ -335,7 +335,8 @@ export const Dashboard: React.FC = () => {
       orders = [],
       products = [],
       customers = [],
-      suppliers = []
+      suppliers = [],
+      users = []
     } = useData() || {};
 
     // Early return for unauthorized access
@@ -357,7 +358,7 @@ export const Dashboard: React.FC = () => {
 
     // Sales Rep Dashboard - Customer and sales-focused view
     if (isSalesRep) {
-        return <SalesRepDashboard currentUser={currentUser} orders={orders} products={products} customers={customers} suppliers={suppliers} />;
+      return <SalesRepDashboard currentUser={currentUser} orders={orders} products={products} customers={customers} suppliers={suppliers} users={users} />;
     }
 
     // Admin/Manager Dashboard - Full detailed view (existing functionality)
@@ -366,6 +367,7 @@ export const Dashboard: React.FC = () => {
     // (Top products chart removed — Financial Overview expanded)
 
     const [selectedSupplier, setSelectedSupplier] = useState<string>('all');
+    const [selectedSalesRep, setSelectedSalesRep] = useState<string>('all');
     const [selectedCustomer, setSelectedCustomer] = useState<string>('all');
     const [selectedCategory, setSelectedCategory] = useState<string>('all');
     const [dateRange, setDateRange] = useState({ start: '', end: '' });
@@ -427,6 +429,12 @@ export const Dashboard: React.FC = () => {
         return false;
       }
 
+      // Sales Rep Filter
+      if (selectedSalesRep !== 'all') {
+        const assignedId = order.assignedUserId ?? order.assigneduserid ?? order.assigned_user_id ?? order.assignedUser ?? null;
+        if (String(assignedId) !== String(selectedSalesRep)) return false;
+      }
+
       // Date Range Filter
       const orderDate = new Date(order.date);
       if (dateRange.start && orderDate < new Date(dateRange.start)) {
@@ -463,7 +471,7 @@ export const Dashboard: React.FC = () => {
 
       return true;
     });
-  }, [orders, safeProducts, selectedCustomer, selectedSupplier, selectedCategory, dateRange, accessibleSuppliers]);
+  }, [orders, safeProducts, selectedCustomer, selectedSupplier, selectedCategory, dateRange, accessibleSuppliers, selectedSalesRep]);
 
   // Calculate previous period orders for comparison
   const previousPeriodOrders = useMemo(() => {
@@ -593,6 +601,20 @@ export const Dashboard: React.FC = () => {
         return sum + orderCost;
       }, 0);
 
+      // Compute margin-based cost (using marginPrice when available, otherwise fall back to costPrice)
+      const marginCost = data.orders.reduce((sum, order) => {
+        if (!order.orderItems) return sum;
+        const orderMargin = order.orderItems.reduce((itemSum, item) => {
+          const product = safeProducts.find(p => p.id === item.productId);
+          const margin = (typeof product?.marginPrice === 'number' && product.marginPrice > 0)
+            ? product.marginPrice
+            : (typeof product?.costPrice === 'number' ? product.costPrice : 0);
+          const totalQty = (Number(item.quantity) || 0) + (Number(item.free) || 0);
+          return itemSum + (margin * totalQty);
+        }, 0);
+        return sum + orderMargin;
+      }, 0);
+
       const grossProfit = data.sales - deliveryCost;
       const dailyExpenses = 0; // placeholder for daily expenses
       const netProfit = grossProfit - dailyExpenses;
@@ -606,6 +628,7 @@ export const Dashboard: React.FC = () => {
         fullLabel,
         sales: data.sales,
         deliveryCost,
+        marginCost,
         grossProfit,
         netProfit
       };
@@ -618,6 +641,7 @@ export const Dashboard: React.FC = () => {
         setSelectedSupplier('all');
         setSelectedCustomer('all');
         setSelectedCategory('all');
+      setSelectedSalesRep('all');
         setDateRange({ start: '', end: '' });
     };
 
@@ -636,6 +660,22 @@ export const Dashboard: React.FC = () => {
       }, 0);
       return sum + orderCost;
     }, 0);
+
+  // Total Margin (sum of per-product marginPrice * quantity) for delivered orders.
+  // Falls back to costPrice when marginPrice is not set for a product.
+  const totalMargin = filteredOrders.reduce((sum, order) => {
+    if (order.status !== OrderStatus.Delivered) return sum;
+    if (!order.orderItems) return sum;
+    const orderMargin = order.orderItems.reduce((itemSum, item) => {
+      const product = safeProducts.find(p => p.id === item.productId);
+      const marginPrice = (typeof product?.marginPrice === 'number' && !isNaN(product.marginPrice))
+        ? product.marginPrice
+        : (typeof product?.costPrice === 'number' && !isNaN(product.costPrice) ? product.costPrice : 0);
+      const totalQty = (Number(item.quantity) || 0) + (Number(item.free) || 0);
+      return itemSum + (marginPrice * totalQty);
+    }, 0);
+    return sum + orderMargin;
+  }, 0);
 
     // Calculate total order cost for ALL filtered orders (regardless of status)
     const totalOrderCost = filteredOrders.reduce((sum, order) => {
@@ -888,6 +928,14 @@ export const Dashboard: React.FC = () => {
                     {availableSuppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
                </select>
              </FilterField>
+             <FilterField label="Sales Rep" htmlFor="salesrep-filter" variant="slate">
+               <select id="salesrep-filter" value={selectedSalesRep} onChange={e => setSelectedSalesRep(e.target.value)}>
+                 <option value="all">All Sales Reps</option>
+                 {(users || []).filter(u => u.role === UserRole.Sales).map((u: any) => (
+                   <option key={u.id} value={u.id}>{u.name}</option>
+                 ))}
+               </select>
+             </FilterField>
              <FilterField label="Customer" htmlFor="customer-filter" variant="slate">
                <select id="customer-filter" value={selectedCustomer} onChange={e => setSelectedCustomer(e.target.value)}>
                  <option value="all">All Customers</option>
@@ -1078,6 +1126,23 @@ export const Dashboard: React.FC = () => {
             </div>
             <div className="flex justify-end mt-4">
               <ChangeIndicator change={calculateChange(totalCost, 0)} />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-gradient-to-br from-yellow-50 to-yellow-100 dark:from-yellow-950 dark:to-yellow-900 border-yellow-200 dark:border-yellow-800 min-h-[180px] flex flex-col">
+          <CardHeader className="flex-shrink-0">
+            <CardTitle className="text-yellow-700 dark:text-yellow-300">Total Margin</CardTitle>
+          </CardHeader>
+          <CardContent className="flex-1 flex flex-col justify-between">
+            <div className="flex justify-between items-start">
+              <div>
+                <StatValue amount={totalMargin} currency={currency} colorClass="text-yellow-600 dark:text-yellow-400" />
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Margin = sum(item.marginPrice * quantity) for Delivered orders (falls back to costPrice)</p>
+              </div>
+            </div>
+            <div className="flex justify-end mt-4">
+              <ChangeIndicator change={calculateChange(totalMargin, 0)} />
             </div>
           </CardContent>
         </Card>
@@ -1811,12 +1876,13 @@ const DriverDashboard: React.FC<{
 
 // Sales Rep Dashboard Component - Customer and sales-focused view
 const SalesRepDashboard: React.FC<{
-    currentUser: any;
-    orders: any[];
-    products: any[];
-    customers: any[];
-    suppliers: any[];
-}> = ({ currentUser, orders, products, customers, suppliers }) => {
+  currentUser: any;
+  orders: any[];
+  products: any[];
+  customers: any[];
+  suppliers: any[];
+  users?: any[];
+}> = ({ currentUser, orders, products, customers, suppliers, users = [] }) => {
     const currency = currentUser?.settings.currency || 'LKR';
     
     // Filter for assigned suppliers
@@ -1841,11 +1907,36 @@ const SalesRepDashboard: React.FC<{
 
   // Local date filter for Sales Rep view
   const [dateRange, setDateRange] = useState<{ start: string; end: string }>({ start: '', end: '' });
+  // Supplier filter for Sales Rep view
+  const [selectedSupplier, setSelectedSupplier] = useState<string>('all');
+  // Sales Rep selector (show for Sales Rep login as well)
+  const [selectedSalesRep, setSelectedSalesRep] = useState<string>('all');
 
   // Apply date range to myOrders to produce filteredMyOrders used by cards and lists
   const filteredMyOrders = useMemo(() => {
-    if ((!dateRange.start && !dateRange.end) || !Array.isArray(myOrders)) return myOrders;
-    return myOrders.filter(order => {
+    if (!Array.isArray(myOrders)) return [];
+
+    // Start with myOrders, optionally scope by selected sales rep
+    let base = myOrders;
+    if (selectedSalesRep !== 'all') {
+      base = base.filter(order => {
+        const assignedId = order.assignedUserId ?? order.assigneduserid ?? order.assigned_user_id ?? order.assignedUser ?? null;
+        return String(assignedId) === String(selectedSalesRep);
+      });
+    }
+
+    // If no date filters, still allow supplier scoping on the base set
+    if ((!dateRange.start && !dateRange.end)) {
+      if (selectedSupplier === 'all') return base;
+      return base.filter(order => {
+        if (!order.orderItems || !Array.isArray(order.orderItems)) return false;
+        const orderProducts = order.orderItems.map((it: any) => products.find(p => p.id === it.productId)).filter(Boolean) as Product[];
+        return orderProducts.some(p => p.supplier === selectedSupplier);
+      });
+    }
+
+    // Apply date range (and supplier) filters on the base set
+    return base.filter(order => {
       try {
         const d = new Date(order.date);
         if (dateRange.start && d < new Date(dateRange.start)) return false;
@@ -1854,12 +1945,19 @@ const SalesRepDashboard: React.FC<{
           end.setDate(end.getDate() + 1); // inclusive
           if (d >= end) return false;
         }
+
+        if (selectedSupplier !== 'all') {
+          if (!order.orderItems || !Array.isArray(order.orderItems)) return false;
+          const orderProducts = order.orderItems.map((it: any) => products.find(p => p.id === it.productId)).filter(Boolean) as Product[];
+          if (!orderProducts.some(p => p.supplier === selectedSupplier)) return false;
+        }
+
         return true;
       } catch {
         return false;
       }
     });
-  }, [myOrders, dateRange]);
+  }, [myOrders, dateRange, products, selectedSupplier, selectedSalesRep]);
 
   // Orders filtered for this sales rep's assigned suppliers are in `myOrders`.
   // Compute totals used by dashboard cards.
@@ -1888,6 +1986,7 @@ const SalesRepDashboard: React.FC<{
     }, 0);
     return sum + orderCost;
   }, 0);
+  
 
   const totalProfitForRep = totalOrdersAmount - totalOrderCostForRep;
     
@@ -1917,7 +2016,21 @@ const SalesRepDashboard: React.FC<{
                 <CardTitle>Filters</CardTitle>
                 <CardDescription>Scope orders for the date range below</CardDescription>
               </CardHeader>
-              <CardContent className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+              <CardContent className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
+                <FilterField label="Supplier" htmlFor="sr-supplier" variant="blue">
+                  <select id="sr-supplier" value={selectedSupplier} onChange={e => setSelectedSupplier(e.target.value)}>
+                    <option value="all">All Suppliers</option>
+                    {Array.from(accessibleSuppliers).sort().map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </FilterField>
+                <FilterField label="Sales Rep" htmlFor="sr-salesrep" variant="slate">
+                  <select id="sr-salesrep" value={selectedSalesRep} onChange={e => setSelectedSalesRep(e.target.value)}>
+                    <option value="all">All Sales Reps</option>
+                    {(users || []).filter(u => u.role === UserRole.Sales).map((u: any) => (
+                      <option key={u.id} value={u.id}>{u.name}</option>
+                    ))}
+                  </select>
+                </FilterField>
                 <FilterField label="Start Date" htmlFor="sr-start-date" variant="amber">
                   <input id="sr-start-date" type="date" value={dateRange.start} onChange={e => setDateRange({ ...dateRange, start: e.target.value })} />
                 </FilterField>
@@ -1926,7 +2039,7 @@ const SalesRepDashboard: React.FC<{
                 </FilterField>
                 <div>
                   <label className="block text-sm font-medium text-transparent mb-1">Reset</label>
-                  <button className="w-full px-3 py-2 text-sm font-medium text-slate-700 bg-slate-200 rounded-lg hover:bg-slate-300 dark:bg-slate-600 dark:text-slate-200 dark:hover:bg-slate-500 transition-colors" onClick={() => setDateRange({ start: '', end: '' })}>Reset</button>
+                  <button className="w-full px-3 py-2 text-sm font-medium text-slate-700 bg-slate-200 rounded-lg hover:bg-slate-300 dark:bg-slate-600 dark:text-slate-200 dark:hover:bg-slate-500 transition-colors" onClick={() => { setDateRange({ start: '', end: '' }); setSelectedSupplier('all'); setSelectedSalesRep('all'); }}>Reset</button>
                 </div>
               </CardContent>
             </Card>

@@ -966,6 +966,11 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
                         name: row.name,
                         category: row.category,
                         price: row.price,
+                        // Read marginPrice if available, otherwise fall back to costprice
+                        marginPrice: row.marginprice == null || isNaN(Number(row.marginprice))
+                            ? (row.costprice == null || isNaN(Number(row.costprice)) ? undefined : Number(row.costprice))
+                            : Number(row.marginprice),
+                        costPrice: row.costprice !== undefined ? Number(row.costprice) : undefined,
                         stock: row.stock,
                         sku: row.sku,
                         supplier: row.supplier,
@@ -1162,7 +1167,21 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
             }
             const { data: freshProducts } = await supabase.from('products').select('*');
             if (freshProducts) {
-                setProducts(freshProducts);
+                const mappedProducts = freshProducts.map((row: any) => ({
+                    id: row.id,
+                    name: row.name,
+                    category: row.category,
+                    price: row.price,
+                    marginPrice: row.marginprice == null || isNaN(Number(row.marginprice))
+                        ? (row.costprice == null || isNaN(Number(row.costprice)) ? undefined : Number(row.costprice))
+                        : Number(row.marginprice),
+                    costPrice: row.costprice !== undefined ? Number(row.costprice) : undefined,
+                    stock: row.stock,
+                    sku: row.sku,
+                    supplier: row.supplier,
+                    imageUrl: row.imageurl || row.imageUrl || '',
+                }));
+                setProducts(mappedProducts);
                 // Force reload of product page if possible
                 if (window.location.pathname.includes('products')) {
                     window.location.reload();

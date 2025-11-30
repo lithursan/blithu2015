@@ -18,12 +18,14 @@ const MockDataPage: React.FC = () => {
         name: p.name,
         category: p.category,
         price: p.price,
-        costprice: p.costPrice,
+        // Seed both marginprice (new) and costprice (legacy) for compatibility
+        marginprice: (p as any).marginPrice ?? (p as any).costPrice ?? null,
+        costprice: (p as any).costPrice ?? null,
         stock: p.stock,
         sku: p.sku,
         supplier: p.supplier,
         imageurl: p.imageUrl,
-  })), { onConflict: 'id' });
+      })), { onConflict: 'id' });
       appendLog(prodErr ? `Products error: ${prodErr.message}` : 'Products seeded');
 
       appendLog('Seeding customers...');

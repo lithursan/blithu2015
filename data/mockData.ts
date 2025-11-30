@@ -246,13 +246,13 @@ export const mockUsers: User[] = [
 ];
 
 export const mockSalesData: SalesData[] = [
-  { month: 'Jan', sales: 4000 },
-  { month: 'Feb', sales: 3000 },
-  { month: 'Mar', sales: 5000 },
-  { month: 'Apr', sales: 4500 },
-  { month: 'May', sales: 6000 },
-  { month: 'Jun', sales: 5500 },
-  { month: 'Jul', sales: 7000 },
+  { label: 'Jan', fullLabel: 'Jan 2025', sales: 4000 },
+  { label: 'Feb', fullLabel: 'Feb 2025', sales: 3000 },
+  { label: 'Mar', fullLabel: 'Mar 2025', sales: 5000 },
+  { label: 'Apr', fullLabel: 'Apr 2025', sales: 4500 },
+  { label: 'May', fullLabel: 'May 2025', sales: 6000 },
+  { label: 'Jun', fullLabel: 'Jun 2025', sales: 5500 },
+  { label: 'Jul', fullLabel: 'Jul 2025', sales: 7000 },
 ];
 
 export const mockTopProducts: StockData[] = mockProducts

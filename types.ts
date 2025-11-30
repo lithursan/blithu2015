@@ -53,6 +53,7 @@ export interface Product {
   name: string;
   category: string;
   price: number;
+  marginPrice?: number; // application-facing margin price (new column `marginprice`)
   costPrice?: number; // purchase price
   stock: number;
   sku: string;
@@ -116,8 +117,21 @@ export interface Supplier {
 }
 
 export interface SalesData {
-  month: string;
+  // Optional original month key (kept for compatibility with some seed data)
+  month?: string;
+  // Short label for x-axis (e.g. "08 Nov")
+  label: string;
+  // Full label for tooltip (e.g. "08 Nov 2025")
+  fullLabel?: string;
+  // Primary series
   sales: number;
+  // Cost computed from products.costPrice (legacy purchase cost)
+  deliveryCost?: number;
+  // Cost computed from products.marginPrice (new margin price column)
+  marginCost?: number;
+  // Derived metrics
+  grossProfit?: number;
+  netProfit?: number;
 }
 
 export interface StockData {

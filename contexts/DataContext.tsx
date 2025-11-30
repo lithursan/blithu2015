@@ -137,6 +137,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                             name: row.name,
                             category: row.category,
                             price: row.price,
+                            // Read marginPrice if present, otherwise fall back to legacy costprice
+                            marginPrice: row.marginprice == null || isNaN(Number(row.marginprice))
+                                ? (row.costprice == null || isNaN(Number(row.costprice)) ? undefined : Number(row.costprice))
+                                : Number(row.marginprice),
                             costPrice: row.costprice !== undefined ? Number(row.costprice) : undefined,
                             stock: row.stock,
                             sku: row.sku,
@@ -498,12 +502,15 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             
             // Fetch products
             const { data: productsData, error: productsError } = await supabase.from('products').select('*');
-            if (!productsError && productsData) {
+                if (!productsError && productsData) {
                 const mappedProducts = productsData.map((row: any) => ({
                     id: row.id,
                     name: row.name,
                     category: row.category,
                     price: row.price,
+                    marginPrice: row.marginprice == null || isNaN(Number(row.marginprice))
+                        ? (row.costprice == null || isNaN(Number(row.costprice)) ? undefined : Number(row.costprice))
+                        : Number(row.marginprice),
                     costPrice: row.costprice !== undefined ? Number(row.costprice) : undefined,
                     stock: row.stock,
                     sku: row.sku,
