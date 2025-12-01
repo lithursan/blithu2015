@@ -99,20 +99,28 @@ const Expenses: React.FC = () => {
             const { data, error } = await supabase.from('expenses').select('*').order('date', { ascending: false });
             if (error) {
                 console.error('Error fetching expenses:', error);
-                const msg = (error.message || '').toString().toLowerCase();
-                // Table missing -> fallback to localStorage
-                if (error.code === 'PGRST205') {
-                    setFallbackMode(true);
+                // Universal localStorage fallback (works offline / network issues)
+                try {
                     const local = localStorage.getItem('app_expenses_v1');
                     setExpenses(local ? JSON.parse(local) : []);
-                    console.warn('Switched to localStorage fallback for expenses. Run migration to restore DB persistence.');
-                } else if (msg.includes('row-level') || msg.includes('forbidden') || (error.code && error.code.toString().startsWith('PG'))) {
+                    setFallbackMode(true);
+                    console.warn('Using localStorage fallback for expenses due to fetch error.');
+                } catch (lsErr) {
+                    console.error('Failed to parse localStorage expenses fallback:', lsErr);
+                    setExpenses([]);
+                }
+
+                const msg = (error.message || '').toString().toLowerCase();
+                // Table missing -> explicit migration hint
+                if (error.code === 'PGRST205') {
+                    console.warn('Expenses table missing in Supabase. Run migration: supabase_migrations/create_expenses.sql');
+                } else if (msg.includes('row-level') || msg.includes('forbidden') || (error.code && String(error.code).startsWith('PG'))) {
                     // Likely RLS blocking SELECT for anon users
                     setRlsBlocked(true);
-                    setExpenses([]);
-                    console.warn('Row Level Security is preventing reading the `expenses` table. Sign in or adjust SELECT policy in Supabase.');
+                    console.warn('Row Level Security may be preventing reading the `expenses` table.');
                 } else {
-                    alert('Error fetching expenses: ' + (error.message || JSON.stringify(error)));
+                    // Generic network error or other - we already fell back to localStorage
+                    console.warn('Fetch failed (network or server). Using local cached expenses if available.');
                 }
             } else if (data) {
                 // Debug raw rows to console to help identify mismatches

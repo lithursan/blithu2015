@@ -13,6 +13,7 @@ export const LiveLocationMap: React.FC = () => {
   const [locationData, setLocationData] = useState<Record<string, User>>({});
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [showAllLogins, setShowAllLogins] = useState<boolean>(false);
   const [debugInfo, setDebugInfo] = useState<string>('');
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [viewMode, setViewMode] = useState<'table' | 'map'>('table');
@@ -20,14 +21,18 @@ export const LiveLocationMap: React.FC = () => {
   // Store location coordinates
   const STORE_LOCATION = { latitude: 9.384489, longitude: 80.408737 };
 
-  // Filter users who have location sharing enabled
+  // Filter users to show on map
   const trackableUsers = useMemo(() => {
+    if (showAllLogins) {
+      // Show any user that has a currentLocation or a recent lastLogin (considered 'logged in')
+      return users.filter(user => (user.currentLocation) || (user.lastLogin));
+    }
     return users.filter(user => 
       (user.role === UserRole.Sales || user.role === UserRole.Driver) &&
       user.locationSharing &&
       user.currentLocation
     );
-  }, [users]);
+  }, [users, showAllLogins]);
 
   // Calculate distance between two coordinates
   const calculateDistance = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
@@ -76,11 +81,13 @@ export const LiveLocationMap: React.FC = () => {
   const refreshLocationData = async () => {
     try {
       setDebugInfo('Fetching location data...');
-      
-      const { data: userData, error } = await supabase
-        .from('users')
-        .select('*')
-        .in('role', ['Sales Rep', 'Driver']);
+      let query = supabase.from('users').select('*');
+      if (!showAllLogins) {
+        // keep previous behavior: only Sales Rep and Driver
+        query = query.in('role', ['Sales Rep', 'Driver']);
+      }
+
+      const { data: userData, error } = await query;
 
       if (error) {
         console.error('Error fetching location data:', error);
@@ -136,25 +143,33 @@ export const LiveLocationMap: React.FC = () => {
     }
   }, [autoRefresh]);
 
+  // When showAllLogins changes, immediately refresh data
+  useEffect(() => {
+    refreshLocationData();
+  }, [showAllLogins]);
+
   // Real-time subscription for location updates
   useEffect(() => {
-    const channel = supabase
-      .channel('location_updates')
-      .on('postgres_changes', {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'users',
-        filter: 'locationsharing=eq.true'
-      }, (payload) => {
+    // Subscribe to user updates. If showing all logins, subscribe broadly; otherwise only location sharing updates.
+    const channel = supabase.channel('location_updates');
+    if (showAllLogins) {
+      channel.on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'users' }, (payload) => {
+        console.log('Location/user update received (all):', payload);
+        refreshLocationData();
+      });
+    } else {
+      channel.on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'users', filter: 'locationsharing=eq.true' }, (payload) => {
         console.log('Location update received:', payload);
         refreshLocationData();
-      })
-      .subscribe();
+      });
+    }
+
+    channel.subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      try { supabase.removeChannel(channel); } catch (e) { console.warn('Failed to remove channel', e); }
     };
-  }, []);
+  }, [showAllLogins]);
 
   // Open all locations in Google Maps
   const openInGoogleMaps = () => {
@@ -186,6 +201,17 @@ export const LiveLocationMap: React.FC = () => {
               </CardDescription>
             </div>
             <div className="flex gap-2">
+              {/* Toggle to show all logged-in users (not only field staff) */}
+              <div className="flex items-center px-2">
+                <label className="text-sm mr-2">All Logins</label>
+                <button
+                  onClick={() => setShowAllLogins(!showAllLogins)}
+                  className={`px-2 py-1 text-sm rounded ${showAllLogins ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-700'}`}
+                  title="Toggle showing all logged-in users on the map"
+                >
+                  {showAllLogins ? 'ON' : 'OFF'}
+                </button>
+              </div>
               {/* View Mode Toggle */}
               <div className="flex bg-slate-200 dark:bg-slate-700 rounded-lg p-1">
                 <button

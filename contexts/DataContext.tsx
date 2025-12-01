@@ -5,6 +5,7 @@ declare global {
 }
 import React, { createContext, useState, ReactNode, useContext, Dispatch, SetStateAction } from 'react';
 import { User, Product, Order, Customer, DriverAllocation, DriverSale, Supplier } from '../types';
+import { mockUsers, mockProducts, mockCustomers, mockSuppliers } from '../data/mockData';
 import { supabase } from '../supabaseClient';
 import { 
     DatabaseOrder, 
@@ -137,9 +138,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                             name: row.name,
                             category: row.category,
                             price: row.price,
-                            // Read marginPrice if present, otherwise fall back to legacy costprice
+                            // Read marginPrice from DB (do NOT fall back to costPrice)
                             marginPrice: row.marginprice == null || isNaN(Number(row.marginprice))
-                                ? (row.costprice == null || isNaN(Number(row.costprice)) ? undefined : Number(row.costprice))
+                                ? undefined
                                 : Number(row.marginprice),
                             costPrice: row.costprice !== undefined ? Number(row.costprice) : undefined,
                             stock: row.stock,
@@ -249,10 +250,22 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     console.error(`Supabase ${name} fetch error:`, error);
                     console.error(`Error details:`, JSON.stringify(error, null, 2));
                     
-                    // Set empty array as fallback to prevent app crash
+                    // Use mock fallback data when available to keep the app usable offline
                     if (name === 'customers') {
-                        console.warn('Setting empty customers array as fallback');
-                        setter([]);
+                        console.warn('Using mock customers as fallback');
+                        setter(mockCustomers as any);
+                    } else if (name === 'users') {
+                        console.warn('Using mock users as fallback');
+                        setter(mockUsers as any);
+                    } else if (name === 'products') {
+                        console.warn('Using mock products as fallback');
+                        setter(mockProducts as any);
+                    } else if (name === 'suppliers') {
+                        console.warn('Using mock suppliers as fallback');
+                        setter(mockSuppliers as any);
+                    } else {
+                        // Generic empty fallback for other tables
+                        setter([] as any);
                     }
                     continue; // Skip this table and continue with others
                 }
@@ -508,8 +521,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     name: row.name,
                     category: row.category,
                     price: row.price,
+                    // Read marginPrice from DB only; do not use costPrice as fallback
                     marginPrice: row.marginprice == null || isNaN(Number(row.marginprice))
-                        ? (row.costprice == null || isNaN(Number(row.costprice)) ? undefined : Number(row.costprice))
+                        ? undefined
                         : Number(row.marginprice),
                     costPrice: row.costprice !== undefined ? Number(row.costprice) : undefined,
                     stock: row.stock,

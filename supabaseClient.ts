@@ -30,9 +30,9 @@ export const fetchProducts = async () => {
     name: row.name,
     category: row.category,
     price: row.price,
-    // Prefer explicit `marginprice` DB column when present; fall back to legacy `costprice` for older rows
+    // Read `marginprice` from DB only; do NOT fall back to `costprice`
     marginPrice: row.marginprice == null || isNaN(Number(row.marginprice))
-      ? (row.costprice == null || isNaN(Number(row.costprice)) ? 0 : Number(row.costprice))
+      ? 0
       : Number(row.marginprice),
     costPrice: row.costprice == null || isNaN(Number(row.costprice)) ? 0 : Number(row.costprice),
     stock: row.stock,

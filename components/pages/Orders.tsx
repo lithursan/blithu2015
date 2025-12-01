@@ -307,6 +307,9 @@ export const Orders: React.FC = () => {
   const [isPrintPreviewOpen, setIsPrintPreviewOpen] = useState(false);
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState<string>('');
   const [deliveryAddress, setDeliveryAddress] = useState<string>('');
+  // Capture creation timestamp shown in the Create/Edit modal header
+  const [creationDateISO, setCreationDateISO] = useState<string>(''); // YYYY-MM-DD
+  const [creationTime, setCreationTime] = useState<string>(''); // HH:MM
   const [orderToFinalize, setOrderToFinalize] = useState<Order | null>(null);
   
   // GPS Location for orders
@@ -666,6 +669,12 @@ export const Orders: React.FC = () => {
     setHeldItems(new Set());
     setExpectedDeliveryDate('');
     setDeliveryAddress('');
+    // Initialize creation date/time for the modal (use local current date/time)
+    const now = new Date();
+    setCreationDateISO(now.toISOString().slice(0,10));
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    setCreationTime(`${hh}:${mm}`);
     setModalState('create');
   };
 
@@ -705,6 +714,23 @@ export const Orders: React.FC = () => {
     setHeldItems(backorderedIds);
     setExpectedDeliveryDate(order.expectedDeliveryDate || '');
     setDeliveryAddress(order.deliveryAddress || '');
+    // If the order has a created_at timestamp, prefill the modal creation date/time from it
+    try {
+      const created = (order.created_at || order.date || '') as string;
+      const d = new Date(created);
+      if (!isNaN(d.getTime())) {
+        setCreationDateISO(d.toISOString().slice(0,10));
+        const hh = String(d.getHours()).padStart(2, '0');
+        const mm = String(d.getMinutes()).padStart(2, '0');
+        setCreationTime(`${hh}:${mm}`);
+      } else {
+        setCreationDateISO('');
+        setCreationTime('');
+      }
+    } catch (e) {
+      setCreationDateISO('');
+      setCreationTime('');
+    }
     setModalState('edit');
   };
   
@@ -903,9 +929,8 @@ export const Orders: React.FC = () => {
       // compute cost amount from products' costPrice * qty (for inventory cost tracking)
       const costAmount = newOrderItems.reduce((sum, item) => {
         const prod = products.find(p => p.id === item.productId);
-        const cp = prod
-          ? (typeof prod.marginPrice === 'number' ? prod.marginPrice : (typeof prod.costPrice === 'number' ? prod.costPrice : 0))
-          : 0;
+        // Use marginPrice only (no fallback to costPrice)
+        const cp = prod ? (typeof prod.marginPrice === 'number' ? prod.marginPrice : 0) : 0;
         return sum + (cp * (item.quantity || 0));
       }, 0);
 
@@ -948,6 +973,17 @@ export const Orders: React.FC = () => {
         return;
       }
 
+      // Build created_at timestamp from modal's creation date/time when available
+      let createdAtIso = new Date().toISOString();
+      try {
+        if (creationDateISO && creationTime) {
+          // creationTime is HH:MM; append seconds and form an ISO string
+          createdAtIso = new Date(`${creationDateISO}T${creationTime}:00`).toISOString();
+        }
+      } catch (e) {
+        console.warn('Failed to parse modal creation date/time, falling back to now', e);
+      }
+
       const newOrder = {
         id: newOrderId,
         customerid: customer.id,
@@ -958,8 +994,10 @@ export const Orders: React.FC = () => {
         method: '',
         expecteddeliverydate: expectedDeliveryDate || null,
         deliveryaddress: deliveryAddress || null,
-        orderdate: expectedDeliveryDate || new Date().toISOString().slice(0, 10),
-        created_at: new Date().toISOString(), // Add creation timestamp with proper timezone
+        // Store full ISO timestamp so date+time from the UI is preserved even
+        // if the DB doesn't yet have a dedicated `created_at` column.
+        orderdate: expectedDeliveryDate ? expectedDeliveryDate : createdAtIso,
+        created_at: createdAtIso, // Add creation timestamp with proper timezone (from modal)
         totalamount: total,
         costamount: costAmount,
         status: OrderStatus.Pending,
@@ -969,95 +1007,46 @@ export const Orders: React.FC = () => {
       };
       
       // Try inserting with costamount and created_at; if the DB doesn't have the columns yet, retry without them
+      // First, insert a safe payload that omits optional columns which may not exist
+      // in older database schemas (e.g., `costamount`, `created_at`). After a
+      // successful insert we attempt to update those optional fields; failures
+      // on the update are non-fatal and merely indicate the migration hasn't
+      // been applied yet.
       let insertPayload: any = { ...newOrder };
+      const safeInsertPayload = ((({ costamount, created_at, ...rest }) => rest)(insertPayload));
       try {
-        // Log the payload so we can inspect what is being POSTed to Supabase
-        console.log('Inserting order payload to Supabase:', insertPayload);
-
-        // Use .select('*') to get the representation back and surface more detailed errors
-        const { data: insertData, error } = await supabase.from('orders').insert([insertPayload]).select('*');
+        console.log('Inserting safe order payload to Supabase (omitting optional columns):', safeInsertPayload);
+        const { data: insertData, error } = await supabase.from('orders').insert([safeInsertPayload]).select('*');
         console.log('Supabase insert response:', { insertData, error });
-
         if (error) {
-          // Provide richer debug info to the developer
-          console.error('Supabase insert error details:', {
-            message: error.message,
-            details: (error as any).details,
-            hint: (error as any).hint,
-            code: (error as any).code,
-          });
-
-          const msg = (error.message || '').toLowerCase();
-          if (msg.includes("could not find the 'created_at' column") || msg.includes('created_at')) {
-            // Retry without created_at
-            const payloadNoCreatedAt = ((({ created_at, ...rest }) => rest)(insertPayload));
-            console.log('Retrying insert without created_at:', payloadNoCreatedAt);
-            const { data: retryData, error: retryError } = await supabase.from('orders').insert([payloadNoCreatedAt]).select('*');
-            console.log('Supabase retry response:', { retryData, retryError });
-            if (retryError) {
-              const retryMsg = (retryError.message || '').toLowerCase();
-              if (retryMsg.includes('costamount')) {
-                // Both created_at and costamount missing
-                const payloadMinimal = ((({ created_at, costamount, ...rest }) => rest)(insertPayload));
-                console.log('Retrying insert without created_at and costamount:', payloadMinimal);
-                const { data: finalData, error: finalError } = await supabase.from('orders').insert([payloadMinimal]).select('*');
-                if (finalError) {
-                  alert('Error adding order - Database migration required: ' + finalError.message + '\n\nPlease run the database migration SQL.');
-                  return;
-                }
-              } else {
-                alert('Error adding order after created_at retry: ' + retryError.message + '\n\nSee console for details.');
-                return;
-              }
-            }
-          } else if (msg.includes("could not find the 'costamount' column") || msg.includes('costamount')) {
-            // Retry without costamount
-            const payloadNoCost = ((({ costamount, ...rest }) => rest)(insertPayload));
-            console.log('Retrying insert without costamount:', payloadNoCost);
-            const { data: retryData, error: retryError } = await supabase.from('orders').insert([payloadNoCost]).select('*');
-            console.log('Supabase retry response:', { retryData, retryError });
-            if (retryError) {
-              const retryMsg = (retryError.message || '').toLowerCase();
-              if (retryMsg.includes('created_at')) {
-                // Both costamount and created_at missing
-                const payloadMinimal = ((({ costamount, created_at, ...rest }) => rest)(insertPayload));
-                console.log('Retrying insert without costamount and created_at:', payloadMinimal);
-                const { data: finalData, error: finalError } = await supabase.from('orders').insert([payloadMinimal]).select('*');
-                if (finalError) {
-                  alert('Error adding order - Database migration required: ' + finalError.message + '\n\nPlease run the database migration SQL.');
-                  return;
-                }
-              } else {
-                alert('Error adding order after costamount retry: ' + retryError.message + '\n\nSee console for details.');
-                return;
-              }
-            }
-          } else if (msg.includes("could not find the 'deliveryaddress' column") || msg.includes('deliveryaddress')) {
-            // Retry without deliveryaddress
-            const payloadNoDelivery = ((({ deliveryaddress, ...rest }) => rest)(insertPayload));
-            console.log('Retrying insert without deliveryaddress:', payloadNoDelivery);
-            const { data: retryData, error: retryError } = await supabase.from('orders').insert([payloadNoDelivery]).select('*');
-            console.log('Supabase retry response:', { retryData, retryError });
-            if (retryError) {
-              // Check if other columns are missing
-              const retryMsg = (retryError.message || '').toLowerCase();
-              if (retryMsg.includes('costamount') || retryMsg.includes('created_at')) {
-                const payloadMinimal = ((({ costamount, deliveryaddress, created_at, ...rest }) => rest)(insertPayload));
-                console.log('Retrying insert without costamount, deliveryaddress, and created_at:', payloadMinimal);
-                const { data: finalData, error: finalError } = await supabase.from('orders').insert([payloadMinimal]).select('*');
-                if (finalError) {
-                  alert('Error adding order - Database migration required: ' + finalError.message + '\n\nPlease run the database migration SQL.');
-                  return;
-                }
-              } else {
-                alert('Error adding order after delivery retry: ' + retryError.message + '\n\nSee console for details.');
-                return;
-              }
-            }
-          } else {
-            alert('Error adding order: ' + error.message + '\n\nSee console for details.');
+          // If even the safe insert fails, fall back to the old retry logic to provide
+          // the most helpful error messages possible for debugging.
+          console.error('Safe insert failed, falling back to legacy retry logic:', error);
+          // Legacy fallback: try inserting full payload and handle missing columns
+          const { data: insertData2, error: error2 } = await supabase.from('orders').insert([insertPayload]).select('*');
+          if (error2) {
+            console.error('Legacy insert also failed:', error2);
+            alert('Error adding order: ' + error2.message + '\n\nSee console for details.');
             return;
           }
+        }
+        // If we reach here the insert succeeded for the safe payload. Attempt to
+        // patch optional fields (costamount, created_at, deliveryaddress) for
+        // environments where those columns exist.
+        try {
+          const optionalPatch: any = {};
+          if (insertPayload.costamount !== undefined) optionalPatch.costamount = insertPayload.costamount;
+          if (insertPayload.created_at !== undefined) optionalPatch.created_at = insertPayload.created_at;
+          if (insertPayload.deliveryaddress !== undefined) optionalPatch.deliveryaddress = insertPayload.deliveryaddress;
+          // Only run update when there's something to patch
+          if (Object.keys(optionalPatch).length > 0) {
+            const { error: patchError } = await supabase.from('orders').update(optionalPatch).eq('id', newOrderId);
+            if (patchError) {
+              console.warn('Optional fields update failed (likely missing columns):', patchError.message);
+            }
+          }
+        } catch (e) {
+          console.warn('Failed to patch optional fields after insert:', e);
         }
       } catch (err) {
         console.error('Unexpected insert exception:', err);
@@ -1065,6 +1054,37 @@ export const Orders: React.FC = () => {
         return;
       }
       
+      // Optimistic update: ensure the UI shows the newly created order immediately
+      try {
+        const optimisticOrder: any = {
+          id: newOrderId,
+          customerId: customer.id,
+          customerName: customer.name,
+          date: newOrder.orderdate,
+          created_at: createdAtIso,
+          total: newOrder.totalamount,
+          status: newOrder.status,
+          paymentMethod: newOrder.method,
+          notes: newOrder.notes,
+          assignedUserId: newOrder.assigneduserid,
+          orderItems: newOrderItems,
+          backorderedItems: newBackorderedItems,
+          chequeBalance: newOrder.chequebalance || 0,
+          creditBalance: newOrder.creditbalance || 0,
+          returnAmount: 0,
+        };
+        setOrders(prev => {
+          const byId = new Map<string, Order>();
+          prev.forEach(o => byId.set(o.id, o));
+          // Insert/replace with optimistic order
+          byId.set(optimisticOrder.id, optimisticOrder as Order);
+          return Array.from(byId.values()).sort((a, b) => new Date((b.date as string) || '').getTime() - new Date((a.date as string) || '').getTime());
+        });
+      } catch (e) {
+        console.warn('Optimistic order insert failed:', e);
+      }
+
+      // Refresh authoritative list from server (will replace optimistic entry if DB returns different data)
       const freshOrders = await fetchOrders();
       if (freshOrders) {
         setOrders(prev => {
@@ -1099,14 +1119,14 @@ export const Orders: React.FC = () => {
         method: '',
         expecteddeliverydate: expectedDeliveryDate || null,
         deliveryaddress: deliveryAddress || null,
-        orderdate: expectedDeliveryDate || currentOrder.orderdate || new Date().toISOString().slice(0, 10),
+        // Preserve full timestamp when possible during edits as well.
+        orderdate: expectedDeliveryDate || currentOrder.orderdate || new Date().toISOString(),
         totalamount: total,
           // update costamount when editing
           costamount: newOrderItems.reduce((sum, item) => {
             const prod = products.find(p => p.id === item.productId);
-            const cp = prod
-              ? (typeof prod.marginPrice === 'number' ? prod.marginPrice : (typeof prod.costPrice === 'number' ? prod.costPrice : 0))
-              : 0;
+            // Use marginPrice only (no fallback to costPrice)
+            const cp = prod ? (typeof prod.marginPrice === 'number' ? prod.marginPrice : 0) : 0;
             return sum + (cp * (item.quantity || 0));
           }, 0),
         status: currentOrder.status ?? OrderStatus.Pending,
@@ -2431,21 +2451,12 @@ export const Orders: React.FC = () => {
                   <div className="flex items-center gap-2">
                     <span className="text-blue-600 dark:text-blue-400">📅</span>
                     <span className="font-medium text-slate-700 dark:text-slate-300">
-                      Order Date: {new Date().toLocaleDateString('en-GB', { 
-                        day: '2-digit', 
-                        month: '2-digit', 
-                        year: 'numeric' 
-                      })}
+                      Order Date: {creationDateISO ? new Date(creationDateISO).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }) : 'N/A'}
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-blue-600 dark:text-blue-400">🕒</span>
-                    <span className="font-medium text-slate-700 dark:text-slate-300">
-                      Time: {new Date().toLocaleTimeString('en-GB', { 
-                        hour: '2-digit', 
-                        minute: '2-digit'
-                      })}
-                    </span>
+                    <span className="font-medium text-slate-700 dark:text-slate-300">Time: {creationTime || 'N/A'}</span>
                   </div>
                 </div>
               </div>

@@ -62,15 +62,17 @@ const ExpensesCard: React.FC<{ currency: string; dateRange: { start: string; end
             const { data, error } = await supabase.from('expenses').select('*').order('date', { ascending: false });
             
             if (error) {
-                // If error, try localStorage fallback
-                try {
-                    const local = localStorage.getItem('app_expenses_v1');
-                    setExpenses(local ? JSON.parse(local) : []);
-                } catch {
-                    setExpenses([]);
-                }
+              // If error, try localStorage fallback and coerce amounts to numbers
+              try {
+                const local = localStorage.getItem('app_expenses_v1');
+                const parsed = local ? JSON.parse(local) : [];
+                setExpenses(Array.isArray(parsed) ? parsed.map((e: any) => ({ ...e, amount: Number(e?.amount) || 0 })) : []);
+              } catch {
+                setExpenses([]);
+              }
             } else {
-                setExpenses(data || []);
+              // Ensure amounts are numeric to avoid string concatenation in reduce
+              setExpenses((data || []).map((e: any) => ({ ...e, amount: Number(e?.amount) || 0 })));
             }
         } catch (error) {
             console.error('Error fetching expenses:', error);
@@ -86,17 +88,12 @@ const ExpensesCard: React.FC<{ currency: string; dateRange: { start: string; end
 
     // Filter expenses based on date range
     const filteredExpenses = useMemo(() => {
-        if (!dateRange.start && !dateRange.end) {
-            // If no date filter, show current month
-            const currentMonth = new Date().getMonth();
-            const currentYear = new Date().getFullYear();
-            return expenses.filter(expense => {
-                const expenseDate = new Date(expense.date);
-                return expenseDate.getMonth() === currentMonth && expenseDate.getFullYear() === currentYear;
-            });
-        }
+      if (!dateRange.start && !dateRange.end) {
+        // If no date filter, show ALL expenses (match Expenses page default behavior)
+        return expenses;
+      }
 
-        return expenses.filter(expense => {
+      return expenses.filter(expense => {
             const expenseDate = new Date(expense.date);
             
             if (dateRange.start && expenseDate < new Date(dateRange.start)) {
@@ -116,7 +113,7 @@ const ExpensesCard: React.FC<{ currency: string; dateRange: { start: string; end
     }, [expenses, dateRange]);
 
     // Calculate total expenses
-    const totalExpenses = filteredExpenses.reduce((sum, expense) => sum + (expense.amount || 0), 0);
+    const totalExpenses = filteredExpenses.reduce((sum, expense) => sum + (Number(expense?.amount) || 0), 0);
 
     // Calculate previous period for comparison
     const previousPeriodExpenses = useMemo(() => {
@@ -146,7 +143,7 @@ const ExpensesCard: React.FC<{ currency: string; dateRange: { start: string; end
         });
     }, [expenses, dateRange]);
 
-    const prevTotalExpenses = previousPeriodExpenses.reduce((sum, expense) => sum + (expense.amount || 0), 0);
+    const prevTotalExpenses = previousPeriodExpenses.reduce((sum, expense) => sum + (Number(expense?.amount) || 0), 0);
     
     // Calculate percentage change
     const expensesChange = prevTotalExpenses > 0 ? ((totalExpenses - prevTotalExpenses) / prevTotalExpenses) * 100 : 0;
@@ -190,15 +187,17 @@ const NetProfitCard: React.FC<{
             const { data, error } = await supabase.from('expenses').select('*').order('date', { ascending: false });
             
             if (error) {
-                // If error, try localStorage fallback
-                try {
-                    const local = localStorage.getItem('app_expenses_v1');
-                    setExpenses(local ? JSON.parse(local) : []);
-                } catch {
-                    setExpenses([]);
-                }
+              // If error, try localStorage fallback and coerce amounts to numbers
+              try {
+                const local = localStorage.getItem('app_expenses_v1');
+                const parsed = local ? JSON.parse(local) : [];
+                setExpenses(Array.isArray(parsed) ? parsed.map((e: any) => ({ ...e, amount: Number(e?.amount) || 0 })) : []);
+              } catch {
+                setExpenses([]);
+              }
             } else {
-                setExpenses(data || []);
+              // Ensure amounts are numeric
+              setExpenses((data || []).map((e: any) => ({ ...e, amount: Number(e?.amount) || 0 })));
             }
         } catch (error) {
             console.error('Error fetching expenses for net profit:', error);
@@ -214,17 +213,12 @@ const NetProfitCard: React.FC<{
 
     // Filter expenses based on date range (same logic as ExpensesCard)
     const filteredExpenses = useMemo(() => {
-        if (!dateRange.start && !dateRange.end) {
-            // If no date filter, show current month
-            const currentMonth = new Date().getMonth();
-            const currentYear = new Date().getFullYear();
-            return expenses.filter(expense => {
-                const expenseDate = new Date(expense.date);
-                return expenseDate.getMonth() === currentMonth && expenseDate.getFullYear() === currentYear;
-            });
-        }
+      if (!dateRange.start || !dateRange.end) {
+        // If no date filter, show ALL expenses (match Expenses page default behavior)
+        return expenses;
+      }
 
-        return expenses.filter(expense => {
+      return expenses.filter(expense => {
             const expenseDate = new Date(expense.date);
             
             if (dateRange.start && expenseDate < new Date(dateRange.start)) {
@@ -244,7 +238,7 @@ const NetProfitCard: React.FC<{
     }, [expenses, dateRange]);
 
     // Calculate total expenses for the period
-    const totalExpenses = filteredExpenses.reduce((sum, expense) => sum + (expense.amount || 0), 0);
+    const totalExpenses = filteredExpenses.reduce((sum, expense) => sum + (Number(expense?.amount) || 0), 0);
     
     // Calculate gross profit (Sales - Cost)
     const grossProfit = totalSales - totalCost;
@@ -370,13 +364,32 @@ export const Dashboard: React.FC = () => {
     const [selectedSalesRep, setSelectedSalesRep] = useState<string>('all');
     const [selectedCustomer, setSelectedCustomer] = useState<string>('all');
     const [selectedCategory, setSelectedCategory] = useState<string>('all');
+    // Date filters default: empty (no preselected start/end)
+    const now = new Date();
     const [dateRange, setDateRange] = useState({ start: '', end: '' });
+    const [monthFilter, setMonthFilter] = useState<string>('all');
     
     // Percentage calculator states
     const [showPercentageCalculator, setShowPercentageCalculator] = useState<boolean>(false);
     const [percentageInput, setPercentageInput] = useState<string>('');
 
     const currency = currentUser?.settings.currency || 'LKR';
+
+    const handleMonthChange = (value: string) => {
+      if (!value || value === 'all') {
+        // Show all months
+        setMonthFilter('all');
+        setDateRange({ start: '', end: '' });
+        return;
+      }
+      // value is YYYY-MM
+      const [y, m] = value.split('-').map(Number);
+      if (!y || !m) return;
+      const start = new Date(y, m - 1, 1).toISOString().split('T')[0];
+      const end = new Date(y, m, 0).toISOString().split('T')[0];
+      setMonthFilter(value);
+      setDateRange({ start, end });
+    };
 
     const accessibleSuppliers = useMemo(() => {
     if (currentUser?.role === UserRole.Sales && currentUser.assignedSupplierNames) {
@@ -601,14 +614,12 @@ export const Dashboard: React.FC = () => {
         return sum + orderCost;
       }, 0);
 
-      // Compute margin-based cost (using marginPrice when available, otherwise fall back to costPrice)
+      // Compute margin-based cost using marginPrice only (missing margin treated as 0)
       const marginCost = data.orders.reduce((sum, order) => {
         if (!order.orderItems) return sum;
         const orderMargin = order.orderItems.reduce((itemSum, item) => {
           const product = safeProducts.find(p => p.id === item.productId);
-          const margin = (typeof product?.marginPrice === 'number' && product.marginPrice > 0)
-            ? product.marginPrice
-            : (typeof product?.costPrice === 'number' ? product.costPrice : 0);
+          const margin = (typeof product?.marginPrice === 'number') ? product.marginPrice : 0;
           const totalQty = (Number(item.quantity) || 0) + (Number(item.free) || 0);
           return itemSum + (margin * totalQty);
         }, 0);
@@ -662,7 +673,7 @@ export const Dashboard: React.FC = () => {
     }, 0);
 
   // Total Margin (sum of per-product marginPrice * quantity) for delivered orders.
-  // Falls back to costPrice when marginPrice is not set for a product.
+  // Use marginPrice only; if marginPrice is missing, treat it as 0.
   const totalMargin = filteredOrders.reduce((sum, order) => {
     if (order.status !== OrderStatus.Delivered) return sum;
     if (!order.orderItems) return sum;
@@ -670,7 +681,7 @@ export const Dashboard: React.FC = () => {
       const product = safeProducts.find(p => p.id === item.productId);
       const marginPrice = (typeof product?.marginPrice === 'number' && !isNaN(product.marginPrice))
         ? product.marginPrice
-        : (typeof product?.costPrice === 'number' && !isNaN(product.costPrice) ? product.costPrice : 0);
+        : 0;
       const totalQty = (Number(item.quantity) || 0) + (Number(item.free) || 0);
       return itemSum + (marginPrice * totalQty);
     }, 0);
@@ -1138,7 +1149,7 @@ export const Dashboard: React.FC = () => {
             <div className="flex justify-between items-start">
               <div>
                 <StatValue amount={totalMargin} currency={currency} colorClass="text-yellow-600 dark:text-yellow-400" />
-                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Margin = sum(item.marginPrice * quantity) for Delivered orders (falls back to costPrice)</p>
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Margin = sum(item.marginPrice * quantity) for Delivered orders (uses marginPrice only; missing margin treated as 0)</p>
               </div>
             </div>
             <div className="flex justify-end mt-4">
@@ -1349,16 +1360,16 @@ export const Dashboard: React.FC = () => {
               <CardTitle className="text-teal-700 dark:text-teal-300">Total Profit</CardTitle>
             </CardHeader>
             <CardContent className="flex-1 flex flex-col justify-between">
-              <div className="flex justify-between items-start">
-                <div>
-                  <StatValue amount={totalSales - totalCost} currency={currency} colorClass="text-teal-600 dark:text-teal-400" />
-                  <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Profit = Total Delivered Sales - Delivered Cost (respecting current filters)</p>
+                <div className="flex justify-between items-start">
+                  <div>
+                    <StatValue amount={totalSales - totalMargin} currency={currency} colorClass="text-teal-600 dark:text-teal-400" />
+                    <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Profit = Total Delivered Sales - Total Margin (respecting current filters)</p>
+                  </div>
                 </div>
-              </div>
-              <div className="flex justify-end mt-4">
-                <ChangeIndicator change={calculateChange(totalSales - totalCost, 0)} />
-              </div>
-            </CardContent>
+                <div className="flex justify-end mt-4">
+                  <ChangeIndicator change={calculateChange(totalSales - totalMargin, 0)} />
+                </div>
+              </CardContent>
           </Card>
         )}
         <ExpensesCard currency={currency} dateRange={dateRange} />

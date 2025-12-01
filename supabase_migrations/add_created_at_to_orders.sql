@@ -13,8 +13,11 @@ UPDATE orders
 SET created_at = COALESCE(
   -- Try to parse orderdate as timestamp
   CASE 
-    WHEN orderdate IS NOT NULL AND orderdate != '' 
-    THEN (orderdate || ' 00:00:00')::TIMESTAMP WITH TIME ZONE
+    -- Avoid comparing a date column to an empty string (''), which forces
+    -- Postgres to attempt to cast ''::date and fails. Cast `orderdate` to
+    -- text for the emptiness check instead.
+    WHEN orderdate IS NOT NULL AND orderdate::text <> ''
+    THEN (orderdate::text || ' 00:00:00')::TIMESTAMP WITH TIME ZONE
     ELSE NOW()
   END
 )

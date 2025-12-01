@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Product, UserRole } from '../../types';
+import { Product, UserRole, OrderStatus } from '../../types';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { Modal } from '../ui/Modal';
@@ -229,7 +229,8 @@ export const Products: React.FC = () => {
           name: currentProduct.name,
           category: currentProduct.category,
           price: currentProduct.price,
-          marginprice: currentProduct.marginPrice ?? currentProduct.costPrice,
+          // Persist marginPrice only; do NOT use costPrice as fallback
+          marginprice: currentProduct.marginPrice ?? null,
           // Persist edited cost price when updating product
           costprice: currentProduct.costPrice,
           stock: currentProduct.stock,
@@ -320,6 +321,25 @@ export const Products: React.FC = () => {
 
     return matchesCategory && matchesSearch;
   });
+
+  // Compute sold quantities per product from delivered orders
+  const soldQtyMap = useMemo(() => {
+    const map = new Map<string, number>();
+    try {
+      if (!orders || orders.length === 0) return map;
+      const delivered = orders.filter(o => (o.status || '').toString() === OrderStatus.Delivered);
+      for (const ord of delivered) {
+        (ord.orderItems || []).forEach((it: any) => {
+          if (!it || !it.productId) return;
+          const qty = Number(it.quantity) || 0;
+          map.set(it.productId, (map.get(it.productId) || 0) + qty);
+        });
+      }
+    } catch (err) {
+      console.error('Error building soldQtyMap:', err);
+    }
+    return map;
+  }, [orders]);
 
   const productsBySupplier = useMemo(() => {
     return filteredProducts.reduce((acc, product) => {
@@ -594,6 +614,7 @@ export const Products: React.FC = () => {
                               <th scope="col" className="px-6 py-3">Product</th>
                               <th scope="col" className="px-6 py-3">Category</th>
                               <th scope="col" className="px-6 py-3">Price</th>
+                              <th scope="col" className="px-6 py-3">Sold</th>
                                 {canEdit && <th scope="col" className="px-6 py-3">Cost Price</th>}
                                 {canEdit && <th scope="col" className="px-6 py-3">Margin Price</th>}
                               <th scope="col" className="px-6 py-3">Pending</th>
@@ -619,6 +640,9 @@ export const Products: React.FC = () => {
                                 </td>
                                 <td className="px-6 py-4">{product.category}</td>
                                 <td className="px-6 py-4">{formatCurrency(product.price, currency)}</td>
+                                <td className="px-6 py-4 text-right">
+                                  <span className="font-mono text-sm text-slate-700 dark:text-slate-200">{soldQtyMap.get(product.id) || 0}</span>
+                                </td>
                                 {canEdit && <td className="px-6 py-4">{formatCurrency(product.costPrice || 0, currency)}</td>}
                                 {canEdit && <td className="px-6 py-4">{formatCurrency(product.marginPrice || 0, currency)}</td>}
                                 <td className="px-6 py-4 text-right">
@@ -678,6 +702,7 @@ export const Products: React.FC = () => {
                                 </Badge>
                                 
                                 <div className="text-xs text-rose-500 font-mono">Pending: {pendingQtyMap.get(product.id) || 0}</div>
+                                <div className="text-xs text-slate-500 font-mono">Sold: {soldQtyMap.get(product.id) || 0}</div>
                               </div>
                             </div>
                             

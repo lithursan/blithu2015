@@ -10,9 +10,10 @@ ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
 UPDATE orders 
 SET created_at = (
   CASE 
-    WHEN orderdate IS NOT NULL AND orderdate != '' THEN
+    -- Cast `orderdate` to text for the emptiness check to avoid INVALID input syntax
+    WHEN orderdate IS NOT NULL AND orderdate::text <> '' THEN
       -- Create varied times based on order ID to spread throughout the day (8 AM to 8 PM)
-      (orderdate || ' ' || 
+      (orderdate::text || ' ' || 
         LPAD((8 + (ABS(HASHTEXT(id)) % 12))::text, 2, '0') || ':' ||  -- Hours 8-19
         LPAD((ABS(HASHTEXT(id || 'min')) % 60)::text, 2, '0') || ':' || -- Minutes 0-59
         LPAD((ABS(HASHTEXT(id || 'sec')) % 60)::text, 2, '0')          -- Seconds 0-59

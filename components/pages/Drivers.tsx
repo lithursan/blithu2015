@@ -966,9 +966,9 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
                         name: row.name,
                         category: row.category,
                         price: row.price,
-                        // Read marginPrice if available, otherwise fall back to costprice
+                        // Read marginPrice from DB only (do NOT fall back to costprice)
                         marginPrice: row.marginprice == null || isNaN(Number(row.marginprice))
-                            ? (row.costprice == null || isNaN(Number(row.costprice)) ? undefined : Number(row.costprice))
+                            ? undefined
                             : Number(row.marginprice),
                         costPrice: row.costprice !== undefined ? Number(row.costprice) : undefined,
                         stock: row.stock,
@@ -1172,8 +1172,9 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
                     name: row.name,
                     category: row.category,
                     price: row.price,
+                    // Read marginPrice from DB only (do NOT fall back to costprice)
                     marginPrice: row.marginprice == null || isNaN(Number(row.marginprice))
-                        ? (row.costprice == null || isNaN(Number(row.costprice)) ? undefined : Number(row.costprice))
+                        ? undefined
                         : Number(row.marginprice),
                     costPrice: row.costprice !== undefined ? Number(row.costprice) : undefined,
                     stock: row.stock,
