@@ -5,10 +5,11 @@ import { useData } from '../../contexts/DataContext';
 import { Switch } from '../ui/Switch';
 
 interface HeaderProps {
-    toggleSidebar: () => void;
+  toggleSidebar: () => void;
+  isSidebarOpen?: boolean;
 }
 
-export const Header: React.FC<HeaderProps> = ({ toggleSidebar }) => {
+export const Header: React.FC<HeaderProps> = ({ toggleSidebar, isSidebarOpen = false }) => {
     const themeContext = useContext(ThemeContext);
     if (!themeContext) {
         throw new Error("Header must be used within a ThemeProvider");
@@ -26,6 +27,7 @@ export const Header: React.FC<HeaderProps> = ({ toggleSidebar }) => {
           onClick={toggleSidebar} 
           className="lg:hidden p-2 -ml-2 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
           aria-label="Toggle sidebar"
+          aria-expanded={isSidebarOpen}
         >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16m-7 6h7" />

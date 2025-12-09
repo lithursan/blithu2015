@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 import { NAV_ITEMS } from '../../constants';
 import { useAuth } from '../../contexts/AuthContext';
@@ -22,6 +22,21 @@ export const Sidebar: React.FC<SidebarProps> = ({ isSidebarOpen, closeSidebar })
   const { currentUser } = useAuth();
   const { upcomingChequesCount = 0, overdueCreditsCount = 0, warningCreditsCount = 0 } = useData();
 
+  const [isLarge, setIsLarge] = useState<boolean>(typeof window !== 'undefined' ? window.innerWidth >= 1024 : false);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const onChange = (e: MediaQueryListEvent) => setIsLarge(e.matches);
+    // set initial
+    setIsLarge(mq.matches);
+    if (mq.addEventListener) mq.addEventListener('change', onChange);
+    else mq.addListener(onChange);
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener('change', onChange);
+      else mq.removeListener(onChange);
+    };
+  }, []);
+
   const accessibleNavItems = NAV_ITEMS.filter(item => {
     // Allow cheques access for Admin, Secretary and Manager
     if (item.path === '/cheques' || item.path === '/issued-cheques') {
@@ -33,14 +48,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ isSidebarOpen, closeSidebar })
       return currentUser?.role === UserRole.Admin;
     }
     
-    // Accounting system - Admin only access
-    if (item.path === '/accounting' || item.path === '/chart-of-accounts' || item.path === '/journal-entries') {
-      return currentUser?.role === UserRole.Admin;
-    }
+    // Other role-based visibility rules are handled above; accounting pages were removed from routes
     
     // Allow deliveries and expenses to Admin, Secretary and Manager
     if (item.path === '/deliveries' || item.path === '/expenses') {
       return currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Secretary || currentUser?.role === UserRole.Manager;
+    }
+    // Partner Investment: Admin only
+    if (item.path === '/partner-investment') {
+      return currentUser?.role === UserRole.Admin;
     }
     // My Location is only for Sales Reps and Drivers
     if (item.path === '/my-location') {
@@ -50,12 +66,16 @@ export const Sidebar: React.FC<SidebarProps> = ({ isSidebarOpen, closeSidebar })
     if (item.path === '/map') {
       return currentUser?.role === UserRole.Driver || currentUser?.role === UserRole.Sales || currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Secretary || currentUser?.role === UserRole.Manager;
     }
-    // Make Settings visible to Admins, Secretary and Managers
+    // Make Settings visible to any authenticated user
     if (item.path === '/settings') {
+      return !!currentUser;
+    }
+    if (item.path === '/drivers' || item.path === '/suppliers') {
       return currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Secretary || currentUser?.role === UserRole.Manager;
     }
-    if (item.path === '/drivers' || item.path === '/suppliers' || item.path === '/collections') {
-      return currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Secretary || currentUser?.role === UserRole.Manager;
+    // Collections: Admin/Secretary/Manager can manage; Sales Reps and Drivers can view-only
+    if (item.path === '/collections') {
+      return currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Secretary || currentUser?.role === UserRole.Manager || currentUser?.role === UserRole.Sales || currentUser?.role === UserRole.Driver;
     }
     // Cheque alerts settings only for Admin
     
@@ -63,8 +83,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ isSidebarOpen, closeSidebar })
   });
 
 
+  const hiddenOnMobile = !isSidebarOpen && !isLarge;
+
   return (
-  <aside className={`fixed inset-y-0 left-0 z-30 w-64 sm:w-72 lg:w-64 bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 transform transition-transform duration-300 ease-in-out ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 lg:fixed lg:inset-y-0 lg:left-0 flex flex-col`}> 
+  <aside
+    aria-hidden={hiddenOnMobile}
+    className={`fixed inset-y-0 left-0 z-30 w-64 sm:w-72 lg:w-64 bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 transform transition-transform duration-300 ease-in-out ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 lg:fixed lg:inset-y-0 lg:left-0 flex flex-col`}
+  >
       <div className="flex items-center justify-center h-16 sm:h-20 border-b border-slate-200 dark:border-slate-700 px-3 sm:px-4 flex-shrink-0">
         <div className="relative w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-blue-500 to-blue-700 dark:from-blue-400 dark:to-blue-600 rounded-xl shadow-lg flex items-center justify-center">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-6 w-6 sm:h-7 sm:w-7 text-white">

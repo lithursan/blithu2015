@@ -193,6 +193,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                         chequeBalance: row.chequebalance == null || isNaN(Number(row.chequebalance)) ? 0 : Number(row.chequebalance),
                         creditBalance: row.creditbalance == null || isNaN(Number(row.creditbalance)) ? 0 : Number(row.creditbalance),
                         returnAmount: row.returnamount == null || isNaN(Number(row.returnamount)) ? 0 : Number(row.returnamount),
+                            totalCostPrice: row.total_cost_price == null && row.totalcostprice == null ? 0 : (row.total_cost_price ?? row.totalcostprice ?? 0),
+                            totalMarginPrice: row.total_margin_price == null && row.totalmarginprice == null ? 0 : (row.total_margin_price ?? row.totalmarginprice ?? 0),
                     } as Order;
                 });
                 // Deduplicate orders by id (prefer) to avoid UI duplicates

@@ -290,6 +290,8 @@ export const Orders: React.FC = () => {
   const [productSearchTerm, setProductSearchTerm] = useState('');
   const [deliveryDateFilter, setDeliveryDateFilter] = useState('');
   const [dateRangeFilter, setDateRangeFilter] = useState<'today' | 'this_week' | 'this_month' | 'all'>(currentUser?.role === UserRole.Driver ? 'today' : 'all');
+  const [selectedSalesRep, setSelectedSalesRep] = useState<string>('all');
+  const [selectedSupplier, setSelectedSupplier] = useState<string>('all');
   
   const [modalState, setModalState] = useState<'closed' | 'create' | 'edit'>('closed');
   const [currentOrder, setCurrentOrder] = useState<Order | null>(null);
@@ -304,6 +306,9 @@ export const Orders: React.FC = () => {
   const [heldItems, setHeldItems] = useState<Set<string>>(new Set());
   const [orderToDelete, setOrderToDelete] = useState<Order | null>(null);
   const [viewingOrder, setViewingOrder] = useState<Order | null>(null);
+  // Admin-only: selected orders for bulk actions
+  const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [isPrintPreviewOpen, setIsPrintPreviewOpen] = useState(false);
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState<string>('');
   const [deliveryAddress, setDeliveryAddress] = useState<string>('');
@@ -344,6 +349,173 @@ export const Orders: React.FC = () => {
   );
   
   const canDelete = useMemo(() => currentUser?.role === UserRole.Admin, [currentUser]);
+
+  const norm = (s?: string) => (String(s || '').trim().toLowerCase());
+
+  const toggleSelectOrder = (id: string) => {
+    setSelectedOrderIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+
+  // Keep previous product cost/margin snapshot to detect changes
+  const prevProductsRef = React.useRef<Record<string, { cost: number | null; margin: number | null }>>({});
+
+  // When product cost/margin values change on the Product page, propagate to orders (only for non-delivered orders)
+  useEffect(() => {
+    // Build current snapshot
+    const currentSnapshot: Record<string, { cost: number | null; margin: number | null }> = {};
+    (products || []).forEach((p: any) => {
+      currentSnapshot[p.id] = { cost: p.costPrice != null ? Number(p.costPrice) : null, margin: p.marginPrice != null ? Number(p.marginPrice) : null };
+    });
+
+    // Determine changed product ids
+    const prevSnapshot = prevProductsRef.current || {};
+    const changedProductIds: string[] = [];
+    Object.keys(currentSnapshot).forEach(pid => {
+      const prev = prevSnapshot[pid];
+      const cur = currentSnapshot[pid];
+      if (!prev || prev.cost !== cur.cost || prev.margin !== cur.margin) changedProductIds.push(pid);
+    });
+
+    if (changedProductIds.length === 0) {
+      // update ref and skip
+      prevProductsRef.current = currentSnapshot;
+      return;
+    }
+
+    (async () => {
+      try {
+        // Find orders that reference changed products and are NOT Delivered
+        const affectedOrders = (orders || []).filter((o: any) => o.status !== OrderStatus.Delivered && Array.isArray(o.orderItems) && o.orderItems.some((it: any) => changedProductIds.includes(it.productId)));
+
+        for (const ord of affectedOrders) {
+          const newItems = (ord.orderItems || []).map((it: any) => {
+            const prod = products.find((p: any) => p.id === it.productId);
+            const newCost = prod && prod.costPrice != null ? Number(prod.costPrice) : null;
+            const newMargin = prod && prod.marginPrice != null ? Number(prod.marginPrice) : null;
+            // Only modify if changed
+            if ((it.costPrice ?? null) !== newCost || (it.marginPrice ?? null) !== newMargin) {
+              return { ...it, costPrice: newCost, marginPrice: newMargin };
+            }
+            return it;
+          });
+
+          // Persist only if there is a difference
+          if (JSON.stringify(newItems) !== JSON.stringify(ord.orderItems || [])) {
+            try {
+              // compute totals for the order
+              const totalCost = (newItems || []).reduce((s: number, it: any) => s + ((it.costPrice != null ? Number(it.costPrice) : 0) * (it.quantity || 0)), 0);
+              const totalMargin = (newItems || []).reduce((s: number, it: any) => s + ((it.marginPrice != null ? Number(it.marginPrice) : 0) * (it.quantity || 0)), 0);
+              const { error } = await supabase.from('orders').update({ orderitems: newItems, total_cost_price: totalCost, total_margin_price: totalMargin }).eq('id', ord.id);
+              if (error) {
+                console.error('Failed to update order items for order', ord.id, error);
+                continue;
+              }
+              // Update local state
+              setOrders(prev => prev.map((o: any) => o.id === ord.id ? { ...o, orderItems: newItems, totalCostPrice: totalCost, totalMarginPrice: totalMargin } : o));
+              if (viewingOrder && viewingOrder.id === ord.id) setViewingOrder((vo: any) => ({ ...vo, orderItems: newItems, totalCostPrice: totalCost, totalMarginPrice: totalMargin } as any));
+            } catch (e) {
+              console.error('Unexpected error updating order items for order', ord.id, e);
+            }
+          }
+        }
+
+        // Refresh global caches so dashboard totals update
+        try { await refetchData(); } catch (e) { console.warn('refetchData failed after product-change propagation', e); }
+      } finally {
+        prevProductsRef.current = currentSnapshot;
+      }
+    })();
+  }, [products]);
+
+  // Persist per-item costPrice and marginPrice into the orders table
+  const handleSaveCostMargin = async () => {
+    if (!viewingOrder) return;
+    // Do not allow updating cost/margin for already delivered orders
+    if (viewingOrder.status === OrderStatus.Delivered) {
+      alert('Cannot update cost or margin for an order that is already Delivered.');
+      return;
+    }
+
+    try {
+      // Build new order items with costPrice and marginPrice from products lookup
+      const newOrderItems = (viewingOrder.orderItems || []).map((it: any) => {
+        const product = products.find(p => p.id === it.productId);
+        return {
+          ...it,
+          // Persist numeric values or null when unavailable
+          costPrice: product && product.costPrice != null ? Number(product.costPrice) : null,
+          marginPrice: product && product.marginPrice != null ? Number(product.marginPrice) : null,
+        };
+      });
+
+      const totalCost = (newOrderItems || []).reduce((s: number, it: any) => s + ((it.costPrice != null ? Number(it.costPrice) : 0) * (it.quantity || 0)), 0);
+      const totalMargin = (newOrderItems || []).reduce((s: number, it: any) => s + ((it.marginPrice != null ? Number(it.marginPrice) : 0) * (it.quantity || 0)), 0);
+
+      const { error } = await supabase.from('orders').update({ orderitems: newOrderItems, total_cost_price: totalCost, total_margin_price: totalMargin }).eq('id', viewingOrder.id);
+      if (error) {
+        console.error('Failed to save cost/margin into order:', error);
+        alert('Failed to save cost & margin. See console for details.');
+        return;
+      }
+
+      // Update local state so UI reflects saved values
+      setViewingOrder(prev => prev ? { ...prev, orderItems: newOrderItems, totalCostPrice: totalCost, totalMarginPrice: totalMargin } : prev);
+      setOrders(prev => prev.map(o => o.id === viewingOrder.id ? { ...o, orderItems: newOrderItems, totalCostPrice: totalCost, totalMarginPrice: totalMargin } : o));
+
+      // Refresh global caches to update dashboard totals
+      try { await refetchData(); } catch (e) { console.warn('refetchData failed after saving cost/margin', e); }
+
+      alert('Cost & Margin saved to database for this order. Dashboard totals will reflect after refresh.');
+    } catch (e) {
+      console.error('Unexpected error saving cost/margin:', e);
+      alert('Unexpected error while saving cost & margin. Check console.');
+    }
+  };
+
+  const toggleSelectAllVisible = () => {
+    try {
+      if (!filteredOrders || filteredOrders.length === 0) {
+        setSelectedOrderIds([]);
+        return;
+      }
+      const visibleIds = filteredOrders.map(o => o.id);
+      const allSelected = visibleIds.every(id => selectedOrderIds.includes(id));
+      setSelectedOrderIds(allSelected ? [] : visibleIds);
+    } catch (e) {
+      console.warn('Failed to toggle select all visible orders:', e);
+    }
+  };
+
+  const clearSelection = () => setSelectedOrderIds([]);
+
+  const handleBulkDelete = async () => {
+    if (!canDelete || selectedOrderIds.length === 0) return;
+    // Require admin password confirmation before performing bulk delete
+    const pw = window.prompt(`Enter admin password to confirm bulk delete (enter 1234):`);
+    if (pw === null) return; // user cancelled
+    if ((pw || '').trim() !== '1234') {
+      alert('Incorrect password. Bulk delete cancelled.');
+      return;
+    }
+    if (!confirm(`Delete ${selectedOrderIds.length} selected orders? This cannot be undone.`)) return;
+    setIsBulkDeleting(true);
+    try {
+      const { error } = await supabase.from('orders').delete().in('id', selectedOrderIds);
+      if (error) {
+        alert('Bulk delete failed: ' + error.message);
+        return;
+      }
+      const freshOrders = await fetchOrders();
+      if (freshOrders) setOrders(freshOrders);
+      clearSelection();
+      alert('Selected orders deleted successfully');
+    } catch (e) {
+      console.error('Bulk delete error:', e);
+      alert('Unexpected error while deleting orders. See console.');
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  };
 
   // GPS Location Capture Function
   const captureCurrentLocation = () => {
@@ -403,10 +575,19 @@ export const Orders: React.FC = () => {
 
   const accessibleSuppliers = useMemo(() => {
     if (currentUser?.role === UserRole.Sales && currentUser.assignedSupplierNames) {
-        return new Set(currentUser.assignedSupplierNames);
+        return new Set((currentUser.assignedSupplierNames || []).map((n: string) => norm(n)));
     }
     return null; // null means all access for Admin/Manager
   }, [currentUser]);
+
+  const supplierOptions = useMemo(() => {
+    try {
+      const list = products.map(p => p.supplier).filter(Boolean);
+      return ['all', ...Array.from(new Set(list))];
+    } catch {
+      return ['all'];
+    }
+  }, [products]);
 
   // Helper function to get driver allocated stock for a product
   const getDriverAllocatedStock = (productId: string): number => {
@@ -489,7 +670,7 @@ export const Orders: React.FC = () => {
     
     // Role-based filtering
     if (accessibleSuppliers) {
-      filteredProducts = filteredProducts.filter(p => accessibleSuppliers.has(p.supplier));
+      filteredProducts = filteredProducts.filter(p => accessibleSuppliers.has(norm(p.supplier)));
     }
     
     // Search filtering for product modal
@@ -510,14 +691,14 @@ export const Orders: React.FC = () => {
 
     // Role-based filtering
     if (currentUser?.role === UserRole.Sales && currentUser.assignedSupplierNames) {
-        const accessibleSuppliers = new Set(currentUser.assignedSupplierNames);
-        const productSupplierMap = new Map(products.map(p => [p.id, p.supplier]));
-        displayOrders = displayOrders.filter(order => 
-            order.orderItems.some(item => {
-                const supplier = productSupplierMap.get(item.productId);
-                return supplier && accessibleSuppliers.has(supplier);
-            })
-        );
+      const accessibleSuppliers = new Set((currentUser.assignedSupplierNames || []).map((n: string) => norm(n)));
+      const productSupplierMap = new Map(products.map(p => [p.id, norm(p.supplier)]));
+      displayOrders = displayOrders.filter(order => 
+        order.orderItems.some(item => {
+          const supplier = productSupplierMap.get(item.productId);
+          return supplier && accessibleSuppliers.has(supplier);
+        })
+      );
     } 
     
     // Filter orders based on user role
@@ -533,6 +714,21 @@ export const Orders: React.FC = () => {
     // Status filter
     if (statusFilter !== 'all') {
       displayOrders = displayOrders.filter(order => order.status === statusFilter);
+    }
+
+    // Sales Rep filter (Admin only)
+    if (selectedSalesRep && selectedSalesRep !== 'all') {
+      displayOrders = displayOrders.filter(order => String(order.assignedUserId) === String(selectedSalesRep));
+    }
+
+    // Supplier filter (Admin only) - determine primary supplier for order items
+    if (selectedSupplier && selectedSupplier !== 'all') {
+      const productSupplierMap = new Map(products.map(p => [p.id, norm(p.supplier)]));
+      const wanted = norm(selectedSupplier as string);
+      displayOrders = displayOrders.filter(order => {
+        if (!order.orderItems || !Array.isArray(order.orderItems)) return false;
+        return order.orderItems.some((item: any) => productSupplierMap.get(item.productId) === wanted);
+      });
     }
 
     // Search filter
@@ -610,7 +806,7 @@ export const Orders: React.FC = () => {
       }
       return pa - pb;
     });
-  }, [orders, products, statusFilter, searchTerm, currentUser, deliveryDateFilter, dateRangeFilter]);
+  }, [orders, products, statusFilter, searchTerm, currentUser, deliveryDateFilter, dateRangeFilter, selectedSalesRep, selectedSupplier]);
     
   const ordersBySupplier = useMemo(() => {
     return filteredOrders.reduce((acc, order) => {
@@ -876,6 +1072,9 @@ export const Orders: React.FC = () => {
           quantity, 
           price: price,
           free: freeQuantity, // Include free quantity in regular order item
+          // Snapshot product prices at time of order so historical orders keep original values
+          costPrice: product?.costPrice !== undefined ? product.costPrice : undefined,
+          marginPrice: product?.marginPrice !== undefined ? product.marginPrice : undefined,
         });
       }
     });
@@ -899,42 +1098,24 @@ export const Orders: React.FC = () => {
         return;
       }
 
-      // Generate unique order ID using database function (safer than client-side calculation)
-      let newOrderId: string;
-      try {
-        const { data: idResult, error: idError } = await supabase.rpc('generate_next_order_id');
-        if (idError || !idResult) {
-          console.warn('Database ID generation failed, using fallback method:', idError);
-          // Fallback to client-side generation with timestamp for uniqueness
-          const maxIdNum = orders.reduce((max, order) => {
-            const num = parseInt(order.id.replace('ORD', ''), 10);
-            return num > max ? num : max;
-          }, 0);
-          const timestamp = Date.now().toString().slice(-3); // Last 3 digits of timestamp
-          newOrderId = `ORD${(maxIdNum + 1).toString().padStart(3, '0')}_${timestamp}`;
-        } else {
-          newOrderId = idResult;
-        }
-      } catch (error) {
-        console.warn('Error generating order ID:', error);
-        // Ultimate fallback with UUID-like suffix
-        const maxIdNum = orders.reduce((max, order) => {
-          const num = parseInt(order.id.replace('ORD', ''), 10);
-          return num > max ? num : max;
-        }, 0);
-        const randomSuffix = Math.random().toString(36).substr(2, 4).toUpperCase();
-        newOrderId = `ORD${(maxIdNum + 1).toString().padStart(3, '0')}_${randomSuffix}`;
+      // If the order contains items from multiple suppliers, split into
+      // one order per supplier so supplier-specific processing remains clean.
+      // Build product -> supplier (normalized) map
+      const productSupplierMap = new Map(products.map(p => [p.id, norm(p.supplier)]));
+
+      const itemsBySupplier = new Map<string, OrderItem[]>();
+      const backBySupplier = new Map<string, OrderItem[]>();
+
+      for (const it of newOrderItems) {
+        const supplier = productSupplierMap.get(it.productId) || 'Unassigned';
+        if (!itemsBySupplier.has(supplier)) itemsBySupplier.set(supplier, []);
+        itemsBySupplier.get(supplier)!.push(it);
       }
-
-      // compute cost amount from products' costPrice * qty (for inventory cost tracking)
-      const costAmount = newOrderItems.reduce((sum, item) => {
-        const prod = products.find(p => p.id === item.productId);
-        // Use marginPrice only (no fallback to costPrice)
-        const cp = prod ? (typeof prod.marginPrice === 'number' ? prod.marginPrice : 0) : 0;
-        return sum + (cp * (item.quantity || 0));
-      }, 0);
-
-      // --- New validation: ensure (stock - pending) >= requested qty for each product ---
+      for (const it of newBackorderedItems) {
+        const supplier = productSupplierMap.get(it.productId) || 'Unassigned';
+        if (!backBySupplier.has(supplier)) backBySupplier.set(supplier, []);
+        backBySupplier.get(supplier)!.push(it);
+      }
       // Build pending map from existing orders (exclude currentOrder when editing)
       const pendingMap = new Map<string, number>();
       try {
@@ -983,6 +1164,191 @@ export const Orders: React.FC = () => {
       } catch (e) {
         console.warn('Failed to parse modal creation date/time, falling back to now', e);
       }
+
+      // If multiple suppliers are present, split into supplier-specific orders
+      const supplierKeys = Array.from(new Set([...Array.from(itemsBySupplier.keys()), ...Array.from(backBySupplier.keys())]));
+      if (supplierKeys.length > 1) {
+        const optimisticOrders: any[] = [];
+
+        // Generate a single base order id and append supplier suffixes (_P1, _P2 ...)
+        let baseOrderId = '';
+        try {
+          const { data: idResult, error: idError } = await supabase.rpc('generate_next_order_id');
+          if (idError || !idResult) {
+            const maxIdNum = orders.reduce((max, order) => {
+              const num = parseInt(order.id.replace('ORD', ''), 10);
+              return num > max ? num : max;
+            }, 0);
+            // produce a clean base id like ORD250 (no extra suffix)
+            baseOrderId = `ORD${(maxIdNum + 1).toString().padStart(3, '0')}`;
+          } else {
+            // If RPC returned a variant like ORD250_511, strip any trailing suffix and keep the base (ORD250)
+            const asStr = String(idResult);
+            baseOrderId = asStr.split('_')[0];
+          }
+        } catch (err) {
+          const maxIdNum = orders.reduce((max, order) => {
+            const num = parseInt(order.id.replace('ORD', ''), 10);
+            return num > max ? num : max;
+          }, 0);
+          baseOrderId = `ORD${(maxIdNum + 1).toString().padStart(3, '0')}`;
+        }
+
+        for (let i = 0; i < supplierKeys.length; i++) {
+          const supplier = supplierKeys[i];
+          const items = itemsBySupplier.get(supplier) || [];
+          const backs = backBySupplier.get(supplier) || [];
+          const orderIdForSupplier = `${baseOrderId}_P${i + 1}`;
+
+          const groupTotal = items.reduce((s, it) => s + ((it.price || 0) * (it.quantity || 0)), 0);
+          const groupCostAmount = items.reduce((s, it) => {
+            const prod = products.find(p => p.id === it.productId);
+            const itemCost = (it as any).costPrice !== undefined && typeof (it as any).costPrice === 'number'
+              ? (it as any).costPrice
+              : (prod ? (typeof prod.costPrice === 'number' ? prod.costPrice : 0) : 0);
+            return s + (itemCost * (it.quantity || 0));
+          }, 0);
+
+          const payload: any = {
+            id: orderIdForSupplier,
+            customerid: customer.id,
+            customername: customer.name,
+            assigneduserid: currentUser?.id ?? '',
+            orderitems: JSON.stringify(items),
+            backordereditems: JSON.stringify(backs),
+            method: '',
+            expecteddeliverydate: expectedDeliveryDate || null,
+            deliveryaddress: deliveryAddress || null,
+            orderdate: expectedDeliveryDate ? expectedDeliveryDate : createdAtIso,
+            created_at: createdAtIso,
+            totalamount: groupTotal,
+            costamount: groupCostAmount,
+            status: OrderStatus.Pending,
+            notes: orderNotes || '',
+            chequebalance: 0,
+            creditbalance: 0,
+          };
+
+          // Safe insert
+          const safeInsert = ((({ costamount, created_at, ...rest }) => rest)(payload));
+          try {
+            const { data: insertData, error } = await supabase.from('orders').insert([safeInsert]).select('*');
+            if (error) {
+              const { data: insertData2, error: err2 } = await supabase.from('orders').insert([payload]).select('*');
+              if (err2) {
+                console.error('Failed to insert supplier order:', err2);
+                alert('Error adding order for supplier ' + supplier + ': ' + err2.message);
+                return;
+              }
+            }
+            try {
+              const optionalPatch: any = {};
+              if (payload.costamount !== undefined) optionalPatch.costamount = payload.costamount;
+              if (payload.created_at !== undefined) optionalPatch.created_at = payload.created_at;
+              if (payload.deliveryaddress !== undefined) optionalPatch.deliveryaddress = payload.deliveryaddress;
+              if (Object.keys(optionalPatch).length > 0) {
+                await supabase.from('orders').update(optionalPatch).eq('id', orderIdForSupplier);
+              }
+            } catch (e) {
+              console.warn('Optional patch failed for supplier order:', e);
+            }
+          } catch (e) {
+            console.error('Unexpected insert exception for supplier order:', e);
+            alert('Unexpected error adding order. Check console for details.');
+            return;
+          }
+
+          optimisticOrders.push({
+            id: orderIdForSupplier,
+            customerId: customer.id,
+            customerName: customer.name,
+            date: payload.orderdate,
+            created_at: createdAtIso,
+            total: payload.totalamount,
+            status: payload.status,
+            paymentMethod: payload.method,
+            notes: payload.notes,
+            assignedUserId: payload.assigneduserid,
+            orderItems: items,
+            backorderedItems: backs,
+            chequeBalance: 0,
+            creditBalance: 0,
+            returnAmount: 0,
+          });
+        }
+
+        // Optimistic update
+        try {
+          setOrders(prev => {
+            const byId = new Map<string, Order>();
+            prev.forEach(o => byId.set(o.id, o));
+            optimisticOrders.forEach(o => byId.set(o.id, o as Order));
+            return Array.from(byId.values()).sort((a, b) => new Date((b.date as string) || '').getTime() - new Date((a.date as string) || '').getTime());
+          });
+        } catch (e) {
+          console.warn('Optimistic multi-order insert failed:', e);
+        }
+
+        const freshOrders = await fetchOrders();
+        if (freshOrders) {
+          setOrders(prev => {
+            const byId = new Map<string, Order>();
+            prev.forEach(o => byId.set(o.id, o));
+            freshOrders.forEach(o => byId.set(o.id, o));
+            return Array.from(byId.values()).sort((a, b) => new Date((b.date as string) || '').getTime() - new Date((a.date as string) || '').getTime());
+          });
+        }
+
+        if (currentUser) {
+          for (const o of optimisticOrders) {
+            try {
+              const created = (freshOrders || []).find((f: any) => f.id === o.id) || o;
+              await emailService.sendNewOrderNotification(currentUser, created, customer.name);
+            } catch (e) {
+              console.warn('Failed to send notification for order', o.id, e);
+            }
+          }
+        }
+
+        alert('Order(s) created successfully!');
+        // Close modal and finish
+        setIsSavingOrder(false);
+        closeModal();
+        return;
+      }
+
+      // Single-supplier path: generate order id and cost amount
+      let newOrderId: string = '';
+      try {
+        const { data: idResult, error: idError } = await supabase.rpc('generate_next_order_id');
+        if (idError || !idResult) {
+          const maxIdNum = orders.reduce((max, order) => {
+            const num = parseInt(order.id.replace('ORD', ''), 10);
+            return num > max ? num : max;
+          }, 0);
+          // produce clean id like ORD251
+          newOrderId = `ORD${(maxIdNum + 1).toString().padStart(3, '0')}`;
+        } else {
+          // strip any trailing suffix from RPC result (e.g., ORD250_511 -> ORD250)
+          const asStr = String(idResult);
+          newOrderId = asStr.split('_')[0];
+        }
+      } catch (error) {
+        console.warn('Error generating order ID:', error);
+        const maxIdNum = orders.reduce((max, order) => {
+          const num = parseInt(order.id.replace('ORD', ''), 10);
+          return num > max ? num : max;
+        }, 0);
+        newOrderId = `ORD${(maxIdNum + 1).toString().padStart(3, '0')}`;
+      }
+
+      const costAmount = newOrderItems.reduce((sum, item) => {
+        const prod = products.find(p => p.id === item.productId);
+        const itemCost = (item as any).costPrice !== undefined && typeof (item as any).costPrice === 'number'
+          ? (item as any).costPrice
+          : (prod ? (typeof prod.costPrice === 'number' ? prod.costPrice : 0) : 0);
+        return sum + (itemCost * (item.quantity || 0));
+      }, 0);
 
       const newOrder = {
         id: newOrderId,
@@ -1109,6 +1475,329 @@ export const Orders: React.FC = () => {
     }
   } else if (modalState === 'edit' && currentOrder) {
     try {
+      // Determine supplier grouping for edited items so we can split if items now belong to multiple suppliers
+      const productSupplierMap = new Map(products.map(p => [p.id, norm(p.supplier)]));
+      const itemsBySupplier = new Map<string, OrderItem[]>();
+      const backBySupplier = new Map<string, OrderItem[]>();
+      for (const it of newOrderItems) {
+        const supplier = productSupplierMap.get(it.productId) || 'Unassigned';
+        if (!itemsBySupplier.has(supplier)) itemsBySupplier.set(supplier, []);
+        itemsBySupplier.get(supplier)!.push(it);
+      }
+      for (const it of newBackorderedItems) {
+        const supplier = productSupplierMap.get(it.productId) || 'Unassigned';
+        if (!backBySupplier.has(supplier)) backBySupplier.set(supplier, []);
+        backBySupplier.get(supplier)!.push(it);
+      }
+      const supplierKeys = Array.from(new Set([...Array.from(itemsBySupplier.keys()), ...Array.from(backBySupplier.keys())]));
+
+      if (supplierKeys.length > 1) {
+        // Multi-supplier edit: keep current order for its primary supplier, create new orders for other suppliers
+        // Determine primary supplier of currentOrder (based on highest value item)
+        let currentPrimary = 'Unassigned';
+        try {
+          if ((currentOrder.orderItems || []).length > 0) {
+            let primaryInfo = { supplier: 'Unassigned', value: 0 };
+            (currentOrder.orderItems || []).forEach((it: any) => {
+              const prod = products.find(p => p.id === it.productId);
+              if (prod) {
+                  const val = (it.price || 0) * (it.quantity || 0);
+                  if (val > primaryInfo.value) primaryInfo = { supplier: prod.supplier, value: val };
+                }
+            });
+            currentPrimary = norm(primaryInfo.supplier);
+          }
+        } catch (e) {
+          console.warn('Failed to compute current primary supplier, defaulting to first supplier:', e);
+          currentPrimary = supplierKeys[0];
+        }
+
+        if (!currentPrimary || currentPrimary === 'Unassigned') currentPrimary = supplierKeys[0];
+
+        // Base order id derived from currentOrder.id (strip any _P suffix)
+        const rawId = String(currentOrder.id || '');
+        let baseOrderId = rawId.split('_P')[0].split('_')[0];
+
+        // Find existing partition indices to avoid collisions
+        const existingPartitionIds = new Set((orders || []).map(o => o.id).filter((id: string) => id.startsWith(baseOrderId + '_P')));
+        let nextPartitionIndex = 1;
+        while (existingPartitionIds.has(`${baseOrderId}_P${nextPartitionIndex}`)) nextPartitionIndex++;
+
+        // 1) Update current order to contain only items of currentPrimary
+        const primaryItems = itemsBySupplier.get(currentPrimary) || [];
+        const primaryBacks = backBySupplier.get(currentPrimary) || [];
+        const primaryTotal = primaryItems.reduce((s, it) => s + ((it.price || 0) * (it.quantity || 0)), 0);
+        const primaryCost = primaryItems.reduce((s, it) => {
+          const prod = products.find(p => p.id === it.productId);
+          const itemCost = (it as any).costPrice !== undefined && typeof (it as any).costPrice === 'number'
+            ? (it as any).costPrice
+            : (prod ? (typeof prod.costPrice === 'number' ? prod.costPrice : 0) : 0);
+          return s + (itemCost * (it.quantity || 0));
+        }, 0);
+
+        const updatePayload: any = {
+          orderitems: JSON.stringify(primaryItems),
+          backordereditems: JSON.stringify(primaryBacks),
+          totalamount: primaryTotal,
+          costamount: primaryCost,
+          expecteddeliverydate: expectedDeliveryDate || currentOrder.orderdate || null,
+          deliveryaddress: deliveryAddress || currentOrder.deliveryaddress || null,
+          notes: orderNotes || currentOrder.notes || '',
+          assigneduserid: currentUser?.id ?? currentOrder.assigneduserid ?? '',
+        };
+
+        try {
+          const { error } = await supabase.from('orders').update(updatePayload).eq('id', currentOrder.id);
+          if (error) {
+            console.warn('Primary order update failed, attempting retry without optional columns:', error.message);
+            const { error: retryError } = await supabase.from('orders').update(((({ costamount, ...rest }) => rest)(updatePayload))).eq('id', currentOrder.id);
+            if (retryError) {
+              alert('Failed to update primary order during split: ' + retryError.message);
+              return;
+            }
+          }
+        } catch (e) {
+          console.error('Unexpected error updating primary order during split:', e);
+          alert('Unexpected error while updating primary order. See console.');
+          return;
+        }
+
+        // 2) Create or merge into existing orders for other suppliers
+        const createdNewOrders: any[] = [];
+
+        // Build map of existing partition orders for this baseOrderId: supplierNorm -> orderId
+        const existingPartitionOrders = (orders || []).filter((o: any) => typeof o.id === 'string' && o.id.startsWith(baseOrderId + '_P'));
+        const existingSupplierToOrderId = new Map<string, string>();
+        for (const part of existingPartitionOrders) {
+          try {
+            const oItems = (part.orderItems || []).map((it: any) => ({ ...it }));
+            // compute primary supplier for partition by highest value
+            let primary = 'unassigned';
+            let maxv = 0;
+            for (const it of oItems) {
+              const prod = products.find(p => p.id === it.productId);
+              if (!prod) continue;
+              const v = (it.price || prod.price || 0) * (it.quantity || 0);
+              if (v > maxv) {
+                maxv = v;
+                primary = norm(prod.supplier);
+              }
+            }
+            if (primary) existingSupplierToOrderId.set(primary, part.id);
+          } catch (e) {
+            console.warn('Failed to map existing partition order supplier:', e);
+          }
+        }
+
+        for (const supplier of supplierKeys) {
+          if (supplier === currentPrimary) continue;
+          const items = itemsBySupplier.get(supplier) || [];
+          const backs = backBySupplier.get(supplier) || [];
+          if (items.length === 0 && backs.length === 0) continue;
+
+          // If there is an existing partition order for this supplier, merge into it
+          const existingOrderId = existingSupplierToOrderId.get(supplier);
+          if (existingOrderId) {
+            try {
+              const existingOrder = (orders || []).find((o: any) => o.id === existingOrderId);
+              const existingItems = (existingOrder?.orderItems || []) as any[];
+              const existingBacks = (existingOrder?.backorderedItems || []) as any[];
+
+              // Merge items by productId (sum quantities and free)
+              const mergedItemsMap = new Map<string, any>();
+              const pushToMap = (it: any) => {
+                const key = it.productId;
+                const prev = mergedItemsMap.get(key) || { ...it };
+                if (prev.productId) {
+                  prev.quantity = (Number(prev.quantity) || 0) + (Number(it.quantity) || 0);
+                  prev.free = (Number(prev.free) || 0) + (Number(it.free) || 0);
+                  // prefer latest price if provided
+                  prev.price = it.price || prev.price;
+                }
+                mergedItemsMap.set(key, prev);
+              };
+
+              existingItems.forEach(pushToMap);
+              items.forEach(pushToMap);
+
+              const mergedItems = Array.from(mergedItemsMap.values());
+
+              // Merge backordered similar
+              const mergedBackMap = new Map<string, any>();
+              const pushBack = (it: any) => {
+                const key = it.productId;
+                const prev = mergedBackMap.get(key) || { ...it };
+                if (prev.productId) {
+                  prev.quantityHeld = (Number(prev.quantityHeld) || 0) + (Number(it.quantityHeld || it.quantity) || 0);
+                }
+                mergedBackMap.set(key, prev);
+              };
+              existingBacks.forEach(pushBack);
+              backs.forEach(pushBack);
+              const mergedBacks = Array.from(mergedBackMap.values());
+
+              const newTotal = mergedItems.reduce((s, it) => s + ((it.price || 0) * (it.quantity || 0)), 0);
+              const newCost = mergedItems.reduce((s, it) => {
+                const prod = products.find(p => p.id === it.productId);
+                const itemCost = (it as any).costPrice !== undefined && typeof (it as any).costPrice === 'number'
+                  ? (it as any).costPrice
+                  : (prod ? (typeof prod.costPrice === 'number' ? prod.costPrice : 0) : 0);
+                return s + (itemCost * (it.quantity || 0));
+              }, 0);
+
+              const updatePayloadExisting: any = {
+                orderitems: JSON.stringify(mergedItems),
+                backordereditems: JSON.stringify(mergedBacks),
+                totalamount: newTotal,
+                costamount: newCost,
+              };
+
+              const { error: updErr } = await supabase.from('orders').update(updatePayloadExisting).eq('id', existingOrderId);
+              if (updErr) {
+                console.warn('Failed to update existing partition order:', updErr.message);
+              }
+
+              createdNewOrders.push({
+                id: existingOrderId,
+                customerId: customer.id,
+                customerName: customer.name,
+                date: existingOrder?.orderdate || new Date().toISOString(),
+                created_at: existingOrder?.created_at || new Date().toISOString(),
+                total: newTotal,
+                status: existingOrder?.status || OrderStatus.Pending,
+                paymentMethod: existingOrder?.method || '',
+                notes: existingOrder?.notes || '',
+                assignedUserId: existingOrder?.assigneduserid || currentUser?.id,
+                orderItems: mergedItems,
+                backorderedItems: mergedBacks,
+                chequeBalance: existingOrder?.chequebalance || 0,
+                creditBalance: existingOrder?.creditbalance || 0,
+                returnAmount: existingOrder?.returnAmount || 0,
+              });
+            } catch (e) {
+              console.error('Error merging into existing partition order:', e);
+              alert('Error merging items into existing supplier order. See console.');
+              return;
+            }
+            continue;
+          }
+
+          // No existing partition -> create new order as before
+          const orderIdForSupplier = `${baseOrderId}_P${nextPartitionIndex}`;
+          nextPartitionIndex++;
+
+          const groupTotal = items.reduce((s, it) => s + ((it.price || 0) * (it.quantity || 0)), 0);
+          const groupCost = items.reduce((s, it) => {
+            const prod = products.find(p => p.id === it.productId);
+            const itemCost = (it as any).costPrice !== undefined && typeof (it as any).costPrice === 'number'
+              ? (it as any).costPrice
+              : (prod ? (typeof prod.costPrice === 'number' ? prod.costPrice : 0) : 0);
+            return s + (itemCost * (it.quantity || 0));
+          }, 0);
+
+          const payload: any = {
+            id: orderIdForSupplier,
+            customerid: customer.id,
+            customername: customer.name,
+            assigneduserid: currentUser?.id ?? '',
+            orderitems: JSON.stringify(items),
+            backordereditems: JSON.stringify(backs),
+            method: '',
+            expecteddeliverydate: expectedDeliveryDate || null,
+            deliveryaddress: deliveryAddress || null,
+            orderdate: expectedDeliveryDate ? expectedDeliveryDate : new Date().toISOString(),
+            created_at: new Date().toISOString(),
+            totalamount: groupTotal,
+            costamount: groupCost,
+            status: OrderStatus.Pending,
+            notes: orderNotes || '',
+            chequebalance: 0,
+            creditbalance: 0,
+          };
+
+          try {
+            const safeInsert = ((({ costamount, created_at, ...rest }) => rest)(payload));
+            const { data: insertData, error } = await supabase.from('orders').insert([safeInsert]).select('*');
+            if (error) {
+              const { data: insertData2, error: err2 } = await supabase.from('orders').insert([payload]).select('*');
+              if (err2) {
+                console.error('Failed to insert supplier order during edit split:', err2);
+                alert('Error creating split order for supplier ' + supplier + ': ' + err2.message);
+                return;
+              }
+            }
+            try {
+              const optionalPatch: any = {};
+              if (payload.costamount !== undefined) optionalPatch.costamount = payload.costamount;
+              if (payload.created_at !== undefined) optionalPatch.created_at = payload.created_at;
+              if (payload.deliveryaddress !== undefined) optionalPatch.deliveryaddress = payload.deliveryaddress;
+              if (Object.keys(optionalPatch).length > 0) {
+                await supabase.from('orders').update(optionalPatch).eq('id', orderIdForSupplier);
+              }
+            } catch (e) {
+              console.warn('Optional patch failed for new supplier order during edit split:', e);
+            }
+          } catch (e) {
+            console.error('Unexpected insert exception for supplier order during edit split:', e);
+            alert('Unexpected error creating split order. Check console for details.');
+            return;
+          }
+
+          createdNewOrders.push({
+            id: orderIdForSupplier,
+            customerId: customer.id,
+            customerName: customer.name,
+            date: payload.orderdate,
+            created_at: payload.created_at,
+            total: payload.totalamount,
+            status: payload.status,
+            paymentMethod: payload.method,
+            notes: payload.notes,
+            assignedUserId: payload.assigneduserid,
+            orderItems: items,
+            backorderedItems: backs,
+            chequeBalance: 0,
+            creditBalance: 0,
+            returnAmount: 0,
+          });
+        }
+
+        // Refresh orders and optimistic update
+        try {
+          setOrders(prev => {
+            const byId = new Map<string, Order>();
+            prev.forEach(o => byId.set(o.id, o));
+            createdNewOrders.forEach(o => byId.set(o.id, o as Order));
+            // updated currentOrder already reflected in DB; we'll refresh from server next
+            return Array.from(byId.values()).sort((a, b) => new Date((b.date as string) || '').getTime() - new Date((a.date as string) || '').getTime());
+          });
+        } catch (e) {
+          console.warn('Optimistic update after edit-split failed:', e);
+        }
+
+        const fresh = await fetchOrders();
+        if (fresh) setOrders(fresh);
+
+        // Send notifications for created orders
+        if (currentUser) {
+          for (const o of createdNewOrders) {
+            try {
+              const created = (fresh || []).find((f: any) => f.id === o.id) || o;
+              await emailService.sendNewOrderNotification(currentUser, created, customer.name);
+            } catch (e) {
+              console.warn('Failed to send notification for split-created order', o.id, e);
+            }
+          }
+        }
+
+        alert('Order updated and split into supplier-specific orders successfully!');
+        // Close modal and finish
+        setIsSavingOrder(false);
+        closeModal();
+        return;
+      }
+
+      // If we reach here, it means supplierKeys.length <= 1 and we can proceed with normal single-order update
       const updatedOrder = {
         customerid: customer.id,
         customername: customer.name,
@@ -1444,9 +2133,19 @@ export const Orders: React.FC = () => {
   // --- Update order as Delivered, and set sold qty if the column exists ---
   const soldQty = targetOrder.orderItems.reduce((sum, i) => sum + i.quantity, 0);
   try {
+    // Ensure per-item cost/margin are persisted and compute totals before marking delivered
+    const newItemsForPersist = (targetOrder.orderItems || []).map((it: any) => {
+      const prod = products.find(p => p.id === it.productId);
+      const cost = prod && prod.costPrice != null ? Number(prod.costPrice) : (it.costPrice != null ? Number(it.costPrice) : null);
+      const margin = prod && prod.marginPrice != null ? Number(prod.marginPrice) : (it.marginPrice != null ? Number(it.marginPrice) : null);
+      return { ...it, costPrice: cost, marginPrice: margin };
+    });
+    const totalCostForOrder = (newItemsForPersist || []).reduce((s: number, it: any) => s + ((it.costPrice != null ? Number(it.costPrice) : 0) * (it.quantity || 0)), 0);
+    const totalMarginForOrder = (newItemsForPersist || []).reduce((s: number, it: any) => s + ((it.marginPrice != null ? Number(it.marginPrice) : 0) * (it.quantity || 0)), 0);
+
     const { error } = await supabase
       .from('orders')
-      .update({ status: OrderStatus.Delivered, sold: soldQty })
+      .update({ status: OrderStatus.Delivered, sold: soldQty, orderitems: newItemsForPersist, total_cost_price: totalCostForOrder, total_margin_price: totalMarginForOrder })
       .eq('id', targetOrder.id);
     if (error) {
       const msg = String(error.message || '').toLowerCase();
@@ -2020,6 +2719,27 @@ export const Orders: React.FC = () => {
         <div className="flex flex-col sm:flex-row gap-4 sm:gap-0 sm:justify-between sm:items-center">
           <h1 className="text-2xl sm:text-3xl font-bold text-slate-800 dark:text-slate-100">Orders</h1>
           <div className="flex flex-wrap gap-2 sm:gap-3">
+            {currentUser?.role === UserRole.Admin && (
+              <div className="flex items-center gap-2">
+                <label className="inline-flex items-center text-sm text-slate-700 dark:text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={filteredOrders && filteredOrders.length > 0 && filteredOrders.every(o => selectedOrderIds.includes(o.id))}
+                    onChange={(e) => { e.stopPropagation(); toggleSelectAllVisible(); }}
+                    className="mr-2"
+                  />
+                  Select All
+                </label>
+                <button
+                  onClick={handleBulkDelete}
+                  disabled={selectedOrderIds.length === 0 || isBulkDeleting}
+                  className={`px-3 py-2 text-white rounded-lg text-xs font-medium ${selectedOrderIds.length === 0 || isBulkDeleting ? 'bg-red-300 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700'}`}
+                  title="Delete selected orders"
+                >
+                  Delete Selected{selectedOrderIds.length > 0 ? ` (${selectedOrderIds.length})` : ''}
+                </button>
+              </div>
+            )}
             {/* Export Buttons */}
             <button
               onClick={exportOrdersPDF}
@@ -2083,7 +2803,7 @@ export const Orders: React.FC = () => {
               </div>
               
               {/* Filter dropdowns - responsive grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-3 sm:gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-3 gap-3 sm:gap-4">
                 <div>
                   <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">Status</label>
                   <select
@@ -2096,6 +2816,21 @@ export const Orders: React.FC = () => {
                       <option value={OrderStatus.Delivered}>Delivered</option>
                   </select>
                 </div>
+                {currentUser?.role === UserRole.Admin && (
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">Sales Rep</label>
+                    <select
+                      value={selectedSalesRep}
+                      onChange={(e) => setSelectedSalesRep(e.target.value)}
+                      className="w-full px-3 sm:px-4 py-2.5 sm:py-2 text-sm sm:text-base border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="all">All Sales Reps</option>
+                      {(users || []).filter(u => u.role === UserRole.Sales).map((u: any) => (
+                        <option key={u.id} value={u.id}>{u.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 <div>
                   <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">Time Range</label>
                   <select
@@ -2130,7 +2865,18 @@ export const Orders: React.FC = () => {
                       title="Filter by specific delivery date"
                   />
                 </div>
-                
+                {currentUser?.role === UserRole.Admin && (
+                  <div className="w-56">
+                    <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">Supplier</label>
+                    <select
+                      value={selectedSupplier}
+                      onChange={(e) => setSelectedSupplier(e.target.value)}
+                      className="w-full px-3 sm:px-4 py-2.5 sm:py-2 text-sm sm:text-base border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      {supplierOptions.map(s => <option key={s} value={s}>{s === 'all' ? 'All Suppliers' : s}</option>)}
+                    </select>
+                  </div>
+                )}
                 <div className="flex gap-2 sm:gap-3">
                   {(deliveryDateFilter || dateRangeFilter !== 'all') && (
                       <button
@@ -2201,6 +2947,17 @@ export const Orders: React.FC = () => {
                           <Card key={order.id} className={`${cardStyle.border} hover:shadow-xl hover:-translate-y-1 hover:scale-[1.02] transition-all duration-300 cursor-pointer border-0 overflow-hidden relative`}>
                             <div className="absolute inset-0 bg-gradient-to-br from-white/60 via-transparent to-transparent dark:from-black/20 dark:via-transparent dark:to-transparent pointer-events-none"></div>
                             <CardContent className="p-3 relative z-10">
+                              {currentUser?.role === UserRole.Admin && (
+                                <div className="absolute left-2 top-2 z-20">
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedOrderIds.includes(order.id)}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onChange={() => toggleSelectOrder(order.id)}
+                                    className="w-4 h-4"
+                                  />
+                                </div>
+                              )}
                               {/* Order Header */}
                               <div className="flex justify-between items-start mb-2">
                                 <div className="flex-1 min-w-0">
@@ -2992,6 +3749,14 @@ export const Orders: React.FC = () => {
                       <span className="text-slate-600 dark:text-slate-400">Return Amount:</span>
                       <span className="font-medium text-blue-600">{formatCurrency(editableReturnAmount === '' ? 0 : editableReturnAmount, currency)}</span>
                     </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-600 dark:text-slate-400">Total Cost (Order):</span>
+                      <span className="font-medium text-slate-900 dark:text-white">{formatCurrency(viewingOrder.totalCostPrice ?? 0, currency)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-600 dark:text-slate-400">Total Margin (Order):</span>
+                      <span className="font-medium text-yellow-600">{formatCurrency(viewingOrder.totalMarginPrice ?? 0, currency)}</span>
+                    </div>
                     <div className="flex justify-between font-bold text-base mt-1">
                       <span className="text-slate-800 dark:text-slate-200">Balance Due:</span> 
                       <span className="text-red-600">{formatBalanceAmount(editableChequeBalance + editableCreditBalance, currency)}</span>
@@ -3010,6 +3775,8 @@ export const Orders: React.FC = () => {
                         <th className="py-1 px-2 text-right">Quantity</th>
                         <th className="py-1 px-2 text-right">Free</th>
                         <th className="py-1 px-2 text-right">Unit Price</th>
+                        <th className="py-1 px-2 text-right">Cost Price</th>
+                        <th className="py-1 px-2 text-right">Margin Price</th>
                         <th className="py-1 px-2 text-right">Subtotal</th>
                         {/* Actions column removed (Hold/Unhold removed) */}
                       </tr>
@@ -3031,6 +3798,22 @@ export const Orders: React.FC = () => {
                             <td className="py-1 px-2 text-right text-xs">{item.quantity}</td>
                             <td className="py-1 px-2 text-right text-xs font-bold text-green-600">{item.free || 0}</td>
                             <td className="py-1 px-2 text-right text-xs">{formatCurrency(item.price, currency)}</td>
+                            {
+                              (() => {
+                                // Prefer per-order snapshot values stored on the item (item.costPrice / item.marginPrice)
+                                // This prevents current product page changes from retroactively changing historical orders.
+                                const unitCost = (item.costPrice != null && !isNaN(Number(item.costPrice))) ? Number(item.costPrice) : (product.costPrice != null ? Number(product.costPrice) : null);
+                                const unitMargin = (item.marginPrice != null && !isNaN(Number(item.marginPrice))) ? Number(item.marginPrice) : (product.marginPrice != null ? Number(product.marginPrice) : null);
+                                const totalCost = unitCost != null ? unitCost * (item.quantity || 0) : null;
+                                const totalMargin = unitMargin != null ? unitMargin * (item.quantity || 0) : null;
+                                return (
+                                  <>
+                                    <td className="py-1 px-2 text-right text-xs">{totalCost != null ? formatCurrency(totalCost, currency) : 'N/A'}</td>
+                                    <td className="py-1 px-2 text-right text-xs">{totalMargin != null ? formatCurrency(totalMargin, currency) : 'N/A'}</td>
+                                  </>
+                                );
+                              })()
+                            }
                             <td className="py-1 px-2 text-right font-semibold text-xs text-slate-900 dark:text-white">
                               {formatCurrency(subtotal, currency)}
                             </td>
@@ -3081,13 +3864,20 @@ export const Orders: React.FC = () => {
                       <div className="flex items-center justify-between p-2 border-t border-slate-200 dark:border-slate-600">
             <div className="flex-1">
               <p className="text-xs text-slate-600 dark:text-slate-300">Grand Total: <span className="font-bold text-slate-900 dark:text-white">{formatCurrency(viewingOrder.total, currency)}</span></p>
+              <p className="text-xs text-slate-600 dark:text-slate-300">Order Cost: <span className="font-medium text-slate-900 dark:text-white">{formatCurrency(viewingOrder.totalCostPrice ?? 0, currency)}</span></p>
+              <p className="text-xs text-slate-600 dark:text-slate-300">Order Margin: <span className="font-medium text-yellow-600">{formatCurrency(viewingOrder.totalMarginPrice ?? 0, currency)}</span></p>
             </div>
                         <div className="flex flex-wrap items-center gap-1">
-                           {canEdit && (
+                             {canEdit && (
+                              <>
                                 <button onClick={handleSaveBalances} type="button" className="text-white bg-green-600 hover:bg-green-700 font-medium rounded text-xs px-2 py-1 text-center">
-                                    Save Balances
+                                  Save Balances
                                 </button>
-                           )}
+                                <button onClick={handleSaveCostMargin} type="button" className="text-white bg-amber-600 hover:bg-amber-700 font-medium rounded text-xs px-2 py-1 text-center" title="Save per-product Cost & Margin to DB">
+                                  Save Cost & Margin
+                                </button>
+                              </>
+                             )}
                             {canPrintBill && !(viewingOrder.status === OrderStatus.Delivered && (currentUser?.role === UserRole.Driver || currentUser?.role === UserRole.Sales || currentUser?.role === UserRole.Manager)) && (
                               <button 
                                   onClick={handleDownloadBill} 

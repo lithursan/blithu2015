@@ -3,6 +3,7 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '../ui
 import { FilterField } from '../ui/FilterField';
 import { Badge } from '../ui/Badge';
 import { SalesChart } from '../charts/SalesChart';
+import { AdminFinancialChart } from '../charts/AdminFinancialChart';
 import { OrderStatus, Product, UserRole } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
@@ -173,11 +174,10 @@ const ExpensesCard: React.FC<{ currency: string; dateRange: { start: string; end
 
 // Net Profit Card Component - Admin Only
 const NetProfitCard: React.FC<{ 
-    currency: string; 
-    dateRange: { start: string; end: string }; 
-    totalSales: number; 
-    totalCost: number; 
-}> = ({ currency, dateRange, totalSales, totalCost }) => {
+  currency: string; 
+  dateRange: { start: string; end: string }; 
+  totalProfit: number;
+}> = ({ currency, dateRange, totalProfit }) => {
     const [expenses, setExpenses] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
 
@@ -240,14 +240,11 @@ const NetProfitCard: React.FC<{
     // Calculate total expenses for the period
     const totalExpenses = filteredExpenses.reduce((sum, expense) => sum + (Number(expense?.amount) || 0), 0);
     
-    // Calculate gross profit (Sales - Cost)
-    const grossProfit = totalSales - totalCost;
+    // Calculate net profit as requested: Total Profit - Expenses
+    const netProfit = totalProfit - totalExpenses;
     
-    // Calculate net profit (Gross Profit - Expenses)
-    const netProfit = grossProfit - totalExpenses;
-    
-    // Calculate net profit margin
-    const netProfitMargin = totalSales > 0 ? (netProfit / totalSales * 100) : 0;
+    // Calculate net profit margin relative to totalProfit
+    const netProfitMargin = totalProfit > 0 ? (netProfit / totalProfit * 100) : 0;
     
     // Determine card color based on profit/loss
     const isProfit = netProfit >= 0;
@@ -647,6 +644,70 @@ export const Dashboard: React.FC = () => {
 
   }, [filteredOrders, safeProducts]);
 
+  // Cumulative series for admin: running totals for each metric
+  const cumulativeSalesData = useMemo(() => {
+    let cumSales = 0;
+    let cumDelivery = 0;
+    let cumMargin = 0;
+    let cumGross = 0;
+    let cumNet = 0;
+
+    return salesDataForChart.map(pt => {
+      const sales = Number(pt.sales || 0);
+      const deliveryCost = Number(pt.deliveryCost || 0);
+      const marginCost = Number(pt.marginCost || 0);
+      const grossProfit = Number(pt.grossProfit || 0);
+      const netProfit = Number(pt.netProfit || 0);
+
+      cumSales += sales;
+      cumDelivery += deliveryCost;
+      cumMargin += marginCost;
+      cumGross += grossProfit;
+      cumNet += netProfit;
+
+      return {
+        ...pt,
+        sales: cumSales,
+        deliveryCost: cumDelivery,
+        marginCost: cumMargin,
+        grossProfit: cumGross,
+        netProfit: cumNet,
+      };
+    });
+  }, [salesDataForChart]);
+
+  // Admin: compute date-wise totals for Paid, Cheque, Credit, Returns
+  const adminFinancialData = useMemo(() => {
+    const map: Record<string, { paid: number; cheque: number; credit: number; returns: number; fullLabel?: string }> = {};
+
+    // Consider delivered orders in filteredOrders (respecting filters)
+    filteredOrders.forEach(order => {
+      try {
+        if (order.status !== OrderStatus.Delivered) return;
+        const d = new Date(order.date);
+        const key = d.toISOString().split('T')[0];
+        const fullLabel = d.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' });
+
+        const cheque = Number(order.chequeBalance || 0);
+        const credit = Number(order.creditBalance || 0);
+        const returnsAmt = Number(order.returnAmount || 0);
+        const total = Number(order.total || 0);
+        const paid = total - cheque - credit - returnsAmt;
+
+        if (!map[key]) map[key] = { paid: 0, cheque: 0, credit: 0, returns: 0, fullLabel };
+        map[key].paid += paid;
+        map[key].cheque += cheque;
+        map[key].credit += credit;
+        map[key].returns += returnsAmt;
+      } catch (e) {
+        // ignore bad dates
+      }
+    });
+
+    const keys = Object.keys(map).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+    return keys.map(k => ({ label: k, fullLabel: map[k].fullLabel, paid: map[k].paid, cheque: map[k].cheque, credit: map[k].credit, returns: map[k].returns }));
+  }, [filteredOrders]);
+
 
     const handleResetFilters = () => {
         setSelectedSupplier('all');
@@ -659,45 +720,25 @@ export const Dashboard: React.FC = () => {
     // Stats based on filtered data
     // Calculate total delivered sales (only Delivered orders)
     const totalSales = filteredOrders.reduce((sum, order) => order.status === 'Delivered' ? sum + order.total : sum, 0);
-    // Sum cost only for delivered orders in the current filtered period
+    // Use persisted per-order totals when available.
+    // The `orders` rows include `total_cost_price` and `total_margin_price` in the DB.
+    // Prefer those fields (or their camelCase mapped equivalents) to compute dashboard sums.
     const totalCost = filteredOrders.reduce((sum, order) => {
       if (order.status !== OrderStatus.Delivered) return sum;
-      if (!order.orderItems) return sum;
-      const orderCost = order.orderItems.reduce((itemSum, item) => {
-        const product = safeProducts.find(p => p.id === item.productId);
-        const costPrice = (typeof product?.costPrice === 'number' && product.costPrice > 0) ? product.costPrice : 0;
-        const totalQty = (Number(item.quantity) || 0) + (Number(item.free) || 0);
-        return itemSum + (costPrice * totalQty);
-      }, 0);
-      return sum + orderCost;
+      const orderCostVal = Number(order.total_cost_price ?? order.totalCostPrice ?? 0) || 0;
+      return sum + orderCostVal;
     }, 0);
 
-  // Total Margin (sum of per-product marginPrice * quantity) for delivered orders.
-  // Use marginPrice only; if marginPrice is missing, treat it as 0.
-  const totalMargin = filteredOrders.reduce((sum, order) => {
-    if (order.status !== OrderStatus.Delivered) return sum;
-    if (!order.orderItems) return sum;
-    const orderMargin = order.orderItems.reduce((itemSum, item) => {
-      const product = safeProducts.find(p => p.id === item.productId);
-      const marginPrice = (typeof product?.marginPrice === 'number' && !isNaN(product.marginPrice))
-        ? product.marginPrice
-        : 0;
-      const totalQty = (Number(item.quantity) || 0) + (Number(item.free) || 0);
-      return itemSum + (marginPrice * totalQty);
+    const totalMargin = filteredOrders.reduce((sum, order) => {
+      if (order.status !== OrderStatus.Delivered) return sum;
+      const orderMarginVal = Number(order.total_margin_price ?? order.totalMarginPrice ?? 0) || 0;
+      return sum + orderMarginVal;
     }, 0);
-    return sum + orderMargin;
-  }, 0);
 
-    // Calculate total order cost for ALL filtered orders (regardless of status)
+    // Total Order Cost for ALL filtered orders (use persisted per-order total_cost_price when present)
     const totalOrderCost = filteredOrders.reduce((sum, order) => {
-      if (!order.orderItems) return sum;
-      const orderCost = order.orderItems.reduce((itemSum, item) => {
-        const product = safeProducts.find(p => p.id === item.productId);
-        const costPrice = (typeof product?.costPrice === 'number' && product.costPrice > 0) ? product.costPrice : 0;
-        const totalQty = (Number(item.quantity) || 0) + (Number(item.free) || 0);
-        return itemSum + (costPrice * totalQty);
-      }, 0);
-      return sum + orderCost;
+      const orderCostVal = Number(order.total_cost_price ?? order.totalCostPrice ?? 0) || 0;
+      return sum + orderCostVal;
     }, 0);
     const totalOrders = filteredOrders.length;
     const totalOrdersAmount = filteredOrders.reduce((sum, order) => sum + order.total, 0);
@@ -786,9 +827,11 @@ export const Dashboard: React.FC = () => {
     if (!order.orderItems) return sum;
     const cost = order.orderItems.reduce((s, item) => {
       const prod = safeProducts.find(p => p.id === item.productId);
-      const cp = (prod && typeof prod.costPrice === 'number') ? prod.costPrice : 0;
+      const itemCost = (item as any).costPrice !== undefined && typeof (item as any).costPrice === 'number'
+        ? (item as any).costPrice
+        : (prod ? (typeof prod.costPrice === 'number' ? prod.costPrice : 0) : 0);
       const totalQty = (Number(item.quantity) || 0) + (Number(item.free) || 0);
-      return s + (cp * totalQty);
+      return s + (itemCost * totalQty);
     }, 0);
     return sum + cost;
   }, 0);
@@ -958,6 +1001,20 @@ export const Dashboard: React.FC = () => {
                  {categories.map(c => <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>)}
                </select>
              </FilterField>
+             {isAdmin && (
+               <FilterField label="Month" htmlFor="month-filter" variant="slate">
+                 <select id="month-filter" value={monthFilter} onChange={e => handleMonthChange(e.target.value)}>
+                   <option value="all">All months</option>
+                   {Array.from({ length: 24 }).map((_, i) => {
+                     const d = new Date();
+                     d.setMonth(d.getMonth() - i);
+                     const val = d.toISOString().slice(0, 7); // YYYY-MM
+                     const label = d.toLocaleString(undefined, { month: 'short', year: 'numeric' });
+                     return <option key={val} value={val}>{label}</option>;
+                   })}
+                 </select>
+               </FilterField>
+             )}
              <div className="xl:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <FilterField label="Start Date" htmlFor="start-date" variant="amber">
                   <input type="date" id="start-date" value={dateRange.start} onChange={e => setDateRange({...dateRange, start: e.target.value})} />
@@ -1048,8 +1105,8 @@ export const Dashboard: React.FC = () => {
             </div>
           </CardContent>
         </Card>
-        {/* For Admin/Secretary, show key financial cards in the top row */}
-        {(isAdmin || isSecretary) && (
+        {/* For Admin/Secretary/Manager, show key financial cards in the top row */}
+        {(isAdmin || isManager || isSecretary) && (
           <>
             <Card className="bg-gradient-to-br from-green-50 to-green-100 dark:from-green-950 dark:to-green-900 border-green-200 dark:border-green-800 min-h-[180px] flex flex-col">
               <CardHeader className="flex-shrink-0">
@@ -1123,8 +1180,11 @@ export const Dashboard: React.FC = () => {
             )}
           </>
         )}
-        {/* Delivered Cost (only delivered orders) - moved up to appear first on the second row */}
-        <Card className="bg-gradient-to-br from-indigo-50 to-indigo-100 dark:from-indigo-950 dark:to-indigo-900 border-indigo-200 dark:border-indigo-800 min-h-[180px] flex flex-col">
+        {/* The following stat cards are hidden for Manager users — Managers only see the five key financial cards above */}
+        {!isManager && (
+          <>
+            {/* Delivered Cost (only delivered orders) - moved up to appear first on the second row */}
+            <Card className="bg-gradient-to-br from-indigo-50 to-indigo-100 dark:from-indigo-950 dark:to-indigo-900 border-indigo-200 dark:border-indigo-800 min-h-[180px] flex flex-col">
           <CardHeader className="flex-shrink-0">
             <CardTitle className="text-indigo-700 dark:text-indigo-300">Delivered Cost</CardTitle>
           </CardHeader>
@@ -1132,7 +1192,7 @@ export const Dashboard: React.FC = () => {
             <div className="flex justify-between items-start">
               <div>
                 <StatValue amount={totalCost} currency={currency} colorClass="text-indigo-600 dark:text-indigo-400" />
-                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Delivered Cost = sum(item.costPrice * item.quantity) for Delivered orders in the selected period</p>
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Delivered Cost = sum of each order's `total_cost_price` (persisted per-order cost) for Delivered orders in the selected period</p>
               </div>
             </div>
             <div className="flex justify-end mt-4">
@@ -1149,7 +1209,7 @@ export const Dashboard: React.FC = () => {
             <div className="flex justify-between items-start">
               <div>
                 <StatValue amount={totalMargin} currency={currency} colorClass="text-yellow-600 dark:text-yellow-400" />
-                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Margin = sum(item.marginPrice * quantity) for Delivered orders (uses marginPrice only; missing margin treated as 0)</p>
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Margin = sum of each order's `total_margin_price` (persisted per-order margin) for Delivered orders</p>
               </div>
             </div>
             <div className="flex justify-end mt-4">
@@ -1302,7 +1362,7 @@ export const Dashboard: React.FC = () => {
             <div className="flex justify-between items-start">
               <div>
                 <StatValue amount={totalOrderCost} currency={currency} colorClass="text-indigo-600 dark:text-indigo-400" />
-                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Order Cost = sum(item.costPrice * (quantity + free)) for ALL orders in the selected period (all statuses)</p>
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Order Cost = sum of each order's `total_cost_price` (persisted per-order cost) for ALL orders in the selected period (all statuses)</p>
               </div>
             </div>
             <div className="flex justify-end mt-4">
@@ -1374,8 +1434,10 @@ export const Dashboard: React.FC = () => {
         )}
         <ExpensesCard currency={currency} dateRange={dateRange} />
         {/* Net Profit Card - Admin Only */}
-            {isAdmin && <NetProfitCard currency={currency} dateRange={dateRange} totalSales={totalSales} totalCost={totalCost} />}
-      </div>
+              {isAdmin && <NetProfitCard currency={currency} dateRange={dateRange} totalProfit={totalSales - totalMargin} />}
+            </>
+          )}
+        </div>
 
 
 
@@ -1398,6 +1460,44 @@ export const Dashboard: React.FC = () => {
             )}
           </CardContent>
         </Card>
+        {isAdmin && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Financial Overview (Cumulative)</CardTitle>
+              <CardDescription>Running totals over time (Admin)</CardDescription>
+            </CardHeader>
+            <CardContent className="h-[360px] sm:h-[420px] md:h-[520px]">
+              {cumulativeSalesData.length > 0 ? (
+                <div className="h-full">
+                  <SalesChart data={cumulativeSalesData} />
+                </div>
+              ) : (
+                <div className="h-full flex items-center justify-center text-slate-500 dark:text-slate-400">
+                  <p>No sales data for the selected filters.</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+        {isAdmin && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Admin Financials — Date vs Paid / Cheque / Credit / Returns</CardTitle>
+              <CardDescription>Date-wise totals for key financial components (Admin only)</CardDescription>
+            </CardHeader>
+            <CardContent className="h-[360px] sm:h-[420px] md:h-[520px]">
+              {adminFinancialData.length > 0 ? (
+                <div className="h-full">
+                  <AdminFinancialChart data={adminFinancialData} />
+                </div>
+              ) : (
+                <div className="h-full flex items-center justify-center text-slate-500 dark:text-slate-400">
+                  <p>No financial data for the selected filters.</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       {/* Recent Orders Table */}
@@ -1427,8 +1527,11 @@ export const Dashboard: React.FC = () => {
                           // Calculate order cost (sum of costPrice × quantity for all items) using safeProducts
                           const orderCost = order.orderItems?.reduce((sum, item) => {
                             const product = safeProducts.find(p => p.id === item.productId);
+                            const itemCost = (item as any).costPrice !== undefined && typeof (item as any).costPrice === 'number'
+                              ? (item as any).costPrice
+                              : (product ? (typeof product.costPrice === 'number' ? product.costPrice : 0) : 0);
                             const totalQty = (Number(item.quantity) || 0) + (Number(item.free) || 0);
-                            return sum + ((product?.costPrice || 0) * totalQty);
+                            return sum + (itemCost * totalQty);
                           }, 0) || 0;
                           return (
                             <tr key={order.id} className="bg-white border-b dark:bg-slate-800 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600">
@@ -1991,9 +2094,11 @@ const SalesRepDashboard: React.FC<{
     if (!order.orderItems) return sum;
     const orderCost = order.orderItems.reduce((itemSum, item) => {
       const product = products.find(p => p.id === item.productId);
-      const costPrice = (typeof product?.costPrice === 'number' && product.costPrice > 0) ? product.costPrice : 0;
+      const itemCost = (item as any).costPrice !== undefined && typeof (item as any).costPrice === 'number'
+        ? (item as any).costPrice
+        : (product ? (typeof product.costPrice === 'number' ? product.costPrice : 0) : 0);
       const totalQty = (Number(item.quantity) || 0) + (Number(item.free) || 0);
-      return itemSum + (costPrice * totalQty);
+      return itemSum + (itemCost * totalQty);
     }, 0);
     return sum + orderCost;
   }, 0);

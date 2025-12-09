@@ -133,6 +133,12 @@ export const Collections: React.FC = () => {
     [currentUser]
   );
 
+  // Allow view-only access to Sales Reps and Drivers; mutation actions remain restricted to Admin/Secretary/Manager
+  const canViewCollections = useMemo(() =>
+    isAdminManager || currentUser?.role === UserRole.Sales || currentUser?.role === UserRole.Driver,
+    [currentUser, isAdminManager]
+  );
+
   // Helper function to check if a collection is overdue (red - more than 14 days)
   const isCollectionOverdue = (collection: CollectionRecord) => {
     // Check both credits and cheques with pending status
@@ -218,16 +224,24 @@ export const Collections: React.FC = () => {
     if (searchTerm && searchTerm.trim() !== '') {
       const s = searchTerm.trim().toLowerCase();
       filtered = filtered.filter(c => {
-        const orderId = (c.order_id || '').toString().toLowerCase();
-        const notes = (c.notes || '').toString().toLowerCase();
-        const amountStr = (c.amount || 0).toString();
-        const customer = (customers || []).find(ct => ct.id === c.customer_id);
-        const customerName = (customer && (customer.name || customer.customerName)) ? (customer.name || customer.customerName).toString().toLowerCase() : '';
-        const phone = (customer && (customer.phone || '')).toString().toLowerCase();
-        const collectedByUser = (users || []).find(u => u.id === (c.collected_by || ''));
+        // Support multiple possible column namings that may exist across environments
+        const orderId = ((c as any).order_id || (c as any).orderid || (c as any).id || '').toString().toLowerCase();
+        const notes = ((c as any).notes || '').toString().toLowerCase();
+        const amountStr = ((c as any).amount || 0).toString();
+
+        // Customers may be provided via DataContext; fall back to any customer name fields on the collection row
+        const customer = (customers || []).find((ct: any) => ct.id === (c as any).customer_id || ct.id === (c as any).customerid);
+        const customerNameFromCtx = (customer && (customer.name || customer.customerName)) ? (customer.name || customer.customerName).toString().toLowerCase() : '';
+        const customerNameFromRow = ((c as any).customer_name || (c as any).customername || '').toString().toLowerCase();
+        const customerName = customerNameFromCtx || customerNameFromRow;
+
+        // Phone can be on customer record or on the collection row
+        const phone = ((customer && (customer.phone || '')) || (c as any).phone || (c as any).customer_phone || '').toString().toLowerCase();
+
+        // collected_by can be a user id or a raw display name or different column names depending on migration
+        const collectedByUser = (users || []).find(u => u.id === ((c as any).collected_by || (c as any).collectedby || ''));
         const collectedByName = collectedByUser ? (collectedByUser.name || '').toString().toLowerCase() : '';
-        // Sometimes `collected_by` may already contain a display name instead of a user id
-        const collectedByRaw = (c.collected_by || '').toString().toLowerCase();
+        const collectedByRaw = (((c as any).collected_by || (c as any).collectedby || (c as any).completed_by || (c as any).completedby) || '').toString().toLowerCase();
 
         return (
           orderId.includes(s) ||
@@ -907,11 +921,11 @@ export const Collections: React.FC = () => {
     }
   };
 
-  if (!isAdminManager) {
+  if (!canViewCollections) {
     return (
       <div className="p-8 text-center">
         <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-4">Access Denied</h1>
-        <p className="text-slate-600 dark:text-slate-400">Only Admin, Secretary and Manager roles can access the Collection Management page.</p>
+        <p className="text-slate-600 dark:text-slate-400">Only Admin, Secretary, Manager, Sales Rep and Driver roles can view the Collection page.</p>
       </div>
     );
   }
@@ -927,27 +941,31 @@ export const Collections: React.FC = () => {
           </p>
         </div>
         <div className="mt-4 sm:mt-0 flex space-x-2">
-          <button
-            onClick={() => handleExport('csv')}
-            className="flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm"
-          >
-            📊 Export CSV
-          </button>
-          <button
-            onClick={exportCollectionsPDF}
-            className="flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors text-sm"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-            Export PDF
-          </button>
-          <button
-            onClick={() => handleExport('xlsx')}
-            className="flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors text-sm"
-          >
-            📈 Export Excel
-          </button>
+          {isAdminManager && (
+            <>
+              <button
+                onClick={() => handleExport('csv')}
+                className="flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm"
+              >
+                📊 Export CSV
+              </button>
+              <button
+                onClick={exportCollectionsPDF}
+                className="flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors text-sm"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                Export PDF
+              </button>
+              <button
+                onClick={() => handleExport('xlsx')}
+                className="flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors text-sm"
+              >
+                📈 Export Excel
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -1281,45 +1299,51 @@ export const Collections: React.FC = () => {
                           <div className="flex-shrink-0">
                             {collection.status === 'pending' ? (
                               <div className="flex flex-col gap-1.5">
-                                <button
-                                  onClick={() => handleVerifyClick(collection)}
-                                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md transition-colors text-xs font-medium whitespace-nowrap"
-                                >
-                                  Verify & Recognize
-                                </button>
-                                {collection.collection_type === 'credit' && (
+                                {isAdminManager ? (
                                   <>
                                     <button
-                                      onClick={() => {
-                                        setSelectedCollection(collection);
-                                        setIsConvertingCredit(true);
-                                        setOptimisticConvertedId(collection.id);
-                                        setCollections(prev => prev.map(c => c.id === collection.id ? { ...c, collection_type: 'cheque' } : c));
-                                      }}
-                                      className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-md transition-colors text-xs font-medium whitespace-nowrap"
+                                      onClick={() => handleVerifyClick(collection)}
+                                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md transition-colors text-xs font-medium whitespace-nowrap"
                                     >
-                                      Convert to Cheque
+                                      Verify & Recognize
                                     </button>
-                                    <button
-                                      onClick={() => {
-                                        setSelectedCollection(collection);
-                                        setIsPartialPayment(true);
-                                        setPartialAmount(0);
-                                        setIsConvertingCredit(false);
-                                      }}
-                                      className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md transition-colors text-xs font-medium whitespace-nowrap"
-                                    >
-                                      💰 Partial Payment
-                                    </button>
+                                    {collection.collection_type === 'credit' && (
+                                      <>
+                                        <button
+                                          onClick={() => {
+                                            setSelectedCollection(collection);
+                                            setIsConvertingCredit(true);
+                                            setOptimisticConvertedId(collection.id);
+                                            setCollections(prev => prev.map(c => c.id === collection.id ? { ...c, collection_type: 'cheque' } : c));
+                                          }}
+                                          className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-md transition-colors text-xs font-medium whitespace-nowrap"
+                                        >
+                                          Convert to Cheque
+                                        </button>
+                                        <button
+                                          onClick={() => {
+                                            setSelectedCollection(collection);
+                                            setIsPartialPayment(true);
+                                            setPartialAmount(0);
+                                            setIsConvertingCredit(false);
+                                          }}
+                                          className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md transition-colors text-xs font-medium whitespace-nowrap"
+                                        >
+                                          💰 Partial Payment
+                                        </button>
+                                      </>
+                                    )}
+                                    {isAdmin && (
+                                      <button
+                                        onClick={() => deleteCollection(collection.id)}
+                                        className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-md transition-colors text-xs font-medium whitespace-nowrap"
+                                      >
+                                        🗑️ Delete
+                                      </button>
+                                    )}
                                   </>
-                                )}
-                                {isAdmin && (
-                                  <button
-                                    onClick={() => deleteCollection(collection.id)}
-                                    className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-md transition-colors text-xs font-medium whitespace-nowrap"
-                                  >
-                                    🗑️ Delete
-                                  </button>
+                                ) : (
+                                  <></>
                                 )}
                               </div>
                             ) : (
@@ -1583,21 +1607,23 @@ export const Collections: React.FC = () => {
                       >
                         Cancel
                       </button>
-                      {isPartialPayment ? (
-                        <button
-                          onClick={handlePartialPayment}
-                          type="button"
-                          disabled={partialPaymentLoading}
-                          className={`text-white font-medium rounded-lg text-sm px-5 py-2.5 text-center focus:ring-4 focus:outline-none ${
-                            partialPaymentLoading 
-                              ? 'bg-orange-400 cursor-not-allowed' 
-                              : 'bg-orange-600 hover:bg-orange-700 focus:ring-orange-300'
-                          }`}
-                        >
-                          {partialPaymentLoading ? '⏳ Processing...' : '💰 Record Partial Payment'}
-                        </button>
-                      ) : selectedCollection.collection_type === 'cheque' || isConvertingCredit ? (
+                      {isAdminManager && (
                         <>
+                          {isPartialPayment ? (
+                            <button
+                              onClick={handlePartialPayment}
+                              type="button"
+                              disabled={partialPaymentLoading}
+                              className={`text-white font-medium rounded-lg text-sm px-5 py-2.5 text-center focus:ring-4 focus:outline-none ${
+                                partialPaymentLoading 
+                                  ? 'bg-orange-400 cursor-not-allowed' 
+                                  : 'bg-orange-600 hover:bg-orange-700 focus:ring-orange-300'
+                              }`}
+                            >
+                              {partialPaymentLoading ? '⏳ Processing...' : '💰 Record Partial Payment'}
+                            </button>
+                          ) : selectedCollection.collection_type === 'cheque' || isConvertingCredit ? (
+                            <>
                               <button
                                 onClick={recordChequeFromCollection}
                                 type="button"
@@ -1606,15 +1632,17 @@ export const Collections: React.FC = () => {
                               >
                                 {isConvertingCredit ? '🔁 Convert to Cheque' : '💳 Record Cheque'}
                               </button>
+                            </>
+                          ) : (
+                            <button
+                              onClick={handleRecognizeCollection}
+                              type="button"
+                              className="text-white bg-green-600 hover:bg-green-700 focus:ring-4 focus:outline-none focus:ring-green-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center"
+                            >
+                              ✅ Recognize Collection
+                            </button>
+                          )}
                         </>
-                      ) : (
-                        <button
-                          onClick={handleRecognizeCollection}
-                          type="button"
-                          className="text-white bg-green-600 hover:bg-green-700 focus:ring-4 focus:outline-none focus:ring-green-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center"
-                        >
-                          ✅ Recognize Collection
-                        </button>
                       )}
                     </div>
                   </div>

@@ -84,6 +84,8 @@ export interface Order {
   freeItems?: OrderItem[]; // Free items given with the order
   chequeBalance?: number;
   creditBalance?: number;
+  totalCostPrice?: number; // Sum of costPrice * qty for items (persisted)
+  totalMarginPrice?: number; // Sum of marginPrice * qty for items (persisted)
   assignedUserId?: string; // ID of the user (Sales Rep or Driver) who created/manages the order
   returnAmount?: number; // Amount returned for this order
   amountPaid?: number; // Amount paid for this order

@@ -16,9 +16,7 @@ import { Collections } from './components/pages/Collections';
 import ChequeManagement from './components/pages/ChequeManagement';
 import IssuedCheques from './components/pages/IssuedCheques';
 import Expenses from './components/pages/Expenses';
-import AccountingDashboard from './components/pages/AccountingDashboard';
-import ChartOfAccounts from './components/pages/ChartOfAccounts';
-import JournalEntries from './components/pages/JournalEntries';
+import PartnerInvestment from './components/pages/PartnerInvestment';
 
 import { MyLocation } from './components/pages/MyLocation';
 import { Map } from './components/pages/Map';
@@ -82,8 +80,8 @@ const MainLayout = () => {
             <Sidebar isSidebarOpen={isSidebarOpen} closeSidebar={closeSidebar} />
             
       <div className="flex flex-col flex-1 min-w-0 lg:pl-64">
-        <Header toggleSidebar={toggleSidebar} />
-        <main className="flex-1 overflow-y-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-6 max-w-full">
+        <Header toggleSidebar={toggleSidebar} isSidebarOpen={isSidebarOpen} />
+        <main className="flex-1 overflow-y-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-6 max-w-full lg:max-w-screen-xl lg:mx-auto w-full">
                     <Routes>
                         <Route path="/" element={<Dashboard />} />
                         <Route path="/products" element={<Products />} />
@@ -91,19 +89,17 @@ const MainLayout = () => {
                         <Route path="/deliveries" element={<RoleProtectedRoute allowedRoles={["Admin", "Secretary", "Manager"]} element={<Deliveries />} />} />
                         <Route path="/customers" element={<CustomerManagement />} />
                         <Route path="/suppliers" element={<Suppliers />} />
-                        <Route path="/collections" element={<Collections />} />
+                        <Route path="/collections" element={<RoleProtectedRoute allowedRoles={["Admin", "Secretary", "Manager", "Sales Rep", "Driver"]} element={<Collections />} />} />
                         <Route path="/cheques" element={<RoleProtectedRoute allowedRoles={["Admin", "Secretary", "Manager"]} element={<ChequeManagement />} />} />
                         <Route path="/issued-cheques" element={<RoleProtectedRoute allowedRoles={["Admin", "Secretary", "Manager"]} element={<IssuedCheques />} />} />
+                        <Route path="/partner-investment" element={<RoleProtectedRoute allowedRoles={["Admin"]} element={<PartnerInvestment />} />} />
                         <Route path="/drivers" element={<Drivers />} />
                         <Route path="/expenses" element={<RoleProtectedRoute allowedRoles={["Admin", "Secretary", "Manager"]} element={<Expenses />} />} />
 
                         <Route path="/my-location" element={<RoleProtectedRoute allowedRoles={["Sales Rep", "Driver"]} element={<MyLocation />} />} />
                         <Route path="/map" element={<Map />} />
                         
-                        {/* Accounting System - Admin Only */}
-                        <Route path="/accounting" element={<RoleProtectedRoute allowedRoles={["Admin"]} element={<AccountingDashboard />} />} />
-                        <Route path="/chart-of-accounts" element={<RoleProtectedRoute allowedRoles={["Admin"]} element={<ChartOfAccounts />} />} />
-                        <Route path="/journal-entries" element={<RoleProtectedRoute allowedRoles={["Admin"]} element={<JournalEntries />} />} />
+                        {/* Accounting System removed from app routes */}
                         
                         <Route path="/users" element={<UserManagement />} />
                         <Route path="/settings" element={<Settings />} />
