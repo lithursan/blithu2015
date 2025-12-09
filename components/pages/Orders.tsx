@@ -573,6 +573,9 @@ export const Orders: React.FC = () => {
     [currentUser]
   );
 
+  // Simple admin check used to gate visibility of sensitive cost/margin fields
+  const isAdmin = useMemo(() => currentUser?.role === UserRole.Admin, [currentUser]);
+
   const accessibleSuppliers = useMemo(() => {
     if (currentUser?.role === UserRole.Sales && currentUser.assignedSupplierNames) {
         return new Set((currentUser.assignedSupplierNames || []).map((n: string) => norm(n)));
@@ -2379,6 +2382,13 @@ export const Orders: React.FC = () => {
         return;
       }
       try {
+        // Auto-save per-item cost & margin into the order before finalizing/printing
+        try {
+          await handleSaveCostMargin();
+        } catch (e) {
+          console.warn('Auto-save cost/margin failed (continuing):', e);
+        }
+
         const success = await handleConfirmFinalize(viewingOrder); // This will update status to Delivered and reduce stock/allocation
         if (!success) {
           // Stock validation failed, don't print bill and keep status as pending
@@ -3749,14 +3759,18 @@ export const Orders: React.FC = () => {
                       <span className="text-slate-600 dark:text-slate-400">Return Amount:</span>
                       <span className="font-medium text-blue-600">{formatCurrency(editableReturnAmount === '' ? 0 : editableReturnAmount, currency)}</span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-600 dark:text-slate-400">Total Cost (Order):</span>
-                      <span className="font-medium text-slate-900 dark:text-white">{formatCurrency(viewingOrder.totalCostPrice ?? 0, currency)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-600 dark:text-slate-400">Total Margin (Order):</span>
-                      <span className="font-medium text-yellow-600">{formatCurrency(viewingOrder.totalMarginPrice ?? 0, currency)}</span>
-                    </div>
+                                      {isAdmin && (
+                                        <>
+                                          <div className="flex justify-between">
+                                            <span className="text-slate-600 dark:text-slate-400">Total Cost (Order):</span>
+                                            <span className="font-medium text-slate-900 dark:text-white">{formatCurrency(viewingOrder.totalCostPrice ?? 0, currency)}</span>
+                                          </div>
+                                          <div className="flex justify-between">
+                                            <span className="text-slate-600 dark:text-slate-400">Total Margin (Order):</span>
+                                            <span className="font-medium text-yellow-600">{formatCurrency(viewingOrder.totalMarginPrice ?? 0, currency)}</span>
+                                          </div>
+                                        </>
+                                      )}
                     <div className="flex justify-between font-bold text-base mt-1">
                       <span className="text-slate-800 dark:text-slate-200">Balance Due:</span> 
                       <span className="text-red-600">{formatBalanceAmount(editableChequeBalance + editableCreditBalance, currency)}</span>
@@ -3775,8 +3789,12 @@ export const Orders: React.FC = () => {
                         <th className="py-1 px-2 text-right">Quantity</th>
                         <th className="py-1 px-2 text-right">Free</th>
                         <th className="py-1 px-2 text-right">Unit Price</th>
-                        <th className="py-1 px-2 text-right">Cost Price</th>
-                        <th className="py-1 px-2 text-right">Margin Price</th>
+                                        {isAdmin && (
+                                          <>
+                                            <th className="py-1 px-2 text-right">Cost Price</th>
+                                            <th className="py-1 px-2 text-right">Margin Price</th>
+                                          </>
+                                        )}
                         <th className="py-1 px-2 text-right">Subtotal</th>
                         {/* Actions column removed (Hold/Unhold removed) */}
                       </tr>
@@ -3798,8 +3816,7 @@ export const Orders: React.FC = () => {
                             <td className="py-1 px-2 text-right text-xs">{item.quantity}</td>
                             <td className="py-1 px-2 text-right text-xs font-bold text-green-600">{item.free || 0}</td>
                             <td className="py-1 px-2 text-right text-xs">{formatCurrency(item.price, currency)}</td>
-                            {
-                              (() => {
+                            {isAdmin && (() => {
                                 // Prefer per-order snapshot values stored on the item (item.costPrice / item.marginPrice)
                                 // This prevents current product page changes from retroactively changing historical orders.
                                 const unitCost = (item.costPrice != null && !isNaN(Number(item.costPrice))) ? Number(item.costPrice) : (product.costPrice != null ? Number(product.costPrice) : null);
@@ -3812,8 +3829,7 @@ export const Orders: React.FC = () => {
                                     <td className="py-1 px-2 text-right text-xs">{totalMargin != null ? formatCurrency(totalMargin, currency) : 'N/A'}</td>
                                   </>
                                 );
-                              })()
-                            }
+                              })()}
                             <td className="py-1 px-2 text-right font-semibold text-xs text-slate-900 dark:text-white">
                               {formatCurrency(subtotal, currency)}
                             </td>
@@ -3864,18 +3880,20 @@ export const Orders: React.FC = () => {
                       <div className="flex items-center justify-between p-2 border-t border-slate-200 dark:border-slate-600">
             <div className="flex-1">
               <p className="text-xs text-slate-600 dark:text-slate-300">Grand Total: <span className="font-bold text-slate-900 dark:text-white">{formatCurrency(viewingOrder.total, currency)}</span></p>
-              <p className="text-xs text-slate-600 dark:text-slate-300">Order Cost: <span className="font-medium text-slate-900 dark:text-white">{formatCurrency(viewingOrder.totalCostPrice ?? 0, currency)}</span></p>
-              <p className="text-xs text-slate-600 dark:text-slate-300">Order Margin: <span className="font-medium text-yellow-600">{formatCurrency(viewingOrder.totalMarginPrice ?? 0, currency)}</span></p>
+              {isAdmin && (
+                <>
+                  <p className="text-xs text-slate-600 dark:text-slate-300">Order Cost: <span className="font-medium text-slate-900 dark:text-white">{formatCurrency(viewingOrder.totalCostPrice ?? 0, currency)}</span></p>
+                  <p className="text-xs text-slate-600 dark:text-slate-300">Order Margin: <span className="font-medium text-yellow-600">{formatCurrency(viewingOrder.totalMarginPrice ?? 0, currency)}</span></p>
+                </>
+              )}
             </div>
                         <div className="flex flex-wrap items-center gap-1">
-                             {canEdit && (
+                            {canEdit && (
                               <>
                                 <button onClick={handleSaveBalances} type="button" className="text-white bg-green-600 hover:bg-green-700 font-medium rounded text-xs px-2 py-1 text-center">
                                   Save Balances
                                 </button>
-                                <button onClick={handleSaveCostMargin} type="button" className="text-white bg-amber-600 hover:bg-amber-700 font-medium rounded text-xs px-2 py-1 text-center" title="Save per-product Cost & Margin to DB">
-                                  Save Cost & Margin
-                                </button>
+                                {/* Save Cost & Margin button removed; auto-save occurs when Download Bill & Confirm is used */}
                               </>
                              )}
                             {canPrintBill && !(viewingOrder.status === OrderStatus.Delivered && (currentUser?.role === UserRole.Driver || currentUser?.role === UserRole.Sales || currentUser?.role === UserRole.Manager)) && (
