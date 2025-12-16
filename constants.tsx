@@ -18,6 +18,17 @@ export const NAV_ITEMS = [
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
       </svg>
     ),
+    subItems: [
+      {
+        path: '/suppliers',
+        label: 'Suppliers',
+        icon: (
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h6m-6 4h6m-6 4h6" />
+          </svg>
+        )
+      }
+    ]
   },
   {
     path: '/orders',
@@ -37,6 +48,22 @@ export const NAV_ITEMS = [
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 21v-2M8 21v-2" />
       </svg>
     ),
+    subItems: [
+      {
+        path: '/drivers',
+        label: 'Drivers',
+        icon: (
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 11c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21c-3.333-3.333-6.667-5-10-5s-6.667 1.667-10 5" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 11v10" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 12.464l-3.536 3.536-3.536-3.536" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9h-2a2 2 0 100 4h2" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 9h2a2 2 0 110 4H6" />
+          </svg>
+        )
+      }
+    ]
   },
   {
     path: '/customers',
@@ -47,15 +74,7 @@ export const NAV_ITEMS = [
       </svg>
     ),
   },
-  {
-    path: '/suppliers',
-    label: 'Suppliers',
-    icon: (
-      <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h6m-6 4h6m-6 4h6" />
-      </svg>
-    ),
-  },
+  
   {
     path: '/drivers',
     label: 'Drivers',
@@ -79,6 +98,7 @@ export const NAV_ITEMS = [
       </svg>
     ),
   },
+  // Assets removed from top-level nav; added as subItem under Partner Investment below
 
   {
     path: '/my-location',
@@ -108,6 +128,28 @@ export const NAV_ITEMS = [
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
       </svg>
     ),
+    subItems: [
+      {
+        path: '/cheques',
+        label: 'Cheques',
+        icon: (
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 10l5 3 5-3M7 6l5 3 5-3" />
+          </svg>
+        )
+      },
+      {
+        path: '/issued-cheques',
+        label: 'Issued Cheques',
+        icon: (
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 4v12l-4-2-4 2V4M8 2h8a2 2 0 012 2v16l-6-3-6 3V4a2 2 0 012-2z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 7h.01M9 11h6M9 15h6" />
+          </svg>
+        )
+      }
+    ]
   },
   {
     path: '/partner-investment',
@@ -118,27 +160,19 @@ export const NAV_ITEMS = [
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 20h14" />
       </svg>
     ),
+    subItems: [
+      {
+        path: '/assets',
+        label: 'Assets',
+        icon: (
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7h18M7 7v13a1 1 0 001 1h8a1 1 0 001-1V7M12 3v4" />
+          </svg>
+        )
+      }
+    ]
   },
-  {
-    path: '/cheques',
-    label: 'Cheques',
-    icon: (
-      <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6" />
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 10l5 3 5-3M7 6l5 3 5-3" />
-      </svg>
-    ),
-  },
-  {
-    path: '/issued-cheques',
-    label: 'Issued Cheques',
-    icon: (
-      <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 4v12l-4-2-4 2V4M8 2h8a2 2 0 012 2v16l-6-3-6 3V4a2 2 0 012-2z" />
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 7h.01M9 11h6M9 15h6" />
-      </svg>
-    ),
-  },
+  
   
   
   {

@@ -37,53 +37,62 @@ export const Sidebar: React.FC<SidebarProps> = ({ isSidebarOpen, closeSidebar })
     };
   }, []);
 
-  const accessibleNavItems = NAV_ITEMS.filter(item => {
+  const canAccessPath = (path: string) => {
     // Allow cheques access for Admin, Secretary and Manager
-    if (item.path === '/cheques' || item.path === '/issued-cheques') {
+    if (path === '/cheques' || path === '/issued-cheques') {
       return currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Secretary || currentUser?.role === UserRole.Manager;
     }
 
-    if (item.path === '/users') {
+    if (path === '/users') {
       // Only allow Admins to see User Management (Secretary excluded)
       return currentUser?.role === UserRole.Admin;
     }
     
-    // Other role-based visibility rules are handled above; accounting pages were removed from routes
-    
     // Allow deliveries and expenses to Admin, Secretary and Manager
-    if (item.path === '/deliveries' || item.path === '/expenses') {
+    if (path === '/deliveries' || path === '/expenses') {
       return currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Secretary || currentUser?.role === UserRole.Manager;
     }
     // Partner Investment: Admin only
-    if (item.path === '/partner-investment') {
+    if (path === '/partner-investment') {
       return currentUser?.role === UserRole.Admin;
     }
     // My Location is only for Sales Reps and Drivers
-    if (item.path === '/my-location') {
+    if (path === '/my-location') {
       return currentUser?.role === UserRole.Sales || currentUser?.role === UserRole.Driver;
     }
     // Map View access for Drivers, Sales Reps, Admin, Secretary and Manager
-    if (item.path === '/map') {
+    if (path === '/map') {
       return currentUser?.role === UserRole.Driver || currentUser?.role === UserRole.Sales || currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Secretary || currentUser?.role === UserRole.Manager;
     }
     // Make Settings visible to any authenticated user
-    if (item.path === '/settings') {
+    if (path === '/settings') {
       return !!currentUser;
     }
-    if (item.path === '/drivers' || item.path === '/suppliers') {
+    if (path === '/drivers' || path === '/suppliers') {
       return currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Secretary || currentUser?.role === UserRole.Manager;
     }
     // Collections: Admin/Secretary/Manager can manage; Sales Reps and Drivers can view-only
-    if (item.path === '/collections') {
+    if (path === '/collections') {
       return currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Secretary || currentUser?.role === UserRole.Manager || currentUser?.role === UserRole.Sales || currentUser?.role === UserRole.Driver;
     }
-    // Cheque alerts settings only for Admin
-    
+    // Assets: only Admin, Secretary and Manager
+    if (path === '/assets') {
+      return currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Secretary || currentUser?.role === UserRole.Manager;
+    }
+
+    // Default allow
     return true;
-  });
+  };
+
+  const accessibleNavItems = NAV_ITEMS.filter(item => canAccessPath(item.path));
 
 
   const hiddenOnMobile = !isSidebarOpen && !isLarge;
+  const [openSubmenu, setOpenSubmenu] = useState<string | null>(null);
+
+  const toggleSubmenu = (path: string) => {
+    setOpenSubmenu(prev => (prev === path ? null : path));
+  };
 
   return (
   <aside
@@ -110,37 +119,81 @@ export const Sidebar: React.FC<SidebarProps> = ({ isSidebarOpen, closeSidebar })
           <ul className="space-y-0 pr-1">
           {accessibleNavItems.map((item) => (
             <li key={item.path}>
-              <NavLink
-                to={item.path}
-                onClick={closeSidebar}
-                className={({ isActive }) =>
-                  `flex items-center px-2 py-2 sm:p-2 my-0.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors duration-200 text-xs sm:text-sm ${
-                    isActive ? 'bg-blue-50 text-blue-600 dark:bg-slate-700 dark:text-blue-400' : ''
-                  }`
-                }
-              >
-                <div className="w-5 h-5 sm:w-6 sm:h-6 flex-shrink-0">
-                  {item.icon}
-                </div>
-                <span className="ml-3 sm:ml-4 font-medium truncate">{item.label}</span>
-                {item.path === '/cheques' && upcomingChequesCount > 0 && (
-                  <span className="ml-2 inline-flex items-center justify-center px-2 py-0.5 text-xs font-medium leading-none text-red-700 bg-red-100 rounded-full">{upcomingChequesCount}</span>
-                )}
-                {item.path === '/collections' && (warningCreditsCount > 0 || overdueCreditsCount > 0) && (
-                  <div className="ml-2 flex items-center space-x-1">
-                    {warningCreditsCount > 0 && (
-                      <span className="inline-flex items-center justify-center w-5 h-5 text-xs font-bold text-yellow-800 bg-yellow-200 rounded-full">
-                        {warningCreditsCount}
-                      </span>
-                    )}
-                    {overdueCreditsCount > 0 && (
-                      <span className="inline-flex items-center justify-center w-5 h-5 text-xs font-bold text-red-800 bg-red-200 rounded-full">
-                        {overdueCreditsCount}
-                      </span>
-                    )}
+              <div className="relative">
+                <NavLink
+                  to={item.path}
+                  onClick={closeSidebar}
+                  className={({ isActive }) =>
+                    `relative flex items-center px-2 py-2 pr-10 sm:p-2 my-0.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors duration-200 text-xs sm:text-sm ${
+                      isActive ? 'bg-blue-50 text-blue-600 dark:bg-slate-700 dark:text-blue-400' : ''
+                    }`
+                  }
+                >
+                  <div className="w-5 h-5 sm:w-6 sm:h-6 flex-shrink-0">
+                    {item.icon}
                   </div>
+                  <span className="ml-3 sm:ml-4 font-medium truncate">{item.label}</span>
+                  {item.path === '/cheques' && upcomingChequesCount > 0 && (
+                    <span className="ml-2 inline-flex items-center justify-center px-2 py-0.5 text-xs font-medium leading-none text-red-700 bg-red-100 rounded-full">{upcomingChequesCount}</span>
+                  )}
+                  {item.path === '/collections' && (warningCreditsCount > 0 || overdueCreditsCount > 0) && (
+                    <div className="ml-2 flex items-center space-x-1">
+                      {warningCreditsCount > 0 && (
+                        <span className="inline-flex items-center justify-center w-5 h-5 text-xs font-bold text-yellow-800 bg-yellow-200 rounded-full">
+                          {warningCreditsCount}
+                        </span>
+                      )}
+                      {overdueCreditsCount > 0 && (
+                        <span className="inline-flex items-center justify-center w-5 h-5 text-xs font-bold text-red-800 bg-red-200 rounded-full">
+                          {overdueCreditsCount}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </NavLink>
+
+                {/* If parent has subItems, render a three-dot toggle to open submenu (subpages hidden by default) */}
+                  {Array.isArray((item as any).subItems) && (
+                  (() => {
+                    const visibleSubItems = ((item as any).subItems as any[]).filter(sub => canAccessPath(sub.path));
+                    if (visibleSubItems.length === 0) return null;
+                    return (
+                      <div>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); e.preventDefault(); toggleSubmenu(item.path); }}
+                          aria-expanded={openSubmenu === item.path}
+                          aria-haspopup="menu"
+                          title="Open subpages"
+                          className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700 text-black dark:text-white z-10"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                            <path d="M6 10a2 2 0 11-4 0 2 2 0 014 0zm6 0a2 2 0 11-4 0 2 2 0 014 0zm6 0a2 2 0 11-4 0 2 2 0 014 0z" />
+                          </svg>
+                        </button>
+
+                        {openSubmenu === item.path && (
+                          <ul role="menu" className="mt-1 ml-6 space-y-1">
+                            {visibleSubItems.map(sub => (
+                              <li key={sub.path} role="none">
+                                <NavLink
+                                  to={sub.path}
+                                  onClick={() => { closeSidebar(); setOpenSubmenu(null); }}
+                                  className={({ isActive }) =>
+                                    `flex items-center px-2 py-1 rounded text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs ${isActive ? 'bg-blue-50 text-blue-600 dark:bg-slate-700 dark:text-blue-400' : ''}`
+                                  }
+                                >
+                                  <div className="w-4 h-4 flex-shrink-0">{sub.icon}</div>
+                                  <span className="ml-2 truncate">{sub.label}</span>
+                                </NavLink>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    );
+                  })()
                 )}
-              </NavLink>
+              </div>
             </li>
           ))}
         </ul>

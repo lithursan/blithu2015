@@ -204,18 +204,25 @@ export const Collections: React.FC = () => {
     } else {
       // Apply date filters only when overdue filter is not active
       if (dateFrom) {
-        const fromDate = new Date(dateFrom);
+        // Compare by YYYY-MM-DD to avoid timezone offsets affecting the filter
         filtered = filtered.filter(c => {
-          const d = new Date(c.collected_at || c.created_at || '');
-          return d >= fromDate;
+          const raw = c.collected_at || c.created_at;
+          if (!raw) return false;
+          const d = new Date(raw);
+          if (isNaN(d.getTime())) return false;
+          const ymd = d.toISOString().slice(0,10);
+          return ymd >= dateFrom;
         });
       }
       if (dateTo) {
-        const toDate = new Date(dateTo);
+        // Compare by YYYY-MM-DD to include the full end date
         filtered = filtered.filter(c => {
-          const d = new Date(c.collected_at || c.created_at || '');
-          // Add 1 day to include the end date
-          return d <= new Date(toDate.getTime() + 24*60*60*1000);
+          const raw = c.collected_at || c.created_at;
+          if (!raw) return false;
+          const d = new Date(raw);
+          if (isNaN(d.getTime())) return false;
+          const ymd = d.toISOString().slice(0,10);
+          return ymd <= dateTo;
         });
       }
     }

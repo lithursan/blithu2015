@@ -17,6 +17,7 @@ import ChequeManagement from './components/pages/ChequeManagement';
 import IssuedCheques from './components/pages/IssuedCheques';
 import Expenses from './components/pages/Expenses';
 import PartnerInvestment from './components/pages/PartnerInvestment';
+import Assets from './components/pages/Assets';
 
 import { MyLocation } from './components/pages/MyLocation';
 import { Map } from './components/pages/Map';
@@ -93,6 +94,7 @@ const MainLayout = () => {
                         <Route path="/cheques" element={<RoleProtectedRoute allowedRoles={["Admin", "Secretary", "Manager"]} element={<ChequeManagement />} />} />
                         <Route path="/issued-cheques" element={<RoleProtectedRoute allowedRoles={["Admin", "Secretary", "Manager"]} element={<IssuedCheques />} />} />
                         <Route path="/partner-investment" element={<RoleProtectedRoute allowedRoles={["Admin"]} element={<PartnerInvestment />} />} />
+                        <Route path="/assets" element={<RoleProtectedRoute allowedRoles={["Admin","Secretary","Manager"]} element={<Assets />} />} />
                         <Route path="/drivers" element={<Drivers />} />
                         <Route path="/expenses" element={<RoleProtectedRoute allowedRoles={["Admin", "Secretary", "Manager"]} element={<Expenses />} />} />
 

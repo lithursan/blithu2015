@@ -2114,6 +2114,38 @@ const SalesRepDashboard: React.FC<{
     filteredMyOrders.some(order => order.customerId === customer.id)
   );
 
+  // Admin-style financial breakdown for this Sales Rep (date-wise Paid / Cheque / Credit / Returns)
+  const adminFinancialDataForRep = useMemo(() => {
+    const map: Record<string, { paid: number; cheque: number; credit: number; returns: number; fullLabel?: string }> = {};
+
+    (filteredMyOrders || []).forEach(order => {
+      try {
+        if (order.status !== OrderStatus.Delivered) return;
+        const d = new Date(order.date);
+        if (isNaN(d.getTime())) return;
+        const key = d.toISOString().split('T')[0];
+        const fullLabel = d.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' });
+
+        const cheque = Number(order.chequeBalance || order.chequebalance || 0);
+        const credit = Number(order.creditBalance || order.creditbalance || 0);
+        const returnsAmt = Number(order.returnAmount || order.returnamount || 0);
+        const total = Number(order.total || 0);
+        const paid = total - cheque - credit - returnsAmt;
+
+        if (!map[key]) map[key] = { paid: 0, cheque: 0, credit: 0, returns: 0, fullLabel };
+        map[key].paid += paid;
+        map[key].cheque += cheque;
+        map[key].credit += credit;
+        map[key].returns += returnsAmt;
+      } catch (e) {
+        // ignore
+      }
+    });
+
+    const keys = Object.keys(map).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+    return keys.map(k => ({ label: k, fullLabel: map[k].fullLabel, paid: map[k].paid, cheque: map[k].cheque, credit: map[k].credit, returns: map[k].returns }));
+  }, [filteredMyOrders]);
+
     return (
         <div className="p-4 sm:p-6 lg:p-8 space-y-8">
             <div className="flex justify-between items-center">
@@ -2227,7 +2259,7 @@ const SalesRepDashboard: React.FC<{
                     <CardDescription>Your recent customer orders</CardDescription>
                 </CardHeader>
                 <CardContent>
-          {filteredMyOrders.length > 0 ? (
+              {filteredMyOrders.length > 0 ? (
                         <div className="overflow-x-auto">
                             <table className="w-full text-sm text-left text-slate-500 dark:text-slate-400">
                                 <thead className="text-xs text-slate-700 uppercase bg-slate-50 dark:bg-slate-700 dark:text-slate-400">
@@ -2260,6 +2292,25 @@ const SalesRepDashboard: React.FC<{
                         </div>
                     )}
                 </CardContent>
+            </Card>
+
+            {/* Admin-style Financials for Sales Rep */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Date vs Paid / Cheque / Credit / Returns (Your Sales)</CardTitle>
+                <CardDescription>Daily totals for your delivered orders</CardDescription>
+              </CardHeader>
+              <CardContent className="h-[320px] sm:h-[380px] md:h-[460px]">
+                {adminFinancialDataForRep && adminFinancialDataForRep.length > 0 ? (
+                  <div className="h-full">
+                    <AdminFinancialChart data={adminFinancialDataForRep} />
+                  </div>
+                ) : (
+                  <div className="h-full flex items-center justify-center text-slate-500 dark:text-slate-400">
+                    <p>No financial data for your selected filters.</p>
+                  </div>
+                )}
+              </CardContent>
             </Card>
 
             {/* Customer Portfolio */}
