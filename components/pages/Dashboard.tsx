@@ -1439,7 +1439,25 @@ export const Dashboard: React.FC = () => {
           )}
         </div>
 
-
+        {/* Make Total Orders visible to Managers too (moved outside the manager-hidden block) */}
+        <Card className="bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-950 dark:to-emerald-900 border-emerald-200 dark:border-emerald-800 min-h-[180px] flex flex-col">
+          <CardHeader className="flex-shrink-0">
+            <CardTitle className="text-emerald-700 dark:text-emerald-300">Total Orders</CardTitle>
+          </CardHeader>
+          <CardContent className="flex-1 flex flex-col justify-between">
+            <div className="flex justify-between items-start">
+              <div>
+                <p className={`${getFontSizeClass(totalOrders)} font-bold text-emerald-600 dark:text-emerald-400`}>{totalOrders}</p>
+                <p className="text-lg font-semibold text-emerald-500 dark:text-emerald-300">{formatCurrency(totalOrdersAmount, currency)}</p>
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Total Orders = count(filtered orders). Amount = sum(order.total)</p>
+              </div>
+            </div>
+            <div className="flex justify-end mt-4 space-x-2">
+              <ChangeIndicator change={ordersChange} />
+              <ChangeIndicator change={ordersAmountChange} />
+            </div>
+          </CardContent>
+        </Card>
 
       {/* Charts */}
       <div className="grid gap-6 sm:gap-8 lg:grid-cols-1">

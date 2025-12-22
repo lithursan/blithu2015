@@ -100,7 +100,7 @@ export const Products: React.FC = () => {
       // Show cumulative allocated quantities up to today (inclusive). This lets drivers see
       // the combined allocations from previous days that are still active (not reconciled).
       const today = new Date().toISOString().split('T')[0];
-      const allocationsForDriver = (driverAllocations || []).filter(a => a.driverId === currentUser.id && new Date(a.date) <= new Date(today) && (a.status ?? 'Allocated') !== 'Reconciled');
+      const allocationsForDriver = (driverAllocations || []).filter(a => String(a.driverId) === String(currentUser.id) && String(a.date).slice(0,10) === todayStr && (a.status ?? 'Allocated') !== 'Reconciled');
 
       if (allocationsForDriver.length > 0) {
         const allocatedQuantities = new Map<string, number>();

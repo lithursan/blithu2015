@@ -399,6 +399,7 @@ export const Collections: React.FC = () => {
   const exportCollectionsPDF = () => {
     const columns = [
       { key: 'order_id', title: 'Order ID' },
+      { key: 'date', title: 'Date' },
       { key: 'customer_name', title: 'Customer' },
       { key: 'collection_type', title: 'Type' },
       { key: 'amount', title: 'Amount' },
@@ -410,16 +411,29 @@ export const Collections: React.FC = () => {
 
     const data = filteredCollections.map(collection => {
       const customer = customers.find(c => c.id === collection.customer_id);
-      const collectedBy = users?.find(u => u.id === collection.collected_by);
-      
+      // Try multiple possible column names and tolerant matching for user id/string differences
+      const possibleCollectorKeys = [collection.collected_by, collection.collectedby, collection.completed_by, collection.completedby];
+      const collectedBy = users?.find(u => {
+        try {
+          const uid = String(u.id || '').trim();
+          return possibleCollectorKeys.some(key => key != null && String(key).trim() !== '' && (String(key).trim() === uid || String(key).trim() === String(u.name || '').trim() || String(u.name || '').trim().toLowerCase() === String(key).trim().toLowerCase()));
+        } catch (e) {
+          return false;
+        }
+      });
+
+      const collectorDisplay = collectedBy?.name || possibleCollectorKeys.find(k => k && String(k).trim() !== '') || 'N/A';
+
       return {
         order_id: collection.order_id || 'N/A',
+        // include ISO date for PDF exporter to format consistently
+        date: collection.collected_at || collection.created_at || '',
         customer_name: customer?.name || 'Unknown Customer',
         collection_type: collection.collection_type || 'N/A',
         amount: `LKR ${(collection.amount || 0).toFixed(2)}`,
         status: collection.status || 'Pending',
-        collected_by: collectedBy?.name || 'N/A',
-        collected_at: collection.collected_at ? new Date(collection.collected_at).toLocaleDateString() : 'Not collected',
+        collected_by: collectorDisplay,
+        collected_at: collection.collected_at ? collection.collected_at : (collection.created_at ? collection.created_at : ''),
         notes: collection.notes || 'No notes'
       };
     });
