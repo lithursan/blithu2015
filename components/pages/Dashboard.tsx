@@ -361,10 +361,15 @@ export const Dashboard: React.FC = () => {
     const [selectedSalesRep, setSelectedSalesRep] = useState<string>('all');
     const [selectedCustomer, setSelectedCustomer] = useState<string>('all');
     const [selectedCategory, setSelectedCategory] = useState<string>('all');
-    // Date filters default: empty (no preselected start/end)
+    // Date filters default: current month
     const now = new Date();
-    const [dateRange, setDateRange] = useState({ start: '', end: '' });
-    const [monthFilter, setMonthFilter] = useState<string>('all');
+    const defaultMonthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+    const defaultMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+    const defaultMonthValue = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const [dateRange, setDateRange] = useState({ start: defaultMonthStart, end: defaultMonthEnd });
+    const [monthFilter, setMonthFilter] = useState<string>(defaultMonthValue);
+    // When true, monthly financial overview ignores the current date filters and shows data for all months
+    const [monthlyFree, setMonthlyFree] = useState<boolean>(true);
     
     // Percentage calculator states
     const [showPercentageCalculator, setShowPercentageCalculator] = useState<boolean>(false);
@@ -675,6 +680,58 @@ export const Dashboard: React.FC = () => {
       };
     });
   }, [salesDataForChart]);
+
+  // Monthly aggregated financials (Admin view): group by YYYY-MM
+  const monthlyFinancialData = useMemo(() => {
+    const map = new Map<string, { sales: number; deliveryCost: number; marginCost: number; cheque: number; credit: number; fullLabel?: string }>();
+
+    // Use all delivered orders when monthlyFree is enabled, otherwise respect current filters
+    const baseOrders = monthlyFree ? (orders || []).filter(o => o.status === OrderStatus.Delivered) : filteredOrders;
+
+    baseOrders.forEach(order => {
+      try {
+        if (order.status !== OrderStatus.Delivered) return;
+        const d = new Date(order.date);
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; // e.g. 2025-11
+        const fullLabel = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+        if (!map.has(key)) map.set(key, { sales: 0, deliveryCost: 0, marginCost: 0, cheque: 0, credit: 0, fullLabel });
+        const entry = map.get(key)!;
+        entry.sales += Number(order.total || 0);
+
+        // Use persisted per-order cost fields when available, fallback to computed cost
+        const orderCostVal = Number(order.total_cost_price ?? order.totalCostPrice ?? order.totalCostPrice ?? 0) || 0;
+        if (orderCostVal > 0) {
+          entry.deliveryCost += orderCostVal;
+        } else {
+          // compute from orderItems using product costPrice
+          const computed = (order.orderItems || []).reduce((sum, item) => {
+            const product = safeProducts.find(p => p.id === item.productId);
+            const costPrice = (typeof product?.costPrice === 'number' && !isNaN(product.costPrice)) ? product.costPrice : 0;
+            const qty = (Number(item.quantity) || 0) + (Number(item.free) || 0);
+            return sum + (costPrice * qty);
+          }, 0);
+          entry.deliveryCost += computed;
+        }
+
+        const orderMarginVal = Number(order.total_margin_price ?? order.totalMarginPrice ?? 0) || 0;
+        if (orderMarginVal > 0) entry.marginCost += orderMarginVal;
+
+        entry.cheque += Number(order.chequeBalance || 0);
+        entry.credit += Number(order.creditBalance || 0);
+      } catch (e) {
+        // ignore malformed dates
+      }
+    });
+
+    const keys = Array.from(map.keys()).sort((a, b) => new Date(a + '-01').getTime() - new Date(b + '-01').getTime());
+    return keys.map(k => {
+      const v = map.get(k)!;
+      const [y, m] = k.split('-').map(Number);
+      const label = new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+      return { label, fullLabel: v.fullLabel, sales: v.sales, deliveryCost: v.deliveryCost, marginCost: v.marginCost, cheque: v.cheque, credit: v.credit };
+    });
+  }, [filteredOrders, safeProducts, orders, monthlyFree]);
 
   // Admin: compute date-wise totals for Paid, Cheque, Credit, Returns
   const adminFinancialData = useMemo(() => {
@@ -1371,21 +1428,21 @@ export const Dashboard: React.FC = () => {
           </CardContent>
         </Card>
 
-        {/* Difference Card: Total Order Amount - Order Cost (Admin/Manager view) */}
+        {/* Difference Card: Total Sales - Delivered Cost (Admin/Manager view) */}
         <Card className="bg-gradient-to-br from-stone-50 to-stone-100 dark:from-stone-950 dark:to-stone-900 border-stone-200 dark:border-stone-800 min-h-[180px] flex flex-col">
           <CardHeader className="flex-shrink-0">
             <CardTitle className="text-stone-700 dark:text-stone-300">Difference</CardTitle>
-            <CardDescription>Total Order Amount - Order Cost</CardDescription>
+            <CardDescription>Total Sales - Delivered Cost</CardDescription>
           </CardHeader>
           <CardContent className="flex-1 flex flex-col justify-between">
             <div className="flex justify-between items-start">
               <div>
-                <StatValue amount={totalOrdersAmount - totalOrderCost} currency={currency} colorClass="text-stone-600 dark:text-stone-400" />
-                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Difference between total order values and calculated order cost (filtered period)</p>
+                <StatValue amount={totalSales - totalCost} currency={currency} colorClass="text-stone-600 dark:text-stone-400" />
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Difference between total delivered sales and delivered cost (filtered period)</p>
               </div>
             </div>
             <div className="flex justify-end mt-4">
-              <ChangeIndicator change={calculateChange(totalOrdersAmount, totalOrderCost)} />
+              <ChangeIndicator change={calculateChange(totalSales, totalCost)} />
             </div>
           </CardContent>
         </Card>
@@ -1511,6 +1568,39 @@ export const Dashboard: React.FC = () => {
               ) : (
                 <div className="h-full flex items-center justify-center text-slate-500 dark:text-slate-400">
                   <p>No financial data for the selected filters.</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+        {isAdmin && (
+          <Card>
+            <CardHeader>
+                <div className="flex items-start justify-between w-full">
+                  <div>
+                    <CardTitle>Monthly Financial Overview</CardTitle>
+                    <CardDescription>Month-wise totals for Sales, Delivery Cost, Margin Cost, Cheque, and Credit</CardDescription>
+                  </div>
+                  <div className="ml-4 flex items-center gap-2">
+                    <span className="text-sm text-slate-400 dark:text-slate-500">Free</span>
+                    <button
+                      type="button"
+                      onClick={() => setMonthlyFree(!monthlyFree)}
+                      className={`inline-flex items-center px-3 py-1 rounded-md text-sm font-medium focus:outline-none ${monthlyFree ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-slate-100 dark:bg-slate-600'}`}
+                    >
+                      {monthlyFree ? 'On' : 'Off'}
+                    </button>
+                  </div>
+                </div>
+              </CardHeader>
+            <CardContent className="h-[360px] sm:h-[420px] md:h-[520px]">
+              {monthlyFinancialData.length > 0 ? (
+                <div className="h-full">
+                  <SalesChart data={monthlyFinancialData} maxXTicks={12} />
+                </div>
+              ) : (
+                <div className="h-full flex items-center justify-center text-slate-500 dark:text-slate-400">
+                  <p>No monthly data for the selected filters.</p>
                 </div>
               )}
             </CardContent>

@@ -67,6 +67,9 @@ export const SalesChart: React.FC<SalesChartProps> = ({ data, maxXTicks = 7 }) =
         <Line type="monotone" dataKey="marginCost" stroke="#f59e0b" strokeWidth={2} activeDot={{ r: 6 }} name="Margin Cost" />
         <Line type="monotone" dataKey="grossProfit" stroke="#10b981" strokeWidth={2} activeDot={{ r: 6 }} name="Gross Profit" />
         <Line type="monotone" dataKey="netProfit" stroke="#8b5cf6" strokeWidth={2} activeDot={{ r: 6 }} name="Net Profit" />
+        {/* Optional financial series: cheque & credit */}
+        <Line type="monotone" dataKey="cheque" stroke="#06b6d4" strokeWidth={2} activeDot={{ r: 6 }} name="Cheque" />
+        <Line type="monotone" dataKey="credit" stroke="#a78bfa" strokeWidth={2} activeDot={{ r: 6 }} name="Credit" />
       </LineChart>
     </ResponsiveContainer>
   );

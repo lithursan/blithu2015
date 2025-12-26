@@ -54,7 +54,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     }
                     
                     if (!error && data) {
-                        // Process assignedSupplierNames if it's a JSON string
+                        // Process assignedSupplierNames and assignedRoutes if they are JSON/string
                         const processedUser = {
                             ...data,
                             assignedSupplierNames: (() => {
@@ -68,6 +68,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                                     }
                                 }
                                 return Array.isArray(data.assignedsuppliernames) ? data.assignedsuppliernames : [];
+                            })(),
+                            assignedRoutes: (() => {
+                                if (!data.assignedroutes) return [];
+                                if (typeof data.assignedroutes === 'string') {
+                                    try {
+                                        const parsed = JSON.parse(data.assignedroutes);
+                                        return Array.isArray(parsed) ? parsed : [];
+                                    } catch {
+                                        return [];
+                                    }
+                                }
+                                return Array.isArray(data.assignedroutes) ? data.assignedroutes : [];
                             })()
                         };
                         console.log('Setting current user:', processedUser);
@@ -137,7 +149,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 // RLS policies may need to be adjusted or disabled for expenses table
                 console.log('Using custom authentication system (Supabase auth session not created)');
                 
-                // Process assignedSupplierNames if it's a JSON string
+                // Process assignedSupplierNames and assignedRoutes if they're JSON/string
                 const processedUser = {
                     ...data,
                     assignedSupplierNames: (() => {
@@ -151,6 +163,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                             }
                         }
                         return Array.isArray(data.assignedsuppliernames) ? data.assignedsuppliernames : [];
+                    })(),
+                    assignedRoutes: (() => {
+                        if (!data.assignedroutes) return [];
+                        if (typeof data.assignedroutes === 'string') {
+                            try {
+                                const parsed = JSON.parse(data.assignedroutes);
+                                return Array.isArray(parsed) ? parsed : [];
+                            } catch {
+                                return [];
+                            }
+                        }
+                        return Array.isArray(data.assignedroutes) ? data.assignedroutes : [];
                     })()
                 };
                 
@@ -218,6 +242,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                                 }
                             }
                             return Array.isArray(data.assignedsuppliernames) ? data.assignedsuppliernames : [];
+                        })(),
+                        assignedRoutes: (() => {
+                            if (!data.assignedroutes) return [];
+                            if (typeof data.assignedroutes === 'string') {
+                                try {
+                                    const parsed = JSON.parse(data.assignedroutes);
+                                    return Array.isArray(parsed) ? parsed : [];
+                                } catch {
+                                    return [];
+                                }
+                            }
+                            return Array.isArray(data.assignedroutes) ? data.assignedroutes : [];
                         })()
                     };
                     setCurrentUser(processedUser);

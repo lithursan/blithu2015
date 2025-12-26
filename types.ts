@@ -39,6 +39,7 @@ export interface User {
   password?: string;
   settings: UserSettings;
   assignedSupplierNames?: string[];
+  assignedRoutes?: string[];
   currentLocation?: {
     latitude: number;
     longitude: number;
@@ -131,6 +132,9 @@ export interface SalesData {
   deliveryCost?: number;
   // Cost computed from products.marginPrice (new margin price column)
   marginCost?: number;
+  // Financial breakdowns
+  cheque?: number;
+  credit?: number;
   // Derived metrics
   grossProfit?: number;
   netProfit?: number;

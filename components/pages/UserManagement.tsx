@@ -29,9 +29,17 @@ export const UserManagement: React.FC = () => {
             lastlogin: user.lastLogin,
             password: user.password,
             assignedsuppliernames: user.assignedSupplierNames,
+            // Ensure jsonb column receives a proper JSON value (stringify to be compatible with REST)
+            assignedroutes: user.assignedRoutes ? JSON.stringify(user.assignedRoutes) : '[]',
             settings: user.settings,
         };
-        await supabase.from('users').insert([dbUser]);
+        try {
+            const { error } = await supabase.from('users').insert([dbUser]);
+            if (error) throw error;
+        } catch (err) {
+            console.error('addUserToDB error:', err);
+            throw err;
+        }
     };
     const updateUserInDB = async (id: string, newData: Partial<User>) => {
     // Map to snake_case for DB
@@ -45,14 +53,56 @@ export const UserManagement: React.FC = () => {
     if (newData.lastLogin !== undefined) dbUpdate.lastlogin = newData.lastLogin;
     if (newData.password !== undefined) dbUpdate.password = newData.password;
     if (newData.assignedSupplierNames !== undefined) dbUpdate.assignedsuppliernames = newData.assignedSupplierNames;
+    if (newData.assignedRoutes !== undefined) dbUpdate.assignedroutes = Array.isArray(newData.assignedRoutes) ? JSON.stringify(newData.assignedRoutes) : newData.assignedRoutes;
     if (newData.settings !== undefined) dbUpdate.settings = newData.settings;
-    await supabase.from('users').update(dbUpdate).eq('id', id);
+    try {
+        const { error } = await supabase.from('users').update(dbUpdate).eq('id', id);
+        if (error) throw error;
+    } catch (err: any) {
+        console.error('updateUserInDB error:', err, { dbUpdate, id });
+        // If the error indicates the column doesn't exist in PostgREST schema cache,
+        // retry without the `assignedroutes` field (backwards-compatible fallback).
+        try {
+            const message = (err && (err.message || err.error || '')).toString();
+            const code = err && err.code;
+            if ((code === 'PGRST204' || message.includes("Could not find the 'assignedroutes'")) && dbUpdate.assignedroutes !== undefined) {
+                const fallback = { ...dbUpdate };
+                delete fallback.assignedroutes;
+                console.warn('Retrying update without assignedroutes due to missing column...');
+                const { error: retryError } = await supabase.from('users').update(fallback).eq('id', id);
+                if (retryError) {
+                    console.error('Retry update failed:', retryError);
+                    throw retryError;
+                }
+                return;
+            }
+        } catch (retryErr) {
+            console.error('Error during fallback retry:', retryErr);
+        }
+        throw err;
+    }
     };
     const deleteUserFromDB = async (id: string) => {
         await supabase.from('users').delete().eq('id', id);
     };
     const { currentUser: loggedInUser } = useAuth();
     const { users, setUsers, suppliers } = useData();
+    const [routesList, setRoutesList] = React.useState<string[]>([]);
+
+    React.useEffect(() => {
+        let mounted = true;
+        (async () => {
+            try {
+                const { fetchRoutes } = await import('../../supabaseClient');
+                const r = await fetchRoutes();
+                if (mounted) setRoutesList(r || []);
+            } catch (err) {
+                console.warn('Could not load routes for User Management:', err);
+                if (mounted) setRoutesList(['Unassigned']);
+            }
+        })();
+        return () => { mounted = false; };
+    }, []);
 
     const [searchTerm, setSearchTerm] = useState('');
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -138,6 +188,7 @@ export const UserManagement: React.FC = () => {
                     lastLogin: new Date().toISOString(),
                     password: currentUser.password,
                     assignedSupplierNames: currentUser.role === UserRole.Sales ? currentUser.assignedSupplierNames || [] : [],
+                    assignedRoutes: currentUser.role === UserRole.Sales ? currentUser.assignedRoutes || [] : [],
                     settings: {
                         language: 'en',
                         currency: 'LKR',
@@ -153,6 +204,7 @@ export const UserManagement: React.FC = () => {
                 }
                 if (updatedUser.role !== UserRole.Sales) {
                     updatedUser.assignedSupplierNames = [];
+                    updatedUser.assignedRoutes = [];
                 }
                 // For edit, check if email/phone is being changed to a duplicate
                 const { data: existingUsers, error: fetchError } = await supabase
@@ -186,7 +238,8 @@ export const UserManagement: React.FC = () => {
                     avatarUrl: row.avatarurl ?? '',
                     lastLogin: row.lastlogin,
                     password: row.password,
-                    assignedSupplierNames: row.assignedsuppliernames ?? [],
+                        assignedSupplierNames: row.assignedsuppliernames ?? [],
+                        assignedRoutes: row.assignedroutes ?? [],
                     settings: row.settings ?? {},
                 }));
                 setUsers(mappedUsers);
@@ -538,6 +591,31 @@ export const UserManagement: React.FC = () => {
                                             className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                                         />
                                         <label htmlFor={`supplier-${supplier.id}`} className="ml-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">{supplier.name}</label>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {currentUser.role === UserRole.Sales && (
+                        <div className="pt-4 border-t dark:border-slate-700">
+                            <label className="block mb-2 text-sm font-medium text-slate-900 dark:text-white">Assign Routes</label>
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                                {routesList.map(routeName => (
+                                    <div key={routeName} className="flex items-center p-2 rounded-md hover:bg-slate-100 dark:hover:bg-slate-700">
+                                        <input
+                                            type="checkbox"
+                                            id={`route-${routeName}`}
+                                            checked={(currentUser.assignedRoutes || []).includes(routeName)}
+                                            onChange={() => {
+                                                const currentAssigned = currentUser.assignedRoutes || [];
+                                                const isAssigned = currentAssigned.includes(routeName);
+                                                const newAssigned = isAssigned ? currentAssigned.filter(r => r !== routeName) : [...currentAssigned, routeName];
+                                                handleInputChange('assignedRoutes', newAssigned);
+                                            }}
+                                            className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                        />
+                                        <label htmlFor={`route-${routeName}`} className="ml-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">{routeName}</label>
                                     </div>
                                 ))}
                             </div>

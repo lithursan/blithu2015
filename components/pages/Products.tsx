@@ -532,22 +532,22 @@ export const Products: React.FC = () => {
                       </div>
 
                       {/* Mobile Card View */}
-                      <div className="lg:hidden space-y-3">
+                        <div className="lg:hidden space-y-3">
                           {filteredProducts.map((product) => (
-                              <div key={product.id} className="bg-slate-50 dark:bg-slate-800 rounded-lg p-4 border border-slate-200 dark:border-slate-700">
-                                  <div className="flex items-start justify-between mb-3">
+                              <div key={product.id} className="w-full box-border bg-slate-50 dark:bg-slate-800 rounded-lg p-3 sm:p-4 border border-slate-200 dark:border-slate-700 overflow-hidden relative">
+                                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between mb-3">
                                       <div className="flex items-center space-x-3 flex-1">
-                                          {product.imageUrl ? (
-                                              <img src={product.imageUrl} alt={product.name} className="w-12 h-12 rounded-full flex-shrink-0" />
-                                          ) : (
-                                              <div className="w-12 h-12 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-slate-500 dark:text-slate-400 text-lg flex-shrink-0">
-                                                  <span>?</span>
-                                              </div>
-                                          )}
+                                  {product.imageUrl ? (
+                                    <img src={product.imageUrl} alt={product.name} className="w-10 h-10 rounded-full flex-shrink-0" />
+                                  ) : (
+                                    <div className="w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-slate-500 dark:text-slate-400 text-base flex-shrink-0">
+                                      <span>?</span>
+                                    </div>
+                                  )}
                                           <div className="min-w-0 flex-1">
-                                              <div className="font-semibold text-slate-900 dark:text-white text-sm sm:text-base truncate">{product.name}</div>
-                                              <div className="text-xs sm:text-sm text-slate-600 dark:text-slate-400">{product.category}</div>
-                                              <div className="text-xs sm:text-sm text-slate-500 dark:text-slate-500">SKU: {product.sku}</div>
+                                    <div className="font-semibold text-slate-900 dark:text-white text-sm sm:text-base truncate">{product.name}</div>
+                                    <div className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 truncate">{product.category}</div>
+                                    <div className="text-xs sm:text-sm text-slate-500 dark:text-slate-500 truncate">SKU: {product.sku}</div>
                                           </div>
                                       </div>
                                   </div>
@@ -556,11 +556,11 @@ export const Products: React.FC = () => {
                                       <div className="text-sm sm:text-base font-semibold text-slate-900 dark:text-white">
                                           {formatCurrency(product.price, currency)}
                                       </div>
-                                  <div className="flex items-center gap-3">
-                                  <Badge variant={getDriverStockBadgeVariant(product.stock)} className="text-xs">Stock: {product.stock}</Badge>
-                                              <div className="flex flex-col text-xs text-slate-400 dark:text-slate-300 font-mono">
-                                                <span className="text-rose-500">Pending: {pendingQtyMap.get(product.id) || 0}</span>
-                                              </div>
+                                  <div className="flex items-center gap-2">
+                                    <Badge variant={getDriverStockBadgeVariant(product.stock)} className="text-[11px] px-2 py-1">{product.stock}</Badge>
+                                    <div className="flex flex-col text-xs text-slate-400 dark:text-slate-300 font-mono">
+                                      <span className="text-rose-500">Pending: {pendingQtyMap.get(product.id) || 0}</span>
+                                    </div>
                                   </div>
                                   </div>
                               </div>
@@ -680,24 +680,24 @@ export const Products: React.FC = () => {
                       {/* Mobile Card View */}
                       <div className="xl:hidden space-y-3">
                         {productsArr.map((product) => (
-                          <div key={product.id} className="bg-gradient-to-br from-white to-slate-50 dark:from-slate-800 dark:to-slate-900 rounded-xl p-5 border border-slate-200 dark:border-slate-600 shadow-md hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1">
-                              <div className="flex items-start justify-between mb-4">
+                          <div key={product.id} className="w-full box-border bg-gradient-to-br from-white to-slate-50 dark:from-slate-800 dark:to-slate-900 rounded-xl p-3 sm:p-5 border border-slate-200 dark:border-slate-600 shadow-md hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 overflow-hidden relative">
+                              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between mb-3">
                               <div className="flex items-center space-x-3 flex-1">
                                 {product.imageUrl ? (
-                                  <img src={product.imageUrl} alt={product.name} className="w-12 h-12 rounded-full flex-shrink-0" />
+                                  <img src={product.imageUrl} alt={product.name} className="w-10 h-10 rounded-full flex-shrink-0" />
                                 ) : (
-                                  <div className="w-12 h-12 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-slate-500 dark:text-slate-400 text-lg flex-shrink-0">
+                                  <div className="w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-slate-500 dark:text-slate-400 text-base flex-shrink-0">
                                     <span>?</span>
                                   </div>
                                 )}
                                 <div className="min-w-0 flex-1">
                                   <div className="font-semibold text-slate-900 dark:text-white text-sm sm:text-base truncate">{product.name}</div>
-                                  <div className="text-xs sm:text-sm text-slate-600 dark:text-slate-400">{product.category}</div>
-                                  <div className="text-xs sm:text-sm text-slate-500 dark:text-slate-500">SKU: {product.sku}</div>
+                                  <div className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 truncate">{product.category}</div>
+                                  <div className="text-xs sm:text-sm text-slate-500 dark:text-slate-500 truncate">SKU: {product.sku}</div>
                                 </div>
                               </div>
                               <div className="flex flex-col items-end gap-1">
-                                <Badge variant={getStockBadgeVariant(product.stock)} className="ml-2 flex-shrink-0 text-xs">
+                                <Badge variant={getStockBadgeVariant(product.stock)} className="ml-2 flex-shrink-0 text-[11px] px-2 py-1">
                                   {product.stock}
                                 </Badge>
                                 

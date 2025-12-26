@@ -116,7 +116,18 @@ export const RouteOverview: React.FC<RouteOverviewProps> = ({ onRouteSelect }) =
     try {
       const { fetchRoutes } = await import('../../supabaseClient');
       const routeNames = await fetchRoutes();
-      setRoutes(routeNames.length ? routeNames : ['Unassigned']);
+      // If logged in user is a Sales Rep and has assignedRoutes defined, only show those routes
+      if (currentUser?.role === UserRole.Sales && Array.isArray(currentUser.assignedRoutes)) {
+        if (currentUser.assignedRoutes.length > 0) {
+          const filtered = (routeNames || []).filter(r => currentUser.assignedRoutes!.includes(r));
+          setRoutes(filtered.length ? filtered : []);
+        } else {
+          // Sales user exists but has no assigned routes: show none (or optionally show 'Unassigned')
+          setRoutes([]);
+        }
+      } else {
+        setRoutes(routeNames.length ? routeNames : ['Unassigned']);
+      }
       setRoutesLoaded(true);
     } catch (error) {
       console.warn('Could not load routes from database:', error);

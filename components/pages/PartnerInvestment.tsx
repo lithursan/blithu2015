@@ -554,11 +554,11 @@ const PartnerInvestment: React.FC = () => {
         </CardHeader>
         <CardContent>
           {lastSaved && (
-            <div className="mb-3 p-3 border rounded bg-slate-50">
+            <div className="mb-3 p-3 border rounded bg-slate-50 dark:bg-slate-800">
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="text-sm font-medium">Last saved: {lastSaved.date} — {lastSaved.note || 'Entry'}</div>
-                  <div className="text-xs text-slate-600">Capital: {format(lastSaved.partnerInvestment)} • Loan: {format(lastSaved.loanAmount)} • Bank: {format(lastSaved.bankBalance)}</div>
+                  <div className="text-sm font-medium text-slate-900 dark:text-slate-100">Last saved: {lastSaved.date} — {lastSaved.note || 'Entry'}</div>
+                  <div className="text-sm text-slate-400 dark:text-slate-300">Capital: {format(lastSaved.partnerInvestment)} • Loan: {format(lastSaved.loanAmount)} • Bank: {format(lastSaved.bankBalance)}</div>
                 </div>
                 <div>
                   <button onClick={() => {
@@ -578,64 +578,64 @@ const PartnerInvestment: React.FC = () => {
           )}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div>
-              <label className="block text-xs font-medium text-slate-700">Date</label>
-              <input type="date" className="w-full px-2 py-1 border rounded" value={date} onChange={e => setDate(e.target.value)} />
+              <label className="block text-sm font-medium text-slate-300 dark:text-slate-200">Date</label>
+              <input type="date" className="w-full px-2 py-1 border rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100" value={date} onChange={e => setDate(e.target.value)} />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-700">Capital</label>
-              <input type="number" min="0" step="0.01" className="w-full px-2 py-1 border rounded" value={partnerInvestment} onChange={e => setPartnerInvestment(Number(e.target.value))} />
+              <label className="block text-sm font-medium text-slate-300 dark:text-slate-200">Capital</label>
+              <input type="number" min="0" step="0.01" className="w-full px-2 py-1 border rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100" value={partnerInvestment} onChange={e => setPartnerInvestment(Number(e.target.value))} />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-700">Loan Amount (business loan)</label>
-              <input type="number" min="0" step="0.01" className="w-full px-2 py-1 border rounded" value={loanAmount} onChange={e => setLoanAmount(Number(e.target.value))} />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-slate-700">Issued Cheque Amount (payments)</label>
-              <input type="number" min="0" step="0.01" className="w-full px-2 py-1 border rounded bg-slate-50" value={issuedChequeAmount} readOnly />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-700">Amount Credited (sales/receipts)</label>
-              <input type="number" min="0" step="0.01" className="w-full px-2 py-1 border rounded bg-slate-50" value={creditedAmount} readOnly />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-700">Inventory Value (current)</label>
-              <input type="number" min="0" step="0.01" className="w-full px-2 py-1 border rounded bg-slate-50" value={inventoryValue} readOnly />
-              <div className="text-xs text-slate-500 mt-1">Pending: Credit {format(pendingCreditTotal)} • Cheque {format(pendingChequeTotal)}</div>
+              <label className="block text-sm font-medium text-slate-300 dark:text-slate-200">Loan Amount (business loan)</label>
+              <input type="number" min="0" step="0.01" className="w-full px-2 py-1 border rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100" value={loanAmount} onChange={e => setLoanAmount(Number(e.target.value))} />
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-slate-700">Expenses</label>
-              <input type="number" min="0" step="0.01" className="w-full px-2 py-1 border rounded bg-slate-50" value={expenses} readOnly />
+              <label className="block text-sm font-medium text-slate-300 dark:text-slate-200">Issued Cheque Amount (payments)</label>
+              <input type="number" min="0" step="0.01" className="w-full px-2 py-1 border rounded bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100" value={issuedChequeAmount} readOnly />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-700">Pending: Credit</label>
-              <div onClick={() => setActiveBox(activeBox === 'pendingCredit' ? null : 'pendingCredit')} role="button" tabIndex={0} className={`w-full px-2 py-2 border rounded bg-white cursor-pointer hover:bg-slate-50 ${activeBox === 'pendingCredit' ? 'ring-2 ring-indigo-300' : ''}`}>
+              <label className="block text-sm font-medium text-slate-300 dark:text-slate-200">Amount Credited (sales/receipts)</label>
+              <input type="number" min="0" step="0.01" className="w-full px-2 py-1 border rounded bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100" value={creditedAmount} readOnly />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-300 dark:text-slate-200">Inventory Value (current)</label>
+              <input type="number" min="0" step="0.01" className="w-full px-2 py-1 border rounded bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100" value={inventoryValue} readOnly />
+              <div className="text-sm text-slate-400 mt-1 dark:text-slate-300">Pending: Credit {format(pendingCreditTotal)} • Cheque {format(pendingChequeTotal)}</div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-300 dark:text-slate-200">Expenses</label>
+              <input type="number" min="0" step="0.01" className="w-full px-2 py-1 border rounded bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100" value={expenses} readOnly />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-300 dark:text-slate-200">Pending: Credit</label>
+              <div onClick={() => setActiveBox(activeBox === 'pendingCredit' ? null : 'pendingCredit')} role="button" tabIndex={0} className={`w-full px-2 py-2 border rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700 ${activeBox === 'pendingCredit' ? 'ring-2 ring-indigo-300' : ''}`}>
                 <div className="font-bold">{format(pendingCreditTotal)}</div>
-                <div className="text-xs text-red-600">Source: Collections</div>
+                <div className="text-sm text-red-600">Source: Collections</div>
               </div>
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-700">Pending: Cheque</label>
-              <div onClick={() => setActiveBox(activeBox === 'pendingCheque' ? null : 'pendingCheque')} role="button" tabIndex={0} className={`w-full px-2 py-2 border rounded bg-white cursor-pointer hover:bg-slate-50 ${activeBox === 'pendingCheque' ? 'ring-2 ring-indigo-300' : ''}`}>
+              <label className="block text-sm font-medium text-slate-300 dark:text-slate-200">Pending: Cheque</label>
+              <div onClick={() => setActiveBox(activeBox === 'pendingCheque' ? null : 'pendingCheque')} role="button" tabIndex={0} className={`w-full px-2 py-2 border rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700 ${activeBox === 'pendingCheque' ? 'ring-2 ring-indigo-300' : ''}`}>
                 <div className="font-bold">{format(pendingChequeTotal)}</div>
-                <div className="text-xs text-red-600">Source: Collections</div>
+                <div className="text-sm text-red-600">Source: Collections</div>
               </div>
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-700">Assets Total</label>
-              <div onClick={() => setActiveBox(activeBox === 'assetsTotal' ? null : 'assetsTotal')} role="button" tabIndex={0} className={`w-full px-2 py-2 border rounded bg-white cursor-pointer hover:bg-slate-50 ${activeBox === 'assetsTotal' ? 'ring-2 ring-indigo-300' : ''}`}>
+              <label className="block text-sm font-medium text-slate-300 dark:text-slate-200">Assets Total</label>
+              <div onClick={() => setActiveBox(activeBox === 'assetsTotal' ? null : 'assetsTotal')} role="button" tabIndex={0} className={`w-full px-2 py-2 border rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700 ${activeBox === 'assetsTotal' ? 'ring-2 ring-indigo-300' : ''}`}>
                 <div className="font-bold">{format(assetsTotal)}</div>
-                <div className="text-xs text-red-600">Source: Assets</div>
+                <div className="text-sm text-red-600">Source: Assets</div>
               </div>
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-700">Bank Balance</label>
-              <input type="number" min="0" step="0.01" className="w-full px-2 py-1 border rounded" value={bankBalance} onChange={e => setBankBalance(Number(e.target.value))} />
+              <label className="block text-sm font-medium text-slate-300 dark:text-slate-200">Bank Balance</label>
+              <input type="number" min="0" step="0.01" className="w-full px-2 py-1 border rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100" value={bankBalance} onChange={e => setBankBalance(Number(e.target.value))} />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-700">Note (optional)</label>
-              <input className="w-full px-2 py-1 border rounded" value={note} onChange={e => setNote(e.target.value)} />
+              <label className="block text-sm font-medium text-slate-300 dark:text-slate-200">Note (optional)</label>
+              <input className="w-full px-2 py-1 border rounded text-sm text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-800" value={note} onChange={e => setNote(e.target.value)} />
             </div>
           </div>
 
@@ -666,13 +666,13 @@ const PartnerInvestment: React.FC = () => {
               note
             })} className="px-4 py-2 bg-amber-500 text-white rounded">Set Snapshot (Local)</button>
             <button onClick={handleRefresh} disabled={isRefreshing} className="px-3 py-2 bg-gray-200 text-slate-700 rounded">{isRefreshing ? 'Refreshing…' : 'Refresh Data'}</button>
-            <div className="text-sm text-slate-600">Totals (live):</div>
-            <div className="font-mono">Inflows: {format(totalInflows)}</div>
-            <div className="font-mono">Outflows: {format(totalOutflows)}</div>
-            <div className={`font-mono font-bold ${netPosition >= 0 ? 'text-green-600' : 'text-red-600'}`}>Net: {format(netPosition)}</div>
+            <div className="text-sm text-slate-400 dark:text-slate-300">Totals (live):</div>
+            <div className="font-mono text-sm text-slate-200 dark:text-slate-100">Inflows: {format(totalInflows)}</div>
+            <div className="font-mono text-sm text-slate-200 dark:text-slate-100">Outflows: {format(totalOutflows)}</div>
+            <div className={`font-mono font-bold text-sm ${netPosition >= 0 ? 'text-green-600' : 'text-red-600'}`}>Net: {format(netPosition)}</div>
             <div className="ml-4 text-sm text-slate-600">
               <div>Collections (pending): <span className="font-mono">Credit: {format(pendingCreditTotal)}</span> <span className="font-mono ml-2">Cheque: {format(pendingChequeTotal)}</span></div>
-              <div className="text-xs text-slate-500">Completed: Credit {format(completedCreditTotal)} • Cheque {format(completedChequeTotal)}</div>
+              <div className="text-sm text-slate-400 dark:text-slate-300">Completed: Credit {format(completedCreditTotal)} • Cheque {format(completedChequeTotal)}</div>
             </div>
           </div>
         </CardContent>
@@ -687,18 +687,18 @@ const PartnerInvestment: React.FC = () => {
             <div className="mb-4">
               <div className="text-sm font-medium mb-2">Capital + Loan — Recent Changes</div>
               {capitalLoanChanges.length === 0 ? (
-                <div className="text-slate-500">No saved entries to show changes.</div>
+                <div className="text-sm text-slate-400 dark:text-slate-300">No saved entries to show changes.</div>
               ) : (
                 <div className="space-y-2">
                   {capitalLoanChanges.map((c, idx) => (
                     <div key={idx} className="p-2 border rounded flex items-center justify-between">
                       <div>
                         <div className="text-sm font-medium">{c.date}</div>
-                        <div className="text-xs text-slate-600">Value: {format(c.value)}</div>
+                        <div className="text-sm text-slate-400 dark:text-slate-300">Value: {format(c.value)}</div>
                       </div>
                       <div className="text-right">
                         <div className={`font-bold ${c.delta >= 0 ? 'text-green-600' : 'text-red-600'}`}>{c.delta >= 0 ? '+' : ''}{format(c.delta)}</div>
-                        <div className={`text-xs ${c.delta < 0 ? 'text-red-600' : 'text-slate-600'}`}>By: {c.createdBy || 'unknown'}</div>
+                        <div className={`text-sm ${c.delta < 0 ? 'text-red-600' : 'text-slate-400 dark:text-slate-300'}`}>By: {c.createdBy || 'unknown'}</div>
                       </div>
                     </div>
                   ))}
@@ -713,7 +713,7 @@ const PartnerInvestment: React.FC = () => {
               <div className="flex items-start justify-between">
                 <div>
                   <div className="font-medium">Snapshot: {snapshotEntry.date} — {snapshotEntry.note || 'Snapshot'}</div>
-                  <div className="text-xs text-slate-500">Capital: {format(snapshotEntry.partnerInvestment)} | Loan: {format(snapshotEntry.loanAmount)} | Bank: {format(snapshotEntry.bankBalance)}</div>
+                  <div className="text-sm text-slate-400 dark:text-slate-300">Capital: {format(snapshotEntry.partnerInvestment)} | Loan: {format(snapshotEntry.loanAmount)} | Bank: {format(snapshotEntry.bankBalance)}</div>
                 </div>
                 <div className="text-right">
                   <button onClick={() => { localStorage.removeItem('partner_snapshot_v1'); setSnapshotId(null); setSnapshotEntry(null); }} className="px-3 py-1 bg-red-600 text-white rounded text-sm">Clear Snapshot</button>
@@ -722,38 +722,38 @@ const PartnerInvestment: React.FC = () => {
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div className="p-2 border rounded">
-                  <div className="text-xs text-slate-600">Snapshot Capital + Loan</div>
+                  <div className="text-sm text-slate-400 dark:text-slate-300">Snapshot Capital + Loan</div>
                   <div className="font-bold">{format(snapshotEntry.partnerInvestment + snapshotEntry.loanAmount)}</div>
                 </div>
                 <div className="p-2 border rounded">
-                  <div className="text-xs text-slate-600">Current Capital + Loan</div>
+                  <div className="text-sm text-slate-400 dark:text-slate-300">Current Capital + Loan</div>
                   <div className="font-bold">{format(partnerInvestment + loanAmount)}</div>
                 </div>
                 <div className="p-2 border rounded">
-                  <div className="text-xs text-slate-600">Decrease (Snapshot - Current)</div>
+                  <div className="text-sm text-slate-400 dark:text-slate-300">Decrease (Snapshot - Current)</div>
                   <div className="font-bold text-red-600">{format((snapshotEntry.partnerInvestment + snapshotEntry.loanAmount) - (partnerInvestment + loanAmount))}</div>
                 </div>
               </div>
 
-              <div className="mt-3 p-2 border rounded bg-slate-50">
+              <div className="mt-3 p-2 border rounded bg-slate-50 dark:bg-slate-800">
                 <div className="text-sm font-medium">Reconciliation Check (current)</div>
-                <div className="text-xs text-slate-600">Formula: capital + loan = bankBalance + Inventory Value (current) + receivedCheques + credit + asset - IssuedCheques</div>
+                <div className="text-sm text-slate-400 dark:text-slate-300">Formula: capital + loan = bankBalance + Inventory Value (current) + receivedCheques + credit + asset - IssuedCheques</div>
                 <div className="mt-2">
                   <div className="grid grid-cols-1 gap-2">
                     <div className="p-2 border rounded">
-                      <div className="text-xs text-slate-600">LHS (capital + loan)</div>
+                      <div className="text-sm text-slate-400 dark:text-slate-300">LHS (capital + loan)</div>
                       <div className="font-bold">{format(partnerInvestment + loanAmount)}</div>
                     </div>
 
                     <div className="p-2 border rounded">
-                      <div className="text-xs text-slate-600">RHS breakdown</div>
+                      <div className="text-sm text-slate-400 dark:text-slate-300">RHS breakdown</div>
                       <div className="mt-2 space-y-1">
-                        <div className="text-xs">Bank Balance: <span className="font-mono">{format(bankBalance)}</span></div>
-                        <div className="text-xs">Inventory Value (current): <span className="font-mono">{format(inventoryValue)}</span></div>
-                        <div className="text-xs">Received Cheques (completed): <span className="font-mono">{format(completedChequeTotal)}</span></div>
-                        <div className="text-xs">Credit (sales/receipts): <span className="font-mono">{format(creditedAmount)}</span></div>
-                        <div className="text-xs">Issued Cheques (outgoing): <span className="font-mono">{format(issuedChequeAmount)}</span></div>
-                        <div className="text-xs">Assets (added): <span className="font-mono">{format(assetsTotal)}</span></div>
+                        <div className="text-sm">Bank Balance: <span className="font-mono">{format(bankBalance)}</span></div>
+                        <div className="text-sm">Inventory Value (current): <span className="font-mono">{format(inventoryValue)}</span></div>
+                        <div className="text-sm">Received Cheques (completed): <span className="font-mono">{format(completedChequeTotal)}</span></div>
+                        <div className="text-sm">Credit (sales/receipts): <span className="font-mono">{format(creditedAmount)}</span></div>
+                        <div className="text-sm">Issued Cheques (outgoing): <span className="font-mono">{format(issuedChequeAmount)}</span></div>
+                        <div className="text-sm">Assets (added): <span className="font-mono">{format(assetsTotal)}</span></div>
                       </div>
                       <div className="mt-3 font-bold">RHS total: {format((bankBalance || 0) + (inventoryValue || 0) + (assetsTotal || 0) + (completedChequeTotal || 0) + (creditedAmount || 0) - (issuedChequeAmount || 0))}</div>
                     </div>
@@ -794,7 +794,7 @@ const PartnerInvestment: React.FC = () => {
                       <input type="checkbox" checked={selectedIds.includes(String(e.id))} onChange={() => handleToggleSelect(String(e.id))} className="mt-1" />
                       <div>
                         <div className="font-medium">{e.date} — {e.note || 'Entry'}</div>
-                        <div className="text-xs text-slate-500">Capital: {format(e.partnerInvestment)} | Loan: {format(e.loanAmount)} | Cheque: {format(e.issuedChequeAmount)}</div>
+                        <div className="text-sm text-slate-400 dark:text-slate-300">Capital: {format(e.partnerInvestment)} | Loan: {format(e.loanAmount)} | Cheque: {format(e.issuedChequeAmount)}</div>
                       </div>
                     </div>
                     <div className="flex items-start gap-3">
@@ -811,8 +811,8 @@ const PartnerInvestment: React.FC = () => {
                           setExpenses(e.expenses);
                           setBankBalance(e.bankBalance);
                           setNote(e.note || '');
-                        }} className="px-2 py-1 bg-indigo-600 text-white rounded text-xs">Load</button>
-                        <button onClick={() => handleDeleteEntry(e.id)} className="px-2 py-1 bg-red-600 text-white rounded text-xs">Delete</button>
+                        }} className="px-2 py-1 bg-indigo-600 text-white rounded text-sm">Load</button>
+                        <button onClick={() => handleDeleteEntry(e.id)} className="px-2 py-1 bg-red-600 text-white rounded text-sm">Delete</button>
                       </div>
                     </div>
                   </div>

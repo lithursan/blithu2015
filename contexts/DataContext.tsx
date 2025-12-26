@@ -571,6 +571,13 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                         }
                         return Array.isArray(row.assignedsuppliernames) ? row.assignedsuppliernames : [];
                     })(),
+                        assignedRoutes: (() => {
+                            if (!row.assignedroutes) return [];
+                            if (typeof row.assignedroutes === 'string') {
+                                return safeJsonParse(row.assignedroutes, 'assignedRoutes', row.id) || [];
+                            }
+                            return Array.isArray(row.assignedroutes) ? row.assignedroutes : [];
+                        })(),
                     settings: row.settings ?? {},
                 }));
                 setUsers(mappedUsers);
