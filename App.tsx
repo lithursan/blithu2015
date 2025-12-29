@@ -12,6 +12,7 @@ import { Settings } from './components/pages/Settings';
 import { Login } from './components/pages/Login';
 import { Drivers } from './components/pages/Drivers';
 import { Suppliers } from './components/pages/Suppliers';
+import { DailyTargets } from './components/pages/DailyTargets';
 import { Collections } from './components/pages/Collections';
 import ChequeManagement from './components/pages/ChequeManagement';
 import IssuedCheques from './components/pages/IssuedCheques';
@@ -99,6 +100,7 @@ const MainLayout = () => {
                         <Route path="/expenses" element={<RoleProtectedRoute allowedRoles={["Admin", "Secretary", "Manager"]} element={<Expenses />} />} />
 
                         <Route path="/my-location" element={<RoleProtectedRoute allowedRoles={["Sales Rep", "Driver"]} element={<MyLocation />} />} />
+                        <Route path="/daily-targets" element={<RoleProtectedRoute allowedRoles={["Admin", "Secretary", "Manager"]} element={<DailyTargets />} />} />
                         <Route path="/map" element={<Map />} />
                         
                         {/* Accounting System removed from app routes */}

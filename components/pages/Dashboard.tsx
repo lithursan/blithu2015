@@ -355,6 +355,35 @@ export const Dashboard: React.FC = () => {
     // Admin/Manager Dashboard - Full detailed view (existing functionality)
     // Defensive fallback for products array
     const safeProducts = Array.isArray(products) ? products : [];
+    // Helper: compute per-order breakdown for the currently selected category
+    const computeOrderCategoryBreakdown = (order: any, category: string) => {
+      // returns amount, cost, margin for items matching category
+      if (!order || !order.orderItems || !Array.isArray(order.orderItems)) {
+        return { amount: 0, cost: 0, margin: 0, qty: 0 };
+      }
+      let amount = 0;
+      let cost = 0;
+      let margin = 0;
+      let qtyTotal = 0;
+      order.orderItems.forEach((item: any) => {
+        try {
+          const prod = safeProducts.find(p => p.id === item.productId);
+          const prodCategory = prod ? prod.category : undefined;
+          if (category !== 'all' && prodCategory !== category) return;
+          const price = (item.price !== undefined && item.price !== null) ? Number(item.price) : (prod ? Number(prod.price || 0) : 0);
+          const itemCostPrice = (item.costPrice !== undefined && typeof item.costPrice === 'number') ? item.costPrice : (prod ? (typeof prod.costPrice === 'number' ? prod.costPrice : 0) : 0);
+          const itemMarginPrice = (item.marginPrice !== undefined && typeof item.marginPrice === 'number') ? item.marginPrice : (prod ? (typeof prod.marginPrice === 'number' ? prod.marginPrice : 0) : 0);
+          const qty = (Number(item.quantity) || 0) + (Number(item.free) || 0);
+          amount += price * qty;
+          cost += itemCostPrice * qty;
+          margin += itemMarginPrice * qty;
+          qtyTotal += qty;
+        } catch (e) {
+          // ignore malformed items
+        }
+      });
+      return { amount, cost, margin, qty: qtyTotal };
+    };
     // (Top products chart removed — Financial Overview expanded)
 
     const [selectedSupplier, setSelectedSupplier] = useState<string>('all');
@@ -595,7 +624,9 @@ export const Dashboard: React.FC = () => {
           dailyData[key] = { sales: 0, orders: [] };
         }
 
-        dailyData[key].sales += order.total || 0;
+        // Add only the selected category amount when category filter is active
+        const breakdown = computeOrderCategoryBreakdown(order, selectedCategory);
+        dailyData[key].sales += selectedCategory === 'all' ? (order.total || 0) : breakdown.amount;
         dailyData[key].orders.push(order);
       }
     });
@@ -607,8 +638,10 @@ export const Dashboard: React.FC = () => {
 
       const deliveryCost = data.orders.reduce((sum, order) => {
         if (!order.orderItems) return sum;
-          const orderCost = order.orderItems.reduce((itemSum, item) => {
+        const orderCost = order.orderItems.reduce((itemSum, item) => {
           const product = safeProducts.find(p => p.id === item.productId);
+          // Respect category filter: only include items that match selectedCategory
+          if (selectedCategory !== 'all' && product && product.category !== selectedCategory) return itemSum;
           const costPrice = (typeof product?.costPrice === 'number' && product.costPrice > 0) ? product.costPrice : 0;
           const totalQty = (Number(item.quantity) || 0) + (Number(item.free) || 0);
           return itemSum + (costPrice * totalQty);
@@ -621,6 +654,8 @@ export const Dashboard: React.FC = () => {
         if (!order.orderItems) return sum;
         const orderMargin = order.orderItems.reduce((itemSum, item) => {
           const product = safeProducts.find(p => p.id === item.productId);
+          // Respect category filter
+          if (selectedCategory !== 'all' && product && product.category !== selectedCategory) return itemSum;
           const margin = (typeof product?.marginPrice === 'number') ? product.marginPrice : 0;
           const totalQty = (Number(item.quantity) || 0) + (Number(item.free) || 0);
           return itemSum + (margin * totalQty);
@@ -697,16 +732,20 @@ export const Dashboard: React.FC = () => {
 
         if (!map.has(key)) map.set(key, { sales: 0, deliveryCost: 0, marginCost: 0, cheque: 0, credit: 0, fullLabel });
         const entry = map.get(key)!;
-        entry.sales += Number(order.total || 0);
+        // When a category filter is active, add only that category's amount to monthly sales
+        const breakdown = computeOrderCategoryBreakdown(order, selectedCategory);
+        const categoryAmount = selectedCategory === 'all' ? Number(order.total || 0) : breakdown.amount;
+        entry.sales += categoryAmount;
 
-        // Use persisted per-order cost fields when available, fallback to computed cost
+        // Use persisted per-order cost fields when available, fallback to computed cost (respect category)
         const orderCostVal = Number(order.total_cost_price ?? order.totalCostPrice ?? order.totalCostPrice ?? 0) || 0;
-        if (orderCostVal > 0) {
+        if (orderCostVal > 0 && selectedCategory === 'all') {
           entry.deliveryCost += orderCostVal;
         } else {
-          // compute from orderItems using product costPrice
+          // compute from orderItems using product costPrice and respect category filter
           const computed = (order.orderItems || []).reduce((sum, item) => {
             const product = safeProducts.find(p => p.id === item.productId);
+            if (selectedCategory !== 'all' && product && product.category !== selectedCategory) return sum;
             const costPrice = (typeof product?.costPrice === 'number' && !isNaN(product.costPrice)) ? product.costPrice : 0;
             const qty = (Number(item.quantity) || 0) + (Number(item.free) || 0);
             return sum + (costPrice * qty);
@@ -715,10 +754,25 @@ export const Dashboard: React.FC = () => {
         }
 
         const orderMarginVal = Number(order.total_margin_price ?? order.totalMarginPrice ?? 0) || 0;
-        if (orderMarginVal > 0) entry.marginCost += orderMarginVal;
+        if (orderMarginVal > 0 && selectedCategory === 'all') {
+          entry.marginCost += orderMarginVal;
+        } else {
+          // compute margin per item respecting category
+          const computedMargin = (order.orderItems || []).reduce((sum, item) => {
+            const product = safeProducts.find(p => p.id === item.productId);
+            if (selectedCategory !== 'all' && product && product.category !== selectedCategory) return sum;
+            const marginVal = (typeof product?.marginPrice === 'number') ? product.marginPrice : 0;
+            const qty = (Number(item.quantity) || 0) + (Number(item.free) || 0);
+            return sum + (marginVal * qty);
+          }, 0);
+          entry.marginCost += computedMargin;
+        }
 
-        entry.cheque += Number(order.chequeBalance || 0);
-        entry.credit += Number(order.creditBalance || 0);
+        // Allocate cheque/credit to category proportionally
+        const total = Number(order.total || 0);
+        const proportion = total > 0 ? (categoryAmount / total) : 0;
+        entry.cheque += Number(order.chequeBalance || 0) * proportion;
+        entry.credit += Number(order.creditBalance || 0) * proportion;
       } catch (e) {
         // ignore malformed dates
       }
@@ -745,11 +799,15 @@ export const Dashboard: React.FC = () => {
         const key = d.toISOString().split('T')[0];
         const fullLabel = d.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' });
 
-        const cheque = Number(order.chequeBalance || 0);
-        const credit = Number(order.creditBalance || 0);
-        const returnsAmt = Number(order.returnAmount || 0);
+        // Compute breakdown per selected category and allocate payments proportionally
+        const breakdown = computeOrderCategoryBreakdown(order, selectedCategory);
+        const categoryAmount = selectedCategory === 'all' ? Number(order.total || 0) : breakdown.amount;
         const total = Number(order.total || 0);
-        const paid = total - cheque - credit - returnsAmt;
+        const proportion = total > 0 ? (categoryAmount / total) : 0;
+        const cheque = Number(order.chequeBalance || 0) * proportion;
+        const credit = Number(order.creditBalance || 0) * proportion;
+        const returnsAmt = Number(order.returnAmount || 0) * proportion;
+        const paid = categoryAmount - cheque - credit - returnsAmt;
 
         if (!map[key]) map[key] = { paid: 0, cheque: 0, credit: 0, returns: 0, fullLabel };
         map[key].paid += paid;
@@ -775,35 +833,63 @@ export const Dashboard: React.FC = () => {
     };
 
     // Stats based on filtered data
-    // Calculate total delivered sales (only Delivered orders)
-    const totalSales = filteredOrders.reduce((sum, order) => order.status === 'Delivered' ? sum + order.total : sum, 0);
+    // Calculate total delivered sales (only Delivered orders). When a category is selected,
+    // sum only the product amounts for that category inside each order.
+    const totalSales = filteredOrders.reduce((sum, order) => {
+      if (order.status !== OrderStatus.Delivered) return sum;
+      const breakdown = computeOrderCategoryBreakdown(order, selectedCategory);
+      return sum + (selectedCategory === 'all' ? Number(order.total || 0) : breakdown.amount);
+    }, 0);
     // Use persisted per-order totals when available.
     // The `orders` rows include `total_cost_price` and `total_margin_price` in the DB.
     // Prefer those fields (or their camelCase mapped equivalents) to compute dashboard sums.
     const totalCost = filteredOrders.reduce((sum, order) => {
       if (order.status !== OrderStatus.Delivered) return sum;
-      const orderCostVal = Number(order.total_cost_price ?? order.totalCostPrice ?? 0) || 0;
-      return sum + orderCostVal;
+      // If category selected, compute cost from item-level matching category; else prefer persisted per-order cost
+      if (selectedCategory === 'all') {
+        const orderCostVal = Number(order.total_cost_price ?? order.totalCostPrice ?? 0) || 0;
+        return sum + orderCostVal;
+      }
+      const breakdown = computeOrderCategoryBreakdown(order, selectedCategory);
+      return sum + breakdown.cost;
     }, 0);
 
     const totalMargin = filteredOrders.reduce((sum, order) => {
       if (order.status !== OrderStatus.Delivered) return sum;
-      const orderMarginVal = Number(order.total_margin_price ?? order.totalMarginPrice ?? 0) || 0;
-      return sum + orderMarginVal;
+      if (selectedCategory === 'all') {
+        const orderMarginVal = Number(order.total_margin_price ?? order.totalMarginPrice ?? 0) || 0;
+        return sum + orderMarginVal;
+      }
+      const breakdown = computeOrderCategoryBreakdown(order, selectedCategory);
+      return sum + breakdown.margin;
     }, 0);
 
     // Total Order Cost for ALL filtered orders (use persisted per-order total_cost_price when present)
     const totalOrderCost = filteredOrders.reduce((sum, order) => {
-      const orderCostVal = Number(order.total_cost_price ?? order.totalCostPrice ?? 0) || 0;
-      return sum + orderCostVal;
+      if (selectedCategory === 'all') {
+        const orderCostVal = Number(order.total_cost_price ?? order.totalCostPrice ?? 0) || 0;
+        return sum + orderCostVal;
+      }
+      const breakdown = computeOrderCategoryBreakdown(order, selectedCategory);
+      return sum + breakdown.cost;
     }, 0);
     const totalOrders = filteredOrders.length;
-    const totalOrdersAmount = filteredOrders.reduce((sum, order) => sum + order.total, 0);
+    const totalOrdersAmount = filteredOrders.reduce((sum, order) => {
+      const breakdown = computeOrderCategoryBreakdown(order, selectedCategory);
+      return sum + (selectedCategory === 'all' ? Number(order.total || 0) : breakdown.amount);
+    }, 0);
     
     // Previous period stats for comparison
-    const prevTotalSales = previousPeriodOrders.reduce((sum, order) => order.status === 'Delivered' ? sum + order.total : sum, 0);
+    const prevTotalSales = previousPeriodOrders.reduce((sum, order) => {
+      if (order.status !== OrderStatus.Delivered) return sum;
+      const breakdown = computeOrderCategoryBreakdown(order, selectedCategory);
+      return sum + (selectedCategory === 'all' ? Number(order.total || 0) : breakdown.amount);
+    }, 0);
     const prevTotalOrders = previousPeriodOrders.length;
-    const prevTotalOrdersAmount = previousPeriodOrders.reduce((sum, order) => sum + order.total, 0);
+    const prevTotalOrdersAmount = previousPeriodOrders.reduce((sum, order) => {
+      const breakdown = computeOrderCategoryBreakdown(order, selectedCategory);
+      return sum + (selectedCategory === 'all' ? Number(order.total || 0) : breakdown.amount);
+    }, 0);
     
     // Calculate percentage changes
     const salesChange = prevTotalSales > 0 ? ((totalSales - prevTotalSales) / prevTotalSales) * 100 : 0;
@@ -817,24 +903,59 @@ export const Dashboard: React.FC = () => {
     };
     
     // Financial stats for current filtered period - ONLY from delivered orders
-  // Sum of cheque and credit for the current filtered DELIVERED orders only
+  // Allocate cheque/credit/returns proportionally to the selected category
   const deliveredFilteredOrders = filteredOrders.filter(order => order.status === OrderStatus.Delivered);
-  const currentChequeBalance = deliveredFilteredOrders.reduce((sum, order) => sum + (order.chequeBalance || 0), 0);
-  const currentCreditBalance = deliveredFilteredOrders.reduce((sum, order) => sum + (order.creditBalance || 0), 0);
-  // Sum of return amounts for filtered DELIVERED orders
-  const currentReturnAmount = deliveredFilteredOrders.reduce((sum, order) => sum + (order.returnAmount || 0), 0);
-  // Total paid calculated from components per requirement:
+  const currentChequeBalance = deliveredFilteredOrders.reduce((sum, order) => {
+    const breakdown = computeOrderCategoryBreakdown(order, selectedCategory);
+    const categoryAmount = selectedCategory === 'all' ? Number(order.total || 0) : breakdown.amount;
+    const total = Number(order.total || 0);
+    const proportion = total > 0 ? (categoryAmount / total) : 0;
+    return sum + (Number(order.chequeBalance || 0) * proportion);
+  }, 0);
+  const currentCreditBalance = deliveredFilteredOrders.reduce((sum, order) => {
+    const breakdown = computeOrderCategoryBreakdown(order, selectedCategory);
+    const categoryAmount = selectedCategory === 'all' ? Number(order.total || 0) : breakdown.amount;
+    const total = Number(order.total || 0);
+    const proportion = total > 0 ? (categoryAmount / total) : 0;
+    return sum + (Number(order.creditBalance || 0) * proportion);
+  }, 0);
+  // Sum of return amounts for filtered DELIVERED orders (allocated proportionally)
+  const currentReturnAmount = deliveredFilteredOrders.reduce((sum, order) => {
+    const breakdown = computeOrderCategoryBreakdown(order, selectedCategory);
+    const categoryAmount = selectedCategory === 'all' ? Number(order.total || 0) : breakdown.amount;
+    const total = Number(order.total || 0);
+    const proportion = total > 0 ? (categoryAmount / total) : 0;
+    return sum + (Number(order.returnAmount || 0) * proportion);
+  }, 0);
+  // Total paid calculated from components per requirement (allocated):
   // totalPaid = totalSales - totalCheque - totalCredit - totalReturn
-  // Use the filtered period's totalSales (delivered orders) for current period
   const currentPaid = totalSales - currentChequeBalance - currentCreditBalance - currentReturnAmount;
   // Reconciled total sales computed from components: paid + cheque + credit + returns
   const reconciledTotalSales = currentPaid + currentChequeBalance + currentCreditBalance + currentReturnAmount;
     
     // Financial stats for previous period - ONLY from delivered orders
   const deliveredPreviousPeriodOrders = previousPeriodOrders.filter(order => order.status === OrderStatus.Delivered);
-  const prevChequeBalance = deliveredPreviousPeriodOrders.reduce((sum, order) => sum + (order.chequeBalance || 0), 0);
-  const prevCreditBalance = deliveredPreviousPeriodOrders.reduce((sum, order) => sum + (order.creditBalance || 0), 0);
-  const prevReturnAmount = deliveredPreviousPeriodOrders.reduce((sum, order) => sum + (order.returnAmount || 0), 0);
+  const prevChequeBalance = deliveredPreviousPeriodOrders.reduce((sum, order) => {
+    const breakdown = computeOrderCategoryBreakdown(order, selectedCategory);
+    const categoryAmount = selectedCategory === 'all' ? Number(order.total || 0) : breakdown.amount;
+    const total = Number(order.total || 0);
+    const proportion = total > 0 ? (categoryAmount / total) : 0;
+    return sum + (Number(order.chequeBalance || 0) * proportion);
+  }, 0);
+  const prevCreditBalance = deliveredPreviousPeriodOrders.reduce((sum, order) => {
+    const breakdown = computeOrderCategoryBreakdown(order, selectedCategory);
+    const categoryAmount = selectedCategory === 'all' ? Number(order.total || 0) : breakdown.amount;
+    const total = Number(order.total || 0);
+    const proportion = total > 0 ? (categoryAmount / total) : 0;
+    return sum + (Number(order.creditBalance || 0) * proportion);
+  }, 0);
+  const prevReturnAmount = deliveredPreviousPeriodOrders.reduce((sum, order) => {
+    const breakdown = computeOrderCategoryBreakdown(order, selectedCategory);
+    const categoryAmount = selectedCategory === 'all' ? Number(order.total || 0) : breakdown.amount;
+    const total = Number(order.total || 0);
+    const proportion = total > 0 ? (categoryAmount / total) : 0;
+    return sum + (Number(order.returnAmount || 0) * proportion);
+  }, 0);
   const prevPaid = prevTotalSales - prevChequeBalance - prevCreditBalance - prevReturnAmount;
   const reconciledPrevTotalSales = prevPaid + prevChequeBalance + prevCreditBalance + prevReturnAmount;
     
@@ -1063,8 +1184,8 @@ export const Dashboard: React.FC = () => {
                  <select id="month-filter" value={monthFilter} onChange={e => handleMonthChange(e.target.value)}>
                    <option value="all">All months</option>
                    {Array.from({ length: 24 }).map((_, i) => {
-                     const d = new Date();
-                     d.setMonth(d.getMonth() - i);
+                     // Create a fresh date for each iteration to avoid mutating the same Date object
+                     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
                      const val = d.toISOString().slice(0, 7); // YYYY-MM
                      const label = d.toLocaleString(undefined, { month: 'short', year: 'numeric' });
                      return <option key={val} value={val}>{label}</option>;
@@ -2181,6 +2302,34 @@ const SalesRepDashboard: React.FC<{
     });
   }, [myOrders, dateRange, products, selectedSupplier, selectedSalesRep]);
 
+  // Today's targets for the logged-in sales rep (prominent widget)
+  const [repTargets, setRepTargets] = useState<any[]>([]);
+  const todayStr = new Date().toISOString().slice(0,10);
+
+  useEffect(() => {
+    const fetchRepTargets = async () => {
+      try {
+        if (!currentUser || !currentUser.id) return setRepTargets([]);
+        const { data, error } = await supabase
+          .from('daily_targets')
+          .select('*')
+          .eq('rep_id', String(currentUser.id))
+          .eq('target_date', todayStr)
+          .order('id', { ascending: true });
+        if (error) {
+          console.warn('Failed to fetch rep targets', error);
+          setRepTargets([]);
+          return;
+        }
+        setRepTargets(data || []);
+      } catch (e) {
+        console.error('Error fetching rep targets', e);
+        setRepTargets([]);
+      }
+    };
+    fetchRepTargets();
+  }, [currentUser, todayStr]);
+
   // Orders filtered for this sales rep's assigned suppliers are in `myOrders`.
   // Compute totals used by dashboard cards.
   const thisMonth = new Date().getMonth();
@@ -2299,6 +2448,68 @@ const SalesRepDashboard: React.FC<{
                 </div>
               </CardContent>
             </Card>
+
+            {/* Prominent Daily Targets widget for Sales Rep */}
+            {repTargets && repTargets.length > 0 && (
+              <Card className="col-span-1 lg:col-span-4">
+                <CardHeader>
+                  <CardTitle className="text-xl">Today's Targets</CardTitle>
+                  <CardDescription>Highlight of your assigned daily targets</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    {repTargets.map(t => {
+                      const scopeLabel = t.scope_type === 'supplier' ? ((suppliers || []).find(s => String(s.id) === String(t.scope_id))?.name || (t.scope_id || '(All)')) : (t.scope_type === 'category' ? (t.scope_id || '(All)') : ((products || []).find(p => String(p.id) === String(t.scope_id))?.name || (t.scope_id || '(All)')));
+                      const amtTarget = t.amount_target != null ? Number(t.amount_target) : null;
+                      const qtyTarget = t.quantity_target != null ? Number(t.quantity_target) : null;
+                      const remAmt = t.remaining_amount != null ? Number(t.remaining_amount) : 0;
+                      const remQty = t.remaining_quantity != null ? Number(t.remaining_quantity) : 0;
+                      const amtProgress = amtTarget ? Math.max(0, Math.min(100, ((amtTarget - remAmt) / (amtTarget || 1)) * 100)) : null;
+                      const qtyProgress = qtyTarget ? Math.max(0, Math.min(100, ((qtyTarget - remQty) / (qtyTarget || 1)) * 100)) : null;
+                      return (
+                        <div key={t.id} className="p-3 border rounded-lg bg-gradient-to-r from-blue-50 to-white dark:from-slate-800">
+                          <div className="flex justify-between items-center">
+                            <div>
+                              <div className="text-sm font-semibold">{scopeLabel} <span className="text-xs text-slate-500">({t.scope_type})</span></div>
+                              <div className="text-xs text-slate-500">Target Date: {String(t.target_date).slice(0,10)}</div>
+                            </div>
+                            <div className="text-right">
+                                {amtTarget != null ? (
+                                  <>
+                                    <div className="text-sm text-slate-700">Amount target</div>
+                                    <div className="text-2xl font-bold text-blue-600">{amtTarget.toLocaleString()}</div>
+                                  </>
+                                ) : qtyTarget != null ? (
+                                  <>
+                                    <div className="text-sm text-slate-700">Quantity target</div>
+                                    <div className="text-2xl font-bold text-green-500">{qtyTarget.toLocaleString()}</div>
+                                  </>
+                                ) : null}
+                            </div>
+                          </div>
+                          <div className="mt-3">
+                            {amtProgress != null && (
+                              <div>
+                                <div className="text-xs text-slate-500">Amount progress: {Math.round(amtProgress)}%</div>
+                                <div className="w-full bg-slate-200 h-2 rounded mt-1 overflow-hidden"><div style={{ width: `${amtProgress}%` }} className="h-2 bg-blue-600" /></div>
+                                <div className="text-xs text-slate-500 mt-1">Remaining: {remAmt.toLocaleString()}</div>
+                              </div>
+                            )}
+                            {qtyProgress != null && (
+                              <div className="mt-3">
+                                <div className="text-xs text-slate-500">Quantity progress: {Math.round(qtyProgress)}%</div>
+                                <div className="w-full bg-slate-200 h-2 rounded mt-1 overflow-hidden"><div style={{ width: `${qtyProgress}%` }} className="h-2 bg-green-600" /></div>
+                                <div className="text-xs text-slate-500 mt-1">Remaining Qty: {remQty}</div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Sales Rep Stats */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">

@@ -27,3 +27,26 @@
     display: none;
   }
 }
+
+/* Improve contrast for native select dropdowns on dark theme */
+select, select * {
+  color: #ffffff;
+}
+
+/* Attempt to style native options; some browsers may ignore parts
+   but most modern Chromium-based browsers will respect these */
+select option {
+  background-color: #0b1220; /* dark background */
+  color: #ffffff;            /* white text */
+}
+
+/* Highlighted/selected option in dropdown */
+select option:checked, select option:hover {
+  background-color: #1558d6; /* blue highlight */
+  color: #ffffff;
+}
+
+/* For accessibility, ensure disabled/placeholder options are muted */
+select option[disabled] {
+  color: #94a3b8;
+}

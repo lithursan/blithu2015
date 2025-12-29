@@ -75,6 +75,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ isSidebarOpen, closeSidebar })
     if (path === '/collections') {
       return currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Secretary || currentUser?.role === UserRole.Manager || currentUser?.role === UserRole.Sales || currentUser?.role === UserRole.Driver;
     }
+    // Daily Targets: only Admin, Secretary and Manager
+    if (path === '/daily-targets') {
+      return currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Secretary || currentUser?.role === UserRole.Manager;
+    }
     // Assets: only Admin, Secretary and Manager
     if (path === '/assets') {
       return currentUser?.role === UserRole.Admin || currentUser?.role === UserRole.Secretary || currentUser?.role === UserRole.Manager;

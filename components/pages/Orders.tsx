@@ -281,7 +281,7 @@ export const Orders: React.FC = () => {
 // printWindow.print() and printWindow.close() should only be inside generateAndDownloadBill, not at the top level
   const [orderNotes, setOrderNotes] = useState('');
   // ...existing code...
-  const { orders, setOrders, customers, products, setProducts, users, driverAllocations, setDriverAllocations, refetchData } = useData();
+  const { orders, setOrders, customers, products, setProducts, users, driverAllocations, setDriverAllocations, suppliers, refetchData } = useData();
   const { currentUser } = useAuth();
   const currency = currentUser?.settings.currency || 'LKR';
 
@@ -292,6 +292,8 @@ export const Orders: React.FC = () => {
   const [dateRangeFilter, setDateRangeFilter] = useState<'today' | 'this_week' | 'this_month' | 'all'>(currentUser?.role === UserRole.Driver ? 'today' : 'all');
   const [selectedSalesRep, setSelectedSalesRep] = useState<string>('all');
   const [selectedSupplier, setSelectedSupplier] = useState<string>('all');
+  const [selectedRoute, setSelectedRoute] = useState<string>('all');
+  const [routesList, setRoutesList] = useState<string[]>([]);
   
   const [modalState, setModalState] = useState<'closed' | 'create' | 'edit'>('closed');
   const [currentOrder, setCurrentOrder] = useState<Order | null>(null);
@@ -333,6 +335,119 @@ export const Orders: React.FC = () => {
   // Prevent duplicate submissions when saving/creating orders
   const [isSavingOrder, setIsSavingOrder] = useState(false);
 
+  // Helper: apply orders to daily targets (decrement remaining_amount/remaining_quantity)
+  const applyTargetsToOrders = async (orderIds: string[]) => {
+    try {
+      if (!orderIds || orderIds.length === 0) return;
+      // Fetch fresh orders by ids
+      // Prefer to only fetch orders which have not yet had targets applied.
+      // If the `targets_applied` column doesn't exist in older DB schemas, fall back to selecting without the filter.
+      let ordersData: any[] | null = null;
+      try {
+        const { data, error } = await supabase.from('orders').select('*').in('id', orderIds).neq('targets_applied', true);
+        if (error) throw error;
+        ordersData = data || [];
+      } catch (e: any) {
+        const msg = (e && (e.message || '')).toString().toLowerCase();
+        if (msg.includes('targets_applied') || msg.includes('could not find')) {
+          // Older DB without column: fetch all and we will protect via idempotent updates below
+          const { data, error } = await supabase.from('orders').select('*').in('id', orderIds);
+          if (error || !data) {
+            console.warn('Could not fetch orders for target processing (fallback)', error);
+            return;
+          }
+          ordersData = data;
+        } else {
+          console.warn('Could not fetch newly created orders for target processing', e);
+          return;
+        }
+      }
+      if (!ordersData || ordersData.length === 0) return;
+
+      const processedOrderIds: string[] = [];
+      for (const ord of ordersData) {
+        try {
+          const repId = ord.assigneduserid || ord.assignedUserId || ord.assigned_user_id || null;
+          if (!repId) continue;
+          // Use order placement time (created_at preferred, else orderdate)
+          const placedAt = ord.created_at || ord.orderdate || new Date().toISOString();
+          const placedDate = (typeof placedAt === 'string' ? placedAt : new Date(placedAt).toISOString()).slice(0,10);
+
+          // Parse order items
+          let items = [];
+          try { items = typeof ord.orderitems === 'string' ? JSON.parse(ord.orderitems) : (ord.orderitems || []); } catch { items = ord.orderitems || []; }
+
+          if (!Array.isArray(items) || items.length === 0) continue;
+
+          // Fetch targets for rep on that date
+          const { data: targets, error: tErr } = await supabase.from('daily_targets').select('*').eq('rep_id', String(repId)).eq('target_date', placedDate);
+          if (tErr || !targets) continue;
+
+          // For each target, compute matched amount/qty from this order and decrement
+          for (const t of targets) {
+            let matchedAmount = 0;
+            let matchedQty = 0;
+            for (const it of items) {
+              const prod = products.find(p => p.id === it.productId);
+              // Supplier matching: product.supplier may store either supplier name or id depending on data; support both
+              const supplierMatch = t.scope_type === 'supplier' && (t.scope_id == null || String(t.scope_id) === '' || (
+                // direct equality
+                String(prod?.supplier) === String(t.scope_id)
+                || // or product.supplier equals supplier name when scope_id is supplier id
+                (suppliers && suppliers.length > 0 && (() => {
+                  try {
+                    const sup = suppliers.find((s: any) => String(s.id) === String(t.scope_id));
+                    return sup ? String(prod?.supplier) === String(sup.name) : false;
+                  } catch { return false; }
+                })())
+              ));
+              const categoryMatch = t.scope_type === 'category' && (t.scope_id == null || String(t.scope_id) === '' || String(prod?.category) === String(t.scope_id));
+              const productMatch = t.scope_type === 'product' && (t.scope_id == null || String(t.scope_id) === '' || String(prod?.id) === String(t.scope_id));
+              // If scope_id is null, treat as matching all within that scope type
+              const matches = supplierMatch || categoryMatch || productMatch;
+              if (matches) {
+                const qty = Number(it.quantity || 0) + Number(it.free || 0);
+                const lineAmount = (Number(it.price || 0) * Number(it.quantity || 0));
+                matchedQty += qty;
+                matchedAmount += lineAmount;
+              }
+            }
+
+            if (matchedAmount > 0 || matchedQty > 0) {
+              const newRemAmt = Math.max(0, (Number(t.remaining_amount || 0) - matchedAmount));
+              const newRemQty = Math.max(0, (Number(t.remaining_quantity || 0) - matchedQty));
+              await supabase.from('daily_targets').update({ remaining_amount: newRemAmt, remaining_quantity: newRemQty, updated_at: new Date().toISOString() }).eq('id', t.id);
+            }
+            // mark this order as processed locally so we can flip the flag in DB afterwards
+            processedOrderIds.push(String(ord.id));
+          }
+        } catch (e) {
+          console.error('Error applying order to targets for order', ord.id, e);
+        }
+      }
+
+      // Persist processed flag to prevent double-application in future runs
+      if (processedOrderIds.length > 0) {
+        try {
+          await supabase.from('orders').update({ targets_applied: true }).in('id', processedOrderIds);
+        } catch (e: any) {
+          const msg = (e && (e.message || '')).toString().toLowerCase();
+          if (msg.includes('targets_applied') || msg.includes('could not find')) {
+            // Older DB, ignore — without the column we cannot persist flag here.
+            console.warn('targets_applied column missing; cannot mark orders as processed. Consider running migration.');
+          } else {
+            console.warn('Failed to update orders.targets_applied flag', e);
+          }
+        }
+      }
+
+      // Refresh data so dashboard/widgets reflect updated targets
+      try { await refetchData(); } catch (e) { console.warn('refetchData failed after applying targets', e); }
+    } catch (e) {
+      console.error('applyTargetsToOrders failed', e);
+    }
+  };
+
   // Load amountPaid into editableAmountPaid when viewing/editing an order
   useEffect(() => {
     if (viewingOrder) {
@@ -351,6 +466,22 @@ export const Orders: React.FC = () => {
   const canDelete = useMemo(() => currentUser?.role === UserRole.Admin, [currentUser]);
 
   const norm = (s?: string) => (String(s || '').trim().toLowerCase());
+
+  // Load available routes for the Route filter
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const { fetchRoutes } = await import('../../supabaseClient');
+        const r = await fetchRoutes();
+        if (mounted) setRoutesList(r || ['Unassigned']);
+      } catch (err) {
+        console.warn('Could not load routes for Orders page:', err);
+        if (mounted) setRoutesList(['Unassigned']);
+      }
+    })();
+    return () => { mounted = false; };
+  }, []);
 
   const toggleSelectOrder = (id: string) => {
     setSelectedOrderIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
@@ -734,6 +865,16 @@ export const Orders: React.FC = () => {
       });
     }
 
+    // Route filter (Admin only) - based on customer's assigned route
+    if (selectedRoute && selectedRoute !== 'all') {
+      const wantedRoute = norm(selectedRoute as string);
+      displayOrders = displayOrders.filter(order => {
+        const customer = customers.find(c => c.id === order.customerId);
+        if (!customer) return false;
+        return norm(customer.route) === wantedRoute;
+      });
+    }
+
     // Search filter
     if (searchTerm) {
         const lowercasedTerm = searchTerm.toLowerCase();
@@ -809,7 +950,7 @@ export const Orders: React.FC = () => {
       }
       return pa - pb;
     });
-  }, [orders, products, statusFilter, searchTerm, currentUser, deliveryDateFilter, dateRangeFilter, selectedSalesRep, selectedSupplier]);
+  }, [orders, products, statusFilter, searchTerm, currentUser, deliveryDateFilter, dateRangeFilter, selectedSalesRep, selectedSupplier, selectedRoute, customers]);
     
   const ordersBySupplier = useMemo(() => {
     return filteredOrders.reduce((acc, order) => {
@@ -1313,7 +1454,15 @@ export const Orders: React.FC = () => {
           }
         }
 
-        alert('Order(s) created successfully!');
+          // Apply created orders to daily targets (decrement remaining values)
+          try {
+            const createdIds = optimisticOrders.map(o => o.id).filter(Boolean);
+            await applyTargetsToOrders(createdIds);
+          } catch (e) {
+            console.warn('Failed to apply multi-supplier orders to daily targets', e);
+          }
+
+          alert('Order(s) created successfully!');
         // Close modal and finish
         setIsSavingOrder(false);
         closeModal();
@@ -1469,7 +1618,15 @@ export const Orders: React.FC = () => {
       if (createdOrder && currentUser) {
         await emailService.sendNewOrderNotification(currentUser, createdOrder, customer.name);
       }
-      
+
+      // Apply this created order to daily targets (decrement remaining values)
+      try {
+        const createdId = createdOrder?.id || newOrderId || newOrder.id;
+        if (createdId) await applyTargetsToOrders([createdId]);
+      } catch (e) {
+        console.warn('Failed to apply order to daily targets', e);
+      }
+
       alert('Order created successfully!');
     } catch (error) {
       console.error('Unexpected error creating order:', error);
@@ -1932,6 +2089,14 @@ export const Orders: React.FC = () => {
         await refetchData();
       } catch (e) {
         console.warn('Failed to refetch global data after order update:', e);
+      }
+      try {
+        // When an order is edited (for example a Sales rep claims/accepts a pending order), ensure targets are applied if not already.
+        if (currentOrder && currentOrder.id) {
+          try { await applyTargetsToOrders([currentOrder.id]); } catch (e) { console.warn('applyTargetsToOrders after edit failed', e); }
+        }
+      } catch (e) {
+        console.warn('Post-update target apply error', e);
       }
       alert('Order updated successfully!');
     } catch (error) {
@@ -2728,7 +2893,7 @@ export const Orders: React.FC = () => {
       <div className="p-3 sm:p-4 lg:p-6 space-y-6 sm:space-y-8 no-print">
         <div className="flex flex-col sm:flex-row gap-4 sm:gap-0 sm:justify-between sm:items-center">
           <h1 className="text-2xl sm:text-3xl font-bold text-slate-800 dark:text-slate-100">Orders</h1>
-          <div className="flex flex-wrap gap-2 sm:gap-3">
+          <div className="flex flex-wrap gap-2 sm:gap-3 items-center justify-end">
             {currentUser?.role === UserRole.Admin && (
               <div className="flex items-center gap-2">
                 <label className="inline-flex items-center text-sm text-slate-700 dark:text-slate-300">
@@ -2743,7 +2908,7 @@ export const Orders: React.FC = () => {
                 <button
                   onClick={handleBulkDelete}
                   disabled={selectedOrderIds.length === 0 || isBulkDeleting}
-                  className={`px-3 py-2 text-white rounded-lg text-xs font-medium ${selectedOrderIds.length === 0 || isBulkDeleting ? 'bg-red-300 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700'}`}
+                  className={`w-full sm:w-auto px-3 py-2 text-white rounded-lg text-xs font-medium ${selectedOrderIds.length === 0 || isBulkDeleting ? 'bg-red-300 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700'}`}
                   title="Delete selected orders"
                 >
                   Delete Selected{selectedOrderIds.length > 0 ? ` (${selectedOrderIds.length})` : ''}
@@ -2753,7 +2918,7 @@ export const Orders: React.FC = () => {
             {/* Export Buttons */}
             <button
               onClick={exportOrdersPDF}
-              className="px-3 sm:px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-xs sm:text-sm font-medium"
+              className="w-full sm:w-auto px-3 sm:px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-xs sm:text-sm font-medium"
               title="Export as PDF"
             >
               <span className="hidden sm:inline">📄 PDF</span>
@@ -2761,7 +2926,7 @@ export const Orders: React.FC = () => {
             </button>
             <button
               onClick={() => exportOrders(filteredOrders, 'csv')}
-              className="px-3 sm:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm font-medium"
+              className="w-full sm:w-auto px-3 sm:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm font-medium"
               title="Export as CSV"
             >
               <span className="hidden sm:inline">📊 CSV</span>
@@ -2769,7 +2934,7 @@ export const Orders: React.FC = () => {
             </button>
             <button
               onClick={() => exportOrders(filteredOrders, 'xlsx')}
-              className="px-3 sm:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm font-medium"
+              className="w-full sm:w-auto px-3 sm:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm font-medium"
               title="Export as Excel"
             >
               <span className="hidden sm:inline">📋 Excel</span>
@@ -2778,7 +2943,7 @@ export const Orders: React.FC = () => {
             {canEdit && (
               <button
                 onClick={openCreateModal}
-                className="px-4 sm:px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm sm:text-base font-medium"
+                className="w-full sm:w-auto px-4 sm:px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm sm:text-base font-medium"
               >
                 <span className="hidden sm:inline">+ New Order</span>
                 <span className="sm:hidden">+ Order</span>
@@ -2813,7 +2978,7 @@ export const Orders: React.FC = () => {
               </div>
               
               {/* Filter dropdowns - responsive grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-3 gap-3 sm:gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-4 lg:grid-cols-4 gap-3 sm:gap-4">
                 <div>
                   <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">Status</label>
                   <select
@@ -2837,6 +3002,21 @@ export const Orders: React.FC = () => {
                       <option value="all">All Sales Reps</option>
                       {(users || []).filter(u => u.role === UserRole.Sales).map((u: any) => (
                         <option key={u.id} value={u.id}>{u.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                {currentUser?.role === UserRole.Admin && (
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">Route</label>
+                    <select
+                      value={selectedRoute}
+                      onChange={(e) => setSelectedRoute(e.target.value)}
+                      className="w-full px-3 sm:px-4 py-2.5 sm:py-2 text-sm sm:text-base border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="all">All Routes</option>
+                      {(routesList || []).map((rName) => (
+                        <option key={rName} value={rName}>{rName}</option>
                       ))}
                     </select>
                   </div>
@@ -2956,7 +3136,7 @@ export const Orders: React.FC = () => {
                         return (
                           <Card key={order.id} className={`${cardStyle.border} hover:shadow-xl hover:-translate-y-1 hover:scale-[1.02] transition-all duration-300 cursor-pointer border-0 overflow-hidden relative`}>
                             <div className="absolute inset-0 bg-gradient-to-br from-white/60 via-transparent to-transparent dark:from-black/20 dark:via-transparent dark:to-transparent pointer-events-none"></div>
-                            <CardContent className="p-3 relative z-10">
+                            <CardContent className="p-2 sm:p-3 relative z-10">
                               {currentUser?.role === UserRole.Admin && (
                                 <div className="absolute left-2 top-2 z-20">
                                   <input

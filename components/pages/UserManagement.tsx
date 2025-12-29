@@ -132,9 +132,21 @@ export const UserManagement: React.FC = () => {
     const openModal = (mode: 'add' | 'edit', user?: User) => {
         setModalMode(mode);
         // For edit mode, don't pre-fill password for security.
-        const userForModal = user 
-            ? { ...user, password: '' } 
-            : { name: '', email: '', phone: '', role: UserRole.Sales, status: UserStatus.Active, password: '', avatarUrl: '', assignedSupplierNames: [] };
+        const normalizeArray = (val: any) => {
+            if (Array.isArray(val)) return val;
+            if (typeof val === 'string') {
+                try { const parsed = JSON.parse(val); return Array.isArray(parsed) ? parsed : []; } catch { return []; }
+            }
+            return Array.isArray(val) ? val : [];
+        };
+        const userForModal = user
+            ? { 
+                ...user, 
+                password: '', 
+                assignedSupplierNames: normalizeArray(user.assignedSupplierNames),
+                assignedRoutes: normalizeArray(user.assignedRoutes),
+            }
+            : { name: '', email: '', phone: '', role: UserRole.Sales, status: UserStatus.Active, password: '', avatarUrl: '', assignedSupplierNames: [], assignedRoutes: [] };
         setCurrentUser(userForModal);
         setIsModalOpen(true);
     };
@@ -227,21 +239,30 @@ export const UserManagement: React.FC = () => {
             }
             // Fetch fresh users and map
             const { data } = await supabase.from('users').select('*');
-            if (data) {
-                const mappedUsers = data.map((row: any) => ({
-                    id: row.id,
-                    name: row.name,
-                    email: row.email,
-                    phone: row.phone,
-                    role: row.role,
-                    status: row.status,
-                    avatarUrl: row.avatarurl ?? '',
-                    lastLogin: row.lastlogin,
-                    password: row.password,
-                        assignedSupplierNames: row.assignedsuppliernames ?? [],
-                        assignedRoutes: row.assignedroutes ?? [],
-                    settings: row.settings ?? {},
-                }));
+                if (data) {
+                const mappedUsers = data.map((row: any) => {
+                    const parseArr = (v: any) => {
+                        if (Array.isArray(v)) return v;
+                        if (typeof v === 'string') {
+                            try { const p = JSON.parse(v); return Array.isArray(p) ? p : []; } catch { return []; }
+                        }
+                        return Array.isArray(v) ? v : [];
+                    };
+                    return ({
+                        id: row.id,
+                        name: row.name,
+                        email: row.email,
+                        phone: row.phone,
+                        role: row.role,
+                        status: row.status,
+                        avatarUrl: row.avatarurl ?? '',
+                        lastLogin: row.lastlogin,
+                        password: row.password,
+                        assignedSupplierNames: parseArr(row.assignedsuppliernames ?? []),
+                        assignedRoutes: parseArr(row.assignedroutes ?? []),
+                        settings: row.settings ?? {},
+                    });
+                });
                 setUsers(mappedUsers);
             }
             closeModal();
@@ -272,6 +293,13 @@ export const UserManagement: React.FC = () => {
             // Fetch fresh users and map
             const { data } = await supabase.from('users').select('*');
             if (data) {
+                const parseArr = (v: any) => {
+                    if (Array.isArray(v)) return v;
+                    if (typeof v === 'string') {
+                        try { const p = JSON.parse(v); return Array.isArray(p) ? p : []; } catch { return []; }
+                    }
+                    return Array.isArray(v) ? v : [];
+                };
                 const mappedUsers = data.map((row: any) => ({
                     id: row.id,
                     name: row.name,
@@ -282,7 +310,8 @@ export const UserManagement: React.FC = () => {
                     avatarUrl: row.avatarurl ?? '',
                     lastLogin: row.lastlogin,
                     password: row.password,
-                    assignedSupplierNames: row.assignedsuppliernames ?? [],
+                    assignedSupplierNames: parseArr(row.assignedsuppliernames ?? []),
+                    assignedRoutes: parseArr(row.assignedroutes ?? []),
                     settings: row.settings ?? {},
                 }));
                 setUsers(mappedUsers);

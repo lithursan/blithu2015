@@ -187,28 +187,43 @@ export const Drivers: React.FC = () => {
                 console.warn('⚠️ Existing allocations:', existingAllocations);
             }
             
-            const { error } = await supabase
-                .from('driver_allocations')
-                .upsert([
-                    {
-                        id: allocation.id,
-                        driver_id: allocation.driverId, // Only use driver_id, not both
-                        driver_name: allocation.driverName, // Only use driver_name, not both
-                        date: allocation.date,
+            // If there's an existing allocation for this driver+date, update only the
+            // allocation-specific fields so we don't overwrite other columns like
+            // `sold_items` which hold reconciliation data. Use insert for new rows.
+            if (existingAllocations && existingAllocations.length > 0) {
+                const dbId = allocation.id || existingAllocations[0].id;
+                const { error } = await supabase
+                    .from('driver_allocations')
+                    .update({
                         allocated_items: JSON.stringify(allocation.allocatedItems),
                         returneditems: allocation.returnedItems ? JSON.stringify(allocation.returnedItems) : null,
                         salestotal: allocation.salesTotal,
-                        status: 'Allocated', // Always set status to Allocated on save
-                    }
-                ]);
-            if (error) {
-                console.error('Supabase allocation save error:', error);
-                alert(
-                  `Allocation save failed!\n` +
-                  `Message: ${error.message || ''}\n` +
-                  `Details: ${error.details || ''}\n` +
-                  `Hint: ${error.hint || ''}`
-                );
+                        status: 'Allocated',
+                    })
+                    .eq('id', dbId);
+                if (error) {
+                    console.error('Supabase allocation update error:', error);
+                    alert(`Allocation update failed: ${error.message || ''}`);
+                }
+            } else {
+                const { error } = await supabase
+                    .from('driver_allocations')
+                    .insert([
+                        {
+                            id: allocation.id,
+                            driver_id: allocation.driverId,
+                            driver_name: allocation.driverName,
+                            date: allocation.date,
+                            allocated_items: JSON.stringify(allocation.allocatedItems),
+                            returneditems: allocation.returnedItems ? JSON.stringify(allocation.returnedItems) : null,
+                            salestotal: allocation.salesTotal,
+                            status: 'Allocated',
+                        }
+                    ]);
+                if (error) {
+                    console.error('Supabase allocation insert error:', error);
+                    alert(`Allocation insert failed: ${error.message || ''}`);
+                }
             }
         };
 
