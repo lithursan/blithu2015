@@ -330,6 +330,30 @@ export const DailyTargets: React.FC = () => {
         .select();
       if (error) {
         console.warn('Upsert returned error, attempting fallback insert/update', error);
+        // If error indicates missing column (e.g., carry_over not present in older schema),
+        // retry the upsert/insert without that field so older DBs still work.
+        const msg = (error.message || '').toLowerCase();
+        if (error.code === 'PGRST204' || msg.includes('carry_over') || msg.includes("could not find the 'carry_over'")) {
+          try {
+            const payloadNoCarry: any = { ...payload };
+            delete payloadNoCarry.carry_over;
+            const { data: d2, error: err2 } = await supabase
+              .from('daily_targets')
+              .upsert([payloadNoCarry], { onConflict: 'rep_id,scope_type,scope_id,target_date' })
+              .select();
+            if (!err2) {
+              if (inventoryWarning) alert(inventoryWarning);
+              alert('Daily target saved');
+              await refetchData();
+              clearFormAndBlur();
+              return;
+            }
+            console.warn('Retry without carry_over failed', err2);
+            // continue to fallback handling below
+          } catch (retryEx) {
+            console.warn('Retry without carry_over exception', retryEx);
+          }
+        }
         // If error indicates missing unique constraint, perform manual upsert
         if (error.code === '42P10' || (error.message || '').includes('no unique or exclusion constraint')) {
           // Build selector
@@ -385,6 +409,37 @@ export const DailyTargets: React.FC = () => {
       // Success path
       if (inventoryWarning) alert(inventoryWarning);
       alert('Daily target saved');
+
+      // Ensure next day's default exists: if there's no target for targetDate + 1,
+      // create a copy so the target set once becomes the default for the next day.
+      try {
+        const nextDate = new Date(targetDate);
+        nextDate.setDate(nextDate.getDate() + 1);
+        const nextDateStr = nextDate.toISOString().slice(0,10);
+
+        let selNext: any = supabase.from('daily_targets').select('id').eq('rep_id', repId).eq('scope_type', scopeType).eq('target_date', nextDateStr);
+        selNext = scopeId ? selNext.eq('scope_id', scopeId) : selNext.is('scope_id', null);
+        const { data: existingNext, error: nextErr } = await selNext.limit(1).maybeSingle();
+        if (!nextErr && (!existingNext || !existingNext.id)) {
+          const copyPayload: any = {
+            rep_id: repId,
+            scope_type: scopeType,
+            scope_id: scopeId || null,
+            target_date: nextDateStr,
+            amount_target: amt,
+            quantity_target: qty,
+            remaining_amount: amt || 0,
+            remaining_quantity: qty || 0,
+            carry_over: false,
+            created_by: currentUser?.id || null,
+          };
+          const { error: insNextErr } = await supabase.from('daily_targets').insert([copyPayload]);
+          if (insNextErr) console.warn('Failed to create next day default target', insNextErr);
+        }
+      } catch (e) {
+        console.warn('Next-day default creation failed', e);
+      }
+
       await refetchData();
       // reset form and blur selects so placeholder shows
       clearFormAndBlur();
@@ -402,6 +457,43 @@ export const DailyTargets: React.FC = () => {
         setTargets([]);
         return;
       }
+
+      // If no targets for this date, attempt to copy previous day's targets
+      if ((!data || data.length === 0) && d) {
+        try {
+          const prev = new Date(d);
+          prev.setDate(prev.getDate() - 1);
+          const prevStr = prev.toISOString().slice(0,10);
+          const { data: prevData, error: prevErr } = await supabase.from('daily_targets').select('*').eq('target_date', prevStr);
+          if (!prevErr && prevData && prevData.length > 0) {
+            // Build copies for current date
+            const copies = prevData.map((p: any) => ({
+              rep_id: p.rep_id,
+              scope_type: p.scope_type,
+              scope_id: p.scope_id || null,
+              target_date: d,
+              amount_target: p.amount_target,
+              quantity_target: p.quantity_target,
+              remaining_amount: p.amount_target || 0,
+              remaining_quantity: p.quantity_target || 0,
+              carry_over: false,
+              created_by: p.created_by || currentUser?.id || null,
+            }));
+
+            const { data: insData, error: insErr } = await supabase.from('daily_targets').insert(copies).select();
+            if (insErr) {
+              console.warn('Failed to create copies for empty date', insErr);
+              setTargets([]);
+              return;
+            }
+            setTargets(insData || []);
+            return;
+          }
+        } catch (e) {
+          console.warn('Auto-copy prev-day targets failed', e);
+        }
+      }
+
       setTargets(data || []);
     } catch (err) {
       console.error('Fetch targets exception', err);
