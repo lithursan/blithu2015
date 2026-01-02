@@ -103,14 +103,16 @@ BEGIN
       AND (COALESCE(remaining_amount,0) > 0 OR COALESCE(remaining_quantity,0) > 0)
   LOOP
     -- Insert carry amounts as a new row for today or add to existing today's target
+    -- Insert carry amounts as a new row for today or add to existing today's target
+    -- Also copy the original amount_target/quantity_target so a one-day allocation becomes visible each day
     INSERT INTO daily_targets (rep_id, scope_type, scope_id, target_date, amount_target, quantity_target, remaining_amount, remaining_quantity, created_by, created_at, updated_at, carry_over)
     VALUES (
       rec.rep_id,
       rec.scope_type,
       rec.scope_id,
       CURRENT_DATE,
-      NULL, -- amount_target for carry is left NULL; we add remaining_amount to today's remaining_amount instead
-      NULL,
+      rec.amount_target,
+      rec.quantity_target,
       COALESCE(rec.remaining_amount,0),
       COALESCE(rec.remaining_quantity,0),
       rec.created_by,
@@ -122,13 +124,14 @@ BEGIN
     SET
       remaining_amount = COALESCE(daily_targets.remaining_amount,0) + COALESCE(EXCLUDED.remaining_amount,0),
       remaining_quantity = COALESCE(daily_targets.remaining_quantity,0) + COALESCE(EXCLUDED.remaining_quantity,0),
+      -- If today's amount/quantity target is empty (NULL or 0), set it from the carried row; otherwise keep existing
       amount_target = CASE
-        WHEN COALESCE(daily_targets.amount_target,0) = 0 THEN COALESCE(EXCLUDED.remaining_amount,0)
-        ELSE COALESCE(daily_targets.amount_target,0) + COALESCE(EXCLUDED.remaining_amount,0)
+        WHEN COALESCE(daily_targets.amount_target,0) = 0 THEN COALESCE(EXCLUDED.amount_target,0)
+        ELSE daily_targets.amount_target
       END,
       quantity_target = CASE
-        WHEN COALESCE(daily_targets.quantity_target,0) = 0 THEN COALESCE(EXCLUDED.remaining_quantity,0)
-        ELSE COALESCE(daily_targets.quantity_target,0) + COALESCE(EXCLUDED.remaining_quantity,0)
+        WHEN COALESCE(daily_targets.quantity_target,0) = 0 THEN COALESCE(EXCLUDED.quantity_target,0)
+        ELSE daily_targets.quantity_target
       END,
       updated_at = NOW();
 

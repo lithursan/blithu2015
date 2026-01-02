@@ -354,8 +354,16 @@ export const DailyTargets: React.FC = () => {
             console.warn('Retry without carry_over exception', retryEx);
           }
         }
-        // If error indicates missing unique constraint, perform manual upsert
-        if (error.code === '42P10' || (error.message || '').includes('no unique or exclusion constraint')) {
+        // If error indicates missing unique constraint or on_conflict/schema problems,
+        // perform manual upsert fallback.
+        const errLower = (error.message || '').toLowerCase();
+        if (
+          error.code === '42P10' ||
+          errLower.includes('no unique or exclusion constraint') ||
+          errLower.includes('on_conflict') ||
+          errLower.includes("could not find the") ||
+          (error.status === 400)
+        ) {
           // Build selector
           let sel: any = supabase.from('daily_targets').select('*');
           sel = sel.eq('rep_id', repId).eq('scope_type', scopeType).eq('target_date', targetDate);

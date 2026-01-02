@@ -688,14 +688,16 @@ export const Orders: React.FC = () => {
   const canPrintBill = useMemo(() => 
     currentUser?.role === UserRole.Admin || 
     currentUser?.role === UserRole.Manager ||
-    currentUser?.role === UserRole.Driver,
+    currentUser?.role === UserRole.Driver ||
+    currentUser?.role === UserRole.Sales,
     [currentUser]
   );
 
   const canMarkDelivered = useMemo(() => 
     currentUser?.role === UserRole.Admin || 
     currentUser?.role === UserRole.Manager ||
-    currentUser?.role === UserRole.Driver,
+    currentUser?.role === UserRole.Driver ||
+    currentUser?.role === UserRole.Sales,
     [currentUser]
   );
 
