@@ -1051,8 +1051,9 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
                     <meta name="viewport" content="width=74mm, initial-scale=1" />
                     <title>Allocation - ${driver.name} - ${todayStr}</title>
                     <style>
+                        @page { size: 74mm auto; margin: 1mm; }
                         html, body { margin: 0; padding: 0; }
-                        body { font-family: Arial, Helvetica, sans-serif; color: #000; width: 74mm; margin: 0; padding: 0; }
+                        body { font-family: Arial, Helvetica, sans-serif; color: #000; width: 72mm; margin: 0; padding: 0; }
                         .center { text-align: center; }
                         table { width: 100%; border-collapse: collapse; font-size: 12px; }
                         th, td { vertical-align: top; padding: 6px 8px; }
@@ -1091,7 +1092,7 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
 
                 const height = Math.max(200, 20 + (latestActiveAllocation.allocatedItems || []).length * 12);
                 const options = {
-                    margin: 0,
+                    margin: 1,
                     filename: `Allocation-${driver.name}-${todayStr}.pdf`,
                     image: { type: 'jpeg', quality: 1 },
                     html2canvas: { scale: 2, useCORS: true },

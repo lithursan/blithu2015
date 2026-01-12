@@ -1420,14 +1420,17 @@ export const Orders: React.FC = () => {
           baseOrderId = `ORD${(maxIdNum + 1).toString().padStart(3, '0')}`;
         }
 
-        for (let i = 0; i < supplierKeys.length; i++) {
-          const supplier = supplierKeys[i];
-          const items = itemsBySupplier.get(supplier) || [];
-          const backs = backBySupplier.get(supplier) || [];
-          const orderIdForSupplier = `${baseOrderId}_P${i + 1}`;
+        // Create a single order combining all supplier items (no _P suffixes)
+        try {
+          const allItems: OrderItem[] = [];
+          const allBacks: OrderItem[] = [];
+          for (const s of supplierKeys) {
+            (itemsBySupplier.get(s) || []).forEach(it => allItems.push(it));
+            (backBySupplier.get(s) || []).forEach(it => allBacks.push(it));
+          }
 
-          const groupTotal = items.reduce((s, it) => s + ((it.price || 0) * (it.quantity || 0)), 0);
-          const groupCostAmount = items.reduce((s, it) => {
+          const groupTotal = allItems.reduce((s, it) => s + ((it.price || 0) * (it.quantity || 0)), 0);
+          const groupCostAmount = allItems.reduce((s, it) => {
             const prod = products.find(p => p.id === it.productId);
             const itemCost = (it as any).costPrice !== undefined && typeof (it as any).costPrice === 'number'
               ? (it as any).costPrice
@@ -1436,12 +1439,12 @@ export const Orders: React.FC = () => {
           }, 0);
 
           const payload: any = {
-            id: orderIdForSupplier,
+            id: baseOrderId,
             customerid: customer.id,
             customername: customer.name,
             assigneduserid: currentUser?.id ?? '',
-            orderitems: JSON.stringify(items),
-            backordereditems: JSON.stringify(backs),
+            orderitems: JSON.stringify(allItems),
+            backordereditems: JSON.stringify(allBacks),
             method: '',
             expecteddeliverydate: expectedDeliveryDate || null,
             deliveryaddress: deliveryAddress || null,
@@ -1462,8 +1465,8 @@ export const Orders: React.FC = () => {
             if (error) {
               const { data: insertData2, error: err2 } = await supabase.from('orders').insert([payload]).select('*');
               if (err2) {
-                console.error('Failed to insert supplier order:', err2);
-                alert('Error adding order for supplier ' + supplier + ': ' + err2.message);
+                console.error('Failed to insert order:', err2);
+                alert('Error adding order: ' + err2.message);
                 return;
               }
             }
@@ -1473,19 +1476,19 @@ export const Orders: React.FC = () => {
               if (payload.created_at !== undefined) optionalPatch.created_at = payload.created_at;
               if (payload.deliveryaddress !== undefined) optionalPatch.deliveryaddress = payload.deliveryaddress;
               if (Object.keys(optionalPatch).length > 0) {
-                await supabase.from('orders').update(optionalPatch).eq('id', orderIdForSupplier);
+                await supabase.from('orders').update(optionalPatch).eq('id', baseOrderId);
               }
             } catch (e) {
-              console.warn('Optional patch failed for supplier order:', e);
+              console.warn('Optional patch failed for order:', e);
             }
           } catch (e) {
-            console.error('Unexpected insert exception for supplier order:', e);
+            console.error('Unexpected insert exception for order:', e);
             alert('Unexpected error adding order. Check console for details.');
             return;
           }
 
           optimisticOrders.push({
-            id: orderIdForSupplier,
+            id: baseOrderId,
             customerId: customer.id,
             customerName: customer.name,
             date: payload.orderdate,
@@ -1495,12 +1498,16 @@ export const Orders: React.FC = () => {
             paymentMethod: payload.method,
             notes: payload.notes,
             assignedUserId: payload.assigneduserid,
-            orderItems: items,
-            backorderedItems: backs,
+            orderItems: allItems,
+            backorderedItems: allBacks,
             chequeBalance: 0,
             creditBalance: 0,
             returnAmount: 0,
           });
+        } catch (e) {
+          console.error('Unexpected error creating combined order:', e);
+          alert('Unexpected error adding order. Check console for details.');
+          return;
         }
 
         // Optimistic update
@@ -2829,14 +2836,14 @@ export const Orders: React.FC = () => {
         <meta name="viewport" content="width=74mm, initial-scale=1" />
         <title>Invoice - Order ${orderToUse.id}</title>
           <style>
-          @page { size: 74mm auto; margin: 0; }
+          @page { size: 74mm auto; margin: 1mm; }
           html, body { margin: 0; padding: 0; }
           body {
             font-family: Arial, sans-serif;
-            margin: 0; /* zero margins to match thermal printers */
+            margin: 0; /* outer page margin is handled by @page (1mm) */
             padding: 0; /* remove inner padding so content fills width */
             color: #333;
-            width: 74mm; /* 74mm thermal width */
+            width: 72mm; /* content width = 74mm - 2*1mm page margins */
             box-sizing: border-box;
             font-size: 12px;
             -webkit-print-color-adjust: exact;
@@ -2917,7 +2924,7 @@ export const Orders: React.FC = () => {
         </style>
       </head>
       <body>
-        <div class="page" style="width:74mm;box-sizing:border-box;">
+        <div class="page" style="width:72mm;box-sizing:border-box;">
         <div class="header">
           <div class="company-info">
             <h1>${COMPANY_DETAILS.name}</h1>
@@ -2987,7 +2994,7 @@ export const Orders: React.FC = () => {
   `;
  
     const options = {
-      margin: 0,
+      margin: 1, // 1mm outer margin for PDF export
       filename: `Invoice-${orderToUse.id}.pdf`,
       image: { type: "jpeg" as const, quality: 1 },
       html2canvas: { scale: 2, useCORS: true },
