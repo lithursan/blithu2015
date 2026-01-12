@@ -1050,7 +1050,7 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
                     <meta charset="utf-8" />
                     <title>Allocation - ${driver.name} - ${todayStr}</title>
                     <style>
-                        body { font-family: Arial, Helvetica, sans-serif; color: #000; width: 80mm; margin: 0; padding: 6px; }
+                        body { font-family: Arial, Helvetica, sans-serif; color: #000; width: 74mm; margin: 0; padding: 6px; }
                         .center { text-align: center; }
                         table { width: 100%; border-collapse: collapse; font-size: 12px; }
                         th, td { vertical-align: top; padding: 6px 8px; }
@@ -1089,11 +1089,11 @@ const DailyLog: React.FC<DailyLogProps> = ({ driver, onClose, currency }) => {
 
                 const height = Math.max(200, 20 + (latestActiveAllocation.allocatedItems || []).length * 12);
                 const options = {
-                        margin: 1,
-                        filename: `Allocation-${driver.name}-${todayStr}.pdf`,
-                        image: { type: 'jpeg', quality: 1 },
-                        html2canvas: { scale: 2 },
-                        jsPDF: { unit: 'mm', format: [80, height], orientation: 'portrait' }
+                    margin: 1,
+                    filename: `Allocation-${driver.name}-${todayStr}.pdf`,
+                    image: { type: 'jpeg', quality: 1 },
+                    html2canvas: { scale: 2 },
+                    jsPDF: { unit: 'mm', format: [74, height], orientation: 'portrait' }
                 } as any;
 
                 html2pdf().set(options).from(billHTML).save();

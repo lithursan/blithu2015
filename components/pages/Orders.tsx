@@ -2727,8 +2727,77 @@ export const Orders: React.FC = () => {
     }
   };
 
+  // Download-only PDF for current viewing order (no print dialog)
+  const handleDownloadBillPDF = async () => {
+    if (billLoading) return;
+    setBillLoading(true);
+    try {
+      if (!viewingOrder) {
+        setBillLoading(false);
+        return;
+      }
 
-  const generateAndDownloadBill = (status: any, resolvedCustomer?: Customer, orderParam?: Order) => {
+      let customer = await ensureCustomerById(viewingOrder.customerId);
+      if (!customer) {
+        customer = {
+          id: viewingOrder.customerId,
+          name: viewingOrder.customerName || 'Unknown Customer',
+          email: '', phone: '', location: '', route: 'Unassigned', joinDate: '', totalSpent: 0, outstandingBalance: 0, avatarUrl: ''
+        } as unknown as Customer;
+      }
+
+      // Mirror the Print Bill flow: if not yet delivered, auto-save cost/margin and balances,
+      // mark delivered optimistically, generate PDF (no print), then finalize in background.
+      if (viewingOrder.status !== OrderStatus.Delivered && canMarkDelivered) {
+        try {
+          try {
+            handleSaveCostMargin().catch((e) => console.warn('Auto-save cost/margin failed (continuing):', e));
+          } catch (e) {
+            console.warn('Triggering auto-save cost/margin failed:', e);
+          }
+
+          try {
+            const deliveredOrder = { ...viewingOrder, status: OrderStatus.Delivered } as Order;
+            handleSaveBalances(deliveredOrder).catch((err) => console.warn('Auto-save balances failed:', err));
+          } catch (e) {
+            console.warn('Triggering auto-save balances failed:', e);
+          }
+
+          if (setViewingOrder) setViewingOrder({ ...viewingOrder, status: OrderStatus.Delivered });
+          setOrders(prev => prev.map(o => o.id === viewingOrder.id ? { ...o, status: OrderStatus.Delivered } : o));
+
+          // Generate PDF (skip print dialog)
+          generateAndDownloadBill(OrderStatus.Delivered, customer, viewingOrder, { skipPrint: true, downloadPdf: true });
+
+          (async () => {
+            try {
+              const success = await handleConfirmFinalize(viewingOrder);
+              if (success) await refetchData();
+            } catch (e) {
+              console.error('Background finalize failed:', e);
+            }
+          })();
+
+          setBillLoading(false);
+          return;
+        } catch (error) {
+          alert('Failed to mark order as delivered. Please try again.');
+          setBillLoading(false);
+          return;
+        }
+      }
+
+      // Already delivered: just download PDF (no print)
+      generateAndDownloadBill(viewingOrder.status, customer, viewingOrder, { skipPrint: true, downloadPdf: true });
+    } catch (err) {
+      console.error('PDF download failed', err);
+    } finally {
+      setBillLoading(false);
+    }
+  };
+
+
+  const generateAndDownloadBill = (status: any, resolvedCustomer?: Customer, orderParam?: Order, opts?: { skipPrint?: boolean; downloadPdf?: boolean }) => {
     const orderToUse = orderParam ?? viewingOrder;
     if (!orderToUse) return;
     const customer = resolvedCustomer ?? customers.find(c => c.id === orderToUse.customerId);
@@ -2743,13 +2812,13 @@ export const Orders: React.FC = () => {
         <meta charset="utf-8" />
         <title>Invoice - Order ${orderToUse.id}</title>
           <style>
-          @page { size: 80mm auto; margin: 0; }
+          @page { size: 74mm auto; margin: 0; }
           body {
             font-family: Arial, sans-serif;
             margin: 0; /* zero margins to match thermal printers */
             padding: 4px 6px; /* small printable padding */
             color: #333;
-            width: 80mm; /* 3" (80mm) thermal width */
+            width: 74mm; /* 74mm thermal width */
             box-sizing: border-box;
             font-size: 12px;
             -webkit-print-color-adjust: exact;
@@ -2902,24 +2971,35 @@ export const Orders: React.FC = () => {
       filename: `Invoice-${orderToUse.id}.pdf`,
       image: { type: "jpeg" as const, quality: 1 },
       html2canvas: { scale: 2 },
-      jsPDF: { unit: "mm", format: [80, 200] as [number, number], orientation: "portrait" as const }
+      jsPDF: { unit: "mm", format: [74, 200] as [number, number], orientation: "portrait" as const }
     };
 
-    // Try to open a print window immediately so user sees print dialog on click.
-    try {
-      const printWindow = window.open('', '_blank', 'width=450,height=700');
-      if (printWindow) {
-        // Embed a small script inside the print HTML to trigger print when loaded.
-        const printHTML = billHTML + `\n<script>window.onload=function(){try{window.focus();setTimeout(()=>{try{window.print();/*window.close();*/}catch(e){console.error('Print failed',e);}},120);}catch(e){console.error(e);}};<\/script>`;
-        printWindow.document.write(printHTML);
-        printWindow.document.close();
-      } else {
-        // Popup was blocked; show transient toast and do not auto-download PDF
-        showTransientToast('Print popup blocked. Allow popups for this site or use kiosk/Electron for silent printing.', 'error', 6000);
+    // Try to open a print window immediately so user sees print dialog on click (unless skipped by opts)
+    if (!opts?.skipPrint) {
+      try {
+        const printWindow = window.open('', '_blank', 'width=450,height=700');
+        if (printWindow) {
+          // Embed a small script inside the print HTML to trigger print when loaded.
+          const printHTML = billHTML + `\n<script>window.onload=function(){try{window.focus();setTimeout(()=>{try{window.print();/*window.close();*/}catch(e){console.error('Print failed',e);}},120);}catch(e){console.error(e);}};<\/script>`;
+          printWindow.document.write(printHTML);
+          printWindow.document.close();
+        } else {
+          // Popup was blocked; show transient toast
+          showTransientToast('Print popup blocked. Allow popups for this site or use kiosk/Electron for silent printing.', 'error', 6000);
+        }
+      } catch (e) {
+        console.warn('Print popup failed', e);
+        showTransientToast('Unable to open print window. Allow popups or use kiosk/Electron for direct printing.', 'error', 6000);
       }
-    } catch (e) {
-      console.warn('Print popup failed', e);
-      showTransientToast('Unable to open print window. Allow popups or use kiosk/Electron for direct printing.', 'error', 6000);
+    }
+
+    // If requested, download PDF using html2pdf (non-blocking)
+    if (opts?.downloadPdf) {
+      try {
+        html2pdf().set(options as any).from(billHTML).save();
+      } catch (pdfErr) {
+        console.warn('PDF download failed', pdfErr);
+      }
     }
   };
 
@@ -4225,6 +4305,17 @@ export const Orders: React.FC = () => {
                                   {billLoading ? 'Processing...' : 'Print Bill'}
                                 </button>
                             )}
+                              {canPrintBill && (
+                                <button
+                                  onClick={handleDownloadBillPDF}
+                                  type="button"
+                                  className="text-white bg-green-600 hover:bg-green-700 font-medium rounded text-xs px-2 py-1 text-center disabled:bg-green-400 disabled:cursor-not-allowed"
+                                  disabled={billLoading}
+                                  aria-label="Download PDF"
+                                >
+                                  {billLoading ? 'Processing...' : 'Download PDF'}
+                                </button>
+                              )}
                             <button onClick={closeViewModal} type="button" className="text-white bg-slate-600 hover:bg-slate-700 font-medium rounded text-xs px-2 py-1 text-center">
                                 Close
                             </button>
