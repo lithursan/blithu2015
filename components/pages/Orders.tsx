@@ -290,6 +290,11 @@ export const Orders: React.FC = () => {
   const [productSearchTerm, setProductSearchTerm] = useState('');
   const [deliveryDateFilter, setDeliveryDateFilter] = useState('');
   const [dateRangeFilter, setDateRangeFilter] = useState<'today' | 'this_week' | 'this_month' | 'all'>(currentUser?.role === UserRole.Driver ? 'today' : 'all');
+  // Payment filters: show orders with credit, cheque, returns or fully paid
+  const [filterCredit, setFilterCredit] = useState<boolean>(false);
+  const [filterCheque, setFilterCheque] = useState<boolean>(false);
+  const [filterReturn, setFilterReturn] = useState<boolean>(false);
+  const [filterPaid, setFilterPaid] = useState<boolean>(false);
   const [selectedSalesRep, setSelectedSalesRep] = useState<string>('all');
   const [selectedSupplier, setSelectedSupplier] = useState<string>('all');
   const [selectedRoute, setSelectedRoute] = useState<string>('all');
@@ -563,7 +568,7 @@ export const Orders: React.FC = () => {
     if (!viewingOrder) return;
     // Do not allow updating cost/margin for already delivered orders
     if (viewingOrder.status === OrderStatus.Delivered) {
-      alert('Cannot update cost or margin for an order that is already Delivered.');
+      showTransientToast('Cannot update cost or margin for an order that is already Delivered.', 'error');
       return;
     }
 
@@ -585,7 +590,7 @@ export const Orders: React.FC = () => {
       const { error } = await supabase.from('orders').update({ orderitems: newOrderItems, total_cost_price: totalCost, total_margin_price: totalMargin }).eq('id', viewingOrder.id);
       if (error) {
         console.error('Failed to save cost/margin into order:', error);
-        alert('Failed to save cost & margin. See console for details.');
+        showTransientToast('Failed to save cost & margin. See console for details.', 'error');
         return;
       }
 
@@ -593,13 +598,56 @@ export const Orders: React.FC = () => {
       setViewingOrder(prev => prev ? { ...prev, orderItems: newOrderItems, totalCostPrice: totalCost, totalMarginPrice: totalMargin } : prev);
       setOrders(prev => prev.map(o => o.id === viewingOrder.id ? { ...o, orderItems: newOrderItems, totalCostPrice: totalCost, totalMarginPrice: totalMargin } : o));
 
-      // Refresh global caches to update dashboard totals
-      try { await refetchData(); } catch (e) { console.warn('refetchData failed after saving cost/margin', e); }
+      // Refresh global caches to update dashboard totals (run in background so caller isn't blocked)
+      (async () => {
+        try { await refetchData(); } catch (e) { console.warn('refetchData failed after saving cost/margin', e); }
+      })();
 
-      alert('Cost & Margin saved to database for this order. Dashboard totals will reflect after refresh.');
+      showTransientToast('Cost & Margin saved. Dashboard totals will reflect after refresh.', 'success');
     } catch (e) {
       console.error('Unexpected error saving cost/margin:', e);
-      alert('Unexpected error while saving cost & margin. Check console.');
+      showTransientToast('Unexpected error while saving cost & margin. Check console.', 'error');
+    }
+  };
+
+  // Lightweight transient toast that does not block execution (used instead of alert)
+  function showTransientToast(message: string, type: 'success' | 'error' | 'info' = 'info', duration = 2500) {
+    if (typeof window === 'undefined') return;
+    try {
+      const id = `transient-toast-${Date.now()}`;
+      let container = document.getElementById('transient-toast-container');
+      if (!container) {
+        container = document.createElement('div');
+        container.id = 'transient-toast-container';
+        container.style.position = 'fixed';
+        container.style.top = '12px';
+        container.style.right = '12px';
+        container.style.zIndex = '9999';
+        document.body.appendChild(container);
+      }
+
+      const el = document.createElement('div');
+      el.id = id;
+      el.textContent = message;
+      el.style.marginTop = '8px';
+      el.style.padding = '10px 14px';
+      el.style.borderRadius = '8px';
+      el.style.boxShadow = '0 6px 18px rgba(0,0,0,0.15)';
+      el.style.color = '#fff';
+      el.style.fontSize = '13px';
+      el.style.maxWidth = '320px';
+      el.style.wordBreak = 'break-word';
+      el.style.opacity = '0.98';
+      if (type === 'success') el.style.background = '#16a34a';
+      else if (type === 'error') el.style.background = '#dc2626';
+      else el.style.background = '#2563eb';
+
+      container.appendChild(el);
+      setTimeout(() => {
+        try { el.remove(); } catch { }
+      }, duration);
+    } catch (e) {
+      console.warn('showTransientToast failed', e);
     }
   };
 
@@ -926,6 +974,38 @@ export const Orders: React.FC = () => {
     });
   }
 
+    // Payment-specific filters
+    if (filterCredit) {
+      displayOrders = displayOrders.filter(o => {
+        const credit = o.creditBalance == null || isNaN(Number(o.creditBalance)) ? 0 : Number(o.creditBalance);
+        return credit > 0;
+      });
+    }
+
+    if (filterCheque) {
+      displayOrders = displayOrders.filter(o => {
+        const cheque = o.chequeBalance == null || isNaN(Number(o.chequeBalance)) ? 0 : Number(o.chequeBalance);
+        return cheque > 0;
+      });
+    }
+
+    if (filterReturn) {
+      displayOrders = displayOrders.filter(o => {
+        const ret = o.returnAmount == null || isNaN(Number(o.returnAmount)) ? 0 : Number(o.returnAmount);
+        return ret > 0;
+      });
+    }
+
+    if (filterPaid) {
+      displayOrders = displayOrders.filter(o => {
+        const cheque = o.chequeBalance == null || isNaN(Number(o.chequeBalance)) ? 0 : Number(o.chequeBalance);
+        const credit = o.creditBalance == null || isNaN(Number(o.creditBalance)) ? 0 : Number(o.creditBalance);
+        const ret = o.returnAmount == null || isNaN(Number(o.returnAmount)) ? 0 : Number(o.returnAmount);
+        const amountPaid = (typeof o.amountPaid === 'number' && !isNaN(o.amountPaid)) ? o.amountPaid : Math.max(0, (o.total || 0) - (cheque + credit + ret));
+        return amountPaid >= (o.total || 0) || ((cheque + credit + ret) === 0 && o.status !== OrderStatus.Pending);
+      });
+    }
+
     // Sort orders with custom priority:
     // 1) Pending (yellow cards) at the top
     // 2) Delivered with outstanding > 0 (red cards) next
@@ -952,7 +1032,7 @@ export const Orders: React.FC = () => {
       }
       return pa - pb;
     });
-  }, [orders, products, statusFilter, searchTerm, currentUser, deliveryDateFilter, dateRangeFilter, selectedSalesRep, selectedSupplier, selectedRoute, customers]);
+  }, [orders, products, statusFilter, searchTerm, currentUser, deliveryDateFilter, dateRangeFilter, selectedSalesRep, selectedSupplier, selectedRoute, customers, filterCredit, filterCheque, filterReturn, filterPaid]);
     
   const ordersBySupplier = useMemo(() => {
     return filteredOrders.reduce((acc, order) => {
@@ -1435,37 +1515,42 @@ export const Orders: React.FC = () => {
           console.warn('Optimistic multi-order insert failed:', e);
         }
 
-        const freshOrders = await fetchOrders();
-        if (freshOrders) {
-          setOrders(prev => {
-            const byId = new Map<string, Order>();
-            prev.forEach(o => byId.set(o.id, o));
-            freshOrders.forEach(o => byId.set(o.id, o));
-            return Array.from(byId.values()).sort((a, b) => new Date((b.date as string) || '').getTime() - new Date((a.date as string) || '').getTime());
-          });
-        }
-
-        if (currentUser) {
-          for (const o of optimisticOrders) {
-            try {
-              const created = (freshOrders || []).find((f: any) => f.id === o.id) || o;
-              await emailService.sendNewOrderNotification(currentUser, created, customer.name);
-            } catch (e) {
-              console.warn('Failed to send notification for order', o.id, e);
-            }
-          }
-        }
-
-          // Apply created orders to daily targets (decrement remaining values)
+        // Kick off background work (refresh, notifications, targets) without blocking the UI
+        (async () => {
           try {
-            const createdIds = optimisticOrders.map(o => o.id).filter(Boolean);
-            await applyTargetsToOrders(createdIds);
-          } catch (e) {
-            console.warn('Failed to apply multi-supplier orders to daily targets', e);
-          }
+            const freshOrders = await fetchOrders();
+            if (freshOrders) {
+              setOrders(prev => {
+                const byId = new Map<string, Order>();
+                prev.forEach(o => byId.set(o.id, o));
+                freshOrders.forEach(o => byId.set(o.id, o));
+                return Array.from(byId.values()).sort((a, b) => new Date((b.date as string) || '').getTime() - new Date((a.date as string) || '').getTime());
+              });
+            }
 
-          alert('Order(s) created successfully!');
-        // Close modal and finish
+            if (currentUser) {
+              for (const o of optimisticOrders) {
+                try {
+                  const created = (freshOrders || []).find((f: any) => f.id === o.id) || o;
+                  await emailService.sendNewOrderNotification(currentUser, created, customer.name);
+                } catch (e) {
+                  console.warn('Failed to send notification for order', o.id, e);
+                }
+              }
+            }
+
+            try {
+              const createdIds = optimisticOrders.map(o => o.id).filter(Boolean);
+              await applyTargetsToOrders(createdIds);
+            } catch (e) {
+              console.warn('Failed to apply multi-supplier orders to daily targets', e);
+            }
+          } catch (e) {
+            console.warn('Background post-create tasks failed:', e);
+          }
+        })();
+
+        showTransientToast('Order(s) created. Processing background tasks (notifications, targets).', 'success');
         setIsSavingOrder(false);
         closeModal();
         return;
@@ -1604,32 +1689,34 @@ export const Orders: React.FC = () => {
         console.warn('Optimistic order insert failed:', e);
       }
 
-      // Refresh authoritative list from server (will replace optimistic entry if DB returns different data)
-      const freshOrders = await fetchOrders();
-      if (freshOrders) {
-        setOrders(prev => {
-          const byId = new Map<string, Order>();
-          prev.forEach(o => byId.set(o.id, o));
-          freshOrders.forEach(o => byId.set(o.id, o));
-          return Array.from(byId.values()).sort((a, b) => new Date((b.date as string) || '').getTime() - new Date((a.date as string) || '').getTime());
-        });
-      }
-      
-      // Send email notification to assigned user if enabled
-      const createdOrder = freshOrders?.find(o => o.id === newOrder.id);
-      if (createdOrder && currentUser) {
-        await emailService.sendNewOrderNotification(currentUser, createdOrder, customer.name);
-      }
+      // Start background refresh/notifications/targets; don't block the UI
+      (async () => {
+        try {
+          const fresh = await fetchOrders();
+          if (fresh) {
+            setOrders(prev => {
+              const byId = new Map<string, Order>();
+              prev.forEach(o => byId.set(o.id, o));
+              fresh.forEach(o => byId.set(o.id, o));
+              return Array.from(byId.values()).sort((a, b) => new Date((b.date as string) || '').getTime() - new Date((a.date as string) || '').getTime());
+            });
+          }
 
-      // Apply this created order to daily targets (decrement remaining values)
-      try {
-        const createdId = createdOrder?.id || newOrderId || newOrder.id;
-        if (createdId) await applyTargetsToOrders([createdId]);
-      } catch (e) {
-        console.warn('Failed to apply order to daily targets', e);
-      }
+          const createdOrder = (fresh || []).find(o => o.id === newOrder.id) || newOrder;
+          if (createdOrder && currentUser) {
+            try { await emailService.sendNewOrderNotification(currentUser, createdOrder, customer.name); } catch (e) { console.warn('Failed to send new order notification', e); }
+          }
 
-      alert('Order created successfully!');
+          try {
+            const createdId = createdOrder?.id || newOrderId || newOrder.id;
+            if (createdId) await applyTargetsToOrders([createdId]);
+          } catch (e) { console.warn('Failed to apply order to daily targets', e); }
+        } catch (e) {
+          console.warn('Background tasks for order create failed', e);
+        }
+      })();
+
+      showTransientToast('Order created. Processing background tasks (notifications, targets).', 'success');
     } catch (error) {
       console.error('Unexpected error creating order:', error);
       alert('An unexpected error occurred. Please try again.');
@@ -2163,112 +2250,106 @@ export const Orders: React.FC = () => {
   // 'Hold/Unhold in view' removed: this function previously moved items between orderItems and backorderedItems.
   // The interactive controls were removed from the UI; backordered state continues to be derived from DB and stock levels.
 
-  const handleSaveBalances = () => {
+  async function handleSaveBalances(orderParam?: Order): Promise<void> {
+    try {
+      const orderToUse = orderParam || viewingOrder;
+      if (!orderToUse) return;
+      // No blocking confirms: proceed and show a warning non-blocking toast if outstanding > total
+      const totalOutstanding = editableChequeBalance + editableCreditBalance;
+      if (totalOutstanding > (viewingOrder.total || 0)) {
+        showTransientToast('Warning: outstanding balance is greater than order total. Saving anyway.', 'info', 3500);
+      }
 
-    if (!viewingOrder) return;
-    const totalOutstanding = editableChequeBalance + editableCreditBalance;
-    if (totalOutstanding > viewingOrder.total) {
-        if (!window.confirm('The outstanding balance is greater than the order total. Do you want to proceed?')) {
-            return;
-        }
-    }
-    const updatedOrder: Order = {
-        ...viewingOrder,
+      const updatedOrder: Order = {
+        ...orderToUse,
         chequeBalance: editableChequeBalance,
         creditBalance: editableCreditBalance,
         returnAmount: editableReturnAmount === '' ? 0 : editableReturnAmount,
         amountPaid: editableAmountPaid === '' ? 0 : editableAmountPaid,
-    };
-    // Save to Supabase (amountPaid is now stored)
-    supabase.from('orders').update({
-      chequebalance: editableChequeBalance,
-      creditbalance: editableCreditBalance,
-      returnamount: editableReturnAmount === '' ? 0 : editableReturnAmount,
-      amountpaid: editableAmountPaid === '' ? 0 : editableAmountPaid
-    }).eq('id', viewingOrder.id).then(async ({ error }) => {
-      if (!error) {
-        // Upsert collection records for cheque/credit balances - ONLY for delivered orders
-        if (viewingOrder.status === OrderStatus.Delivered) {
-          const collectionRecords = [];
-          // Find assigned user name for this order
-          let assignedUserName = '';
-          if (viewingOrder.assignedUserId && users && users.length > 0) {
-            const assignedUser = users.find(u => u.id === viewingOrder.assignedUserId);
-            if (assignedUser) assignedUserName = assignedUser.name;
-          }
-          // Use order's delivery date for collection creation
-          const collectionDate = viewingOrder.expectedDeliveryDate || viewingOrder.date || new Date().toISOString();
-          
-          if (editableChequeBalance > 0) {
-            collectionRecords.push({
-              order_id: viewingOrder.id,
-              customer_id: viewingOrder.customerId,
-              collection_type: 'cheque',
-              amount: editableChequeBalance,
-              status: 'pending',
-              collected_by: assignedUserName,
-              created_at: collectionDate,
-            });
-          }
-          if (editableCreditBalance > 0) {
-            collectionRecords.push({
-              order_id: viewingOrder.id,
-              customer_id: viewingOrder.customerId,
-              collection_type: 'credit',
-              amount: editableCreditBalance,
-              status: 'pending',
-              collected_by: assignedUserName,
-              created_at: collectionDate,
-            });
-          }
-          if (collectionRecords.length > 0) {
-            // Only use 'order_id,collection_type' in onConflict
-            await supabase.from('collections').upsert(collectionRecords, { onConflict: 'order_id,collection_type' });
-          }
-        }
-        // Refetch orders to persist changes after refresh
-        const { data: freshOrders, error: fetchError } = await supabase.from('orders').select('*');
-        if (!fetchError && freshOrders) {
-          // Map the fresh orders data properly
-          const mappedOrders = freshOrders.map((row: any) => ({
-            id: row.id,
-            customerId: row.customerid,
-            customerName: row.customername,
-            date: row.orderdate,
-            total: row.totalamount,
-            status: row.status,
-            paymentMethod: row.paymentmethod,
-            notes: row.notes,
-            assignedUserId: row.assigneduserid,
-            orderItems: typeof row.orderitems === 'string' ? JSON.parse(row.orderitems) : (row.orderitems || []),
-            backorderedItems: [],
-            chequeBalance: row.chequebalance == null || isNaN(Number(row.chequebalance)) ? 0 : Number(row.chequebalance),
-            creditBalance: row.creditbalance == null || isNaN(Number(row.creditbalance)) ? 0 : Number(row.creditbalance),
-            returnAmount: row.returnamount == null || isNaN(Number(row.returnamount)) ? 0 : Number(row.returnamount),
-            amountPaid: row.amountpaid == null || isNaN(Number(row.amountpaid)) ? 0 : Number(row.amountpaid),
-          }));
-          setOrders(prev => {
-            const byId = new Map<string, Order>();
-            prev.forEach(o => byId.set(o.id, o));
-            mappedOrders.forEach((o: Order) => byId.set(o.id, o));
-            return Array.from(byId.values()).sort((a, b) => new Date((b.date as string) || '').getTime() - new Date((a.date as string) || '').getTime());
-          });
-          setViewingOrder(updatedOrder);
-          // Also refetch global data so admin deliveries and driver allocations reflect the change
-          try {
-            await refetchData();
-          } catch (e) {
-            console.warn('Failed to refetch global data after saving balances:', e);
-          }
-          alert('Balances updated and saved!');
-        } else {
-          alert('Balances saved, but failed to refresh orders.');
-        }
-      } else {
-        alert('Failed to save balances: ' + error.message);
+      };
+
+      const { error } = await supabase.from('orders').update({
+        chequebalance: editableChequeBalance,
+        creditbalance: editableCreditBalance,
+        returnamount: editableReturnAmount === '' ? 0 : editableReturnAmount,
+        amountpaid: editableAmountPaid === '' ? 0 : editableAmountPaid
+      }).eq('id', viewingOrder.id);
+
+      if (error) {
+        showTransientToast('Failed to save balances: ' + (error.message || ''), 'error', 5000);
+        return;
       }
-    });
-  };
+
+      // Upsert collection records for cheque/credit balances - ONLY for delivered orders
+      if (orderToUse.status === OrderStatus.Delivered) {
+        const collectionRecords: any[] = [];
+        let assignedUserName = '';
+        if (viewingOrder.assignedUserId && users && users.length > 0) {
+          const assignedUser = users.find(u => u.id === viewingOrder.assignedUserId);
+          if (assignedUser) assignedUserName = assignedUser.name;
+        }
+        const collectionDate = viewingOrder.expectedDeliveryDate || viewingOrder.date || new Date().toISOString();
+        if (editableChequeBalance > 0) {
+          collectionRecords.push({ order_id: orderToUse.id, customer_id: orderToUse.customerId, collection_type: 'cheque', amount: editableChequeBalance, status: 'pending', collected_by: assignedUserName, created_at: collectionDate });
+        }
+        if (editableCreditBalance > 0) {
+          collectionRecords.push({ order_id: orderToUse.id, customer_id: orderToUse.customerId, collection_type: 'credit', amount: editableCreditBalance, status: 'pending', collected_by: assignedUserName, created_at: collectionDate });
+        }
+        if (collectionRecords.length > 0) {
+          try { await supabase.from('collections').upsert(collectionRecords, { onConflict: 'order_id,collection_type' }); } catch (e) { console.warn('Failed upserting collections', e); }
+        }
+      }
+
+      // Trigger collections page refresh if present
+      try {
+        const refreshFn = (window as any).refreshCollections;
+        if (typeof refreshFn === 'function') refreshFn();
+      } catch (e) {
+        // ignore
+      }
+
+      // Refresh orders and global data in background (do not block caller)
+      (async () => {
+        try {
+          const { data: freshOrders, error: fetchError } = await supabase.from('orders').select('*');
+          if (!fetchError && freshOrders) {
+            const mappedOrders = freshOrders.map((row: any) => ({
+              id: row.id,
+              customerId: row.customerid,
+              customerName: row.customername,
+              date: row.orderdate,
+              total: row.totalamount,
+              status: row.status,
+              paymentMethod: row.paymentmethod,
+              notes: row.notes,
+              assignedUserId: row.assigneduserid,
+              orderItems: typeof row.orderitems === 'string' ? JSON.parse(row.orderitems) : (row.orderitems || []),
+              backorderedItems: [],
+              chequeBalance: row.chequebalance == null || isNaN(Number(row.chequebalance)) ? 0 : Number(row.chequebalance),
+              creditBalance: row.creditbalance == null || isNaN(Number(row.creditbalance)) ? 0 : Number(row.creditbalance),
+              returnAmount: row.returnamount == null || isNaN(Number(row.returnamount)) ? 0 : Number(row.returnamount),
+              amountPaid: row.amountpaid == null || isNaN(Number(row.amountpaid)) ? 0 : Number(row.amountpaid),
+            }));
+            setOrders(prev => {
+              const byId = new Map<string, Order>();
+              prev.forEach(o => byId.set(o.id, o));
+              mappedOrders.forEach((o: Order) => byId.set(o.id, o));
+              return Array.from(byId.values()).sort((a, b) => new Date((b.date as string) || '').getTime() - new Date((a.date as string) || '').getTime());
+            });
+            setViewingOrder(updatedOrder);
+          }
+          try { await refetchData(); } catch (e) { console.warn('Failed to refetch global data after saving balances:', e); }
+        } catch (e) {
+          console.warn('Background refresh after save balances failed', e);
+        }
+      })();
+
+      showTransientToast('Balances updated and saved!', 'success');
+    } catch (e) {
+      console.error('handleSaveBalances unexpected error', e);
+      showTransientToast('Unexpected error saving balances.', 'error');
+    }
+  }
 
 
 
@@ -2544,33 +2625,41 @@ export const Orders: React.FC = () => {
 
     // Only on first delivery (not already delivered)
     if (viewingOrder.status !== OrderStatus.Delivered && canMarkDelivered) {
-      if (!confirm('This will mark the order as delivered and reduce stock. Continue?')) {
-        setBillLoading(false);
-        return;
-      }
       try {
         // Auto-save per-item cost & margin into the order before finalizing/printing
+
         try {
-          await handleSaveCostMargin();
+          // Fire-and-forget the cost/margin save so printing doesn't wait.
+          handleSaveCostMargin().catch((e) => console.warn('Auto-save cost/margin failed (continuing):', e));
         } catch (e) {
-          console.warn('Auto-save cost/margin failed (continuing):', e);
+          console.warn('Triggering auto-save cost/margin failed:', e);
         }
 
-        const success = await handleConfirmFinalize(viewingOrder); // This will update status to Delivered and reduce stock/allocation
-        if (!success) {
-          // Stock validation failed, don't print bill and keep status as pending
-          setBillLoading(false);
-          return;
+        // Auto-save balances as well (non-blocking) so user doesn't need to click Save Balances
+        try {
+          // Ensure order is treated as Delivered when saving balances so collections are created
+          const deliveredOrder = { ...viewingOrder, status: OrderStatus.Delivered } as Order;
+          handleSaveBalances(deliveredOrder).catch((err) => console.warn('Auto-save balances failed:', err));
+        } catch (e) {
+          console.warn('Triggering auto-save balances failed:', e);
         }
-        // Update viewingOrder status in UI immediately for live sync
+
+        // Mark delivered in UI for immediate feedback
         if (setViewingOrder) setViewingOrder({ ...viewingOrder, status: OrderStatus.Delivered });
-        // Also update the order in the orders list if present
         setOrders(prev => prev.map(o => o.id === viewingOrder.id ? { ...o, status: OrderStatus.Delivered } : o));
-        await refetchData();
-        setTimeout(() => {
-          generateAndDownloadBill(viewingOrder.status, customer);
-          setBillLoading(false);
-        }, 1000);
+
+        // Trigger print immediately using the current order data, and run finalize in background
+        generateAndDownloadBill(OrderStatus.Delivered, customer, viewingOrder);
+        (async () => {
+          try {
+            const success = await handleConfirmFinalize(viewingOrder);
+            if (success) await refetchData();
+          } catch (e) {
+            console.error('Background finalize failed:', e);
+          }
+        })();
+
+        setBillLoading(false);
         return;
       } catch (error) {
         alert('Failed to mark order as delivered. Please try again.');
@@ -2600,32 +2689,38 @@ export const Orders: React.FC = () => {
 
       // If order not delivered and the user can mark delivered, perform finalize flow
       if (order.status !== OrderStatus.Delivered && canMarkDelivered) {
-        if (!confirm('This will mark the order as delivered and reduce stock. Continue?')) {
-          setBillLoading(false);
-          return;
-        }
-        const success = await handleConfirmFinalize(order);
-        if (!success) {
-          setBillLoading(false);
-          return;
-        }
-        // Update orders state to mark delivered for immediate UX
+        // Optimistic UI update: mark delivered for immediate feedback, then print.
         setOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: OrderStatus.Delivered } : o));
-        await refetchData();
-        // generate using latest order object (status updated)
-        generateAndDownloadBill(OrderStatus.Delivered, customer);
+
+        // Auto-save balances for the delivered order so collections get upserted
+        try {
+          const deliveredOrder = { ...order, status: OrderStatus.Delivered } as Order;
+          handleSaveBalances(deliveredOrder).catch(err => console.warn('Auto-save balances (card print) failed:', err));
+        } catch (e) {
+          console.warn('Triggering auto-save balances (card print) failed:', e);
+        }
+
+        // Print immediately and run finalize in background using original order object
+        generateAndDownloadBill(OrderStatus.Delivered, customer, order);
+        (async () => {
+          try {
+            const success = await handleConfirmFinalize(order);
+            if (success) await refetchData();
+          } catch (e) {
+            console.error('Background finalize failed for card print:', e);
+          }
+        })();
+
         setBillLoading(false);
         return;
       }
 
       // Already delivered: just generate and download
-      // Temporarily set viewingOrder so generateAndDownloadBill has the same context (it reads viewingOrder internally)
+      // Temporarily set viewingOrder for UI consistency, but pass the order
+      // directly to the generator so we don't need to wait for state to update.
       setViewingOrder(order);
-      // small delay to ensure viewingOrder is set (not strictly necessary but keeps behaviour consistent)
-      setTimeout(() => {
-        generateAndDownloadBill(order.status, customer);
-        setBillLoading(false);
-      }, 250);
+      generateAndDownloadBill(order.status, customer, order);
+      setBillLoading(false);
     } catch (err) {
       console.error('Error downloading bill from card:', err);
       setBillLoading(false);
@@ -2633,25 +2728,31 @@ export const Orders: React.FC = () => {
   };
 
 
-  const generateAndDownloadBill = (status, resolvedCustomer?: Customer) => {
-    if (!viewingOrder) return;
-    const customer = resolvedCustomer ?? customers.find(c => c.id === viewingOrder.customerId);
+  const generateAndDownloadBill = (status: any, resolvedCustomer?: Customer, orderParam?: Order) => {
+    const orderToUse = orderParam ?? viewingOrder;
+    if (!orderToUse) return;
+    const customer = resolvedCustomer ?? customers.find(c => c.id === orderToUse.customerId);
     if (!customer) return;
 
-    // Generate the bill HTML as before
-    const displayDate = viewingOrder.created_at ? formatDateTimeLocal(viewingOrder.created_at) : viewingOrder.date;
+    // Generate the bill HTML using the provided order (or viewingOrder)
+    const displayDate = orderToUse.created_at ? formatDateTimeLocal(orderToUse.created_at) : orderToUse.date;
     const billHTML = `
     <!DOCTYPE html>
     <html>
       <head>
         <meta charset="utf-8" />
-        <title>Invoice - Order ${viewingOrder.id}</title>
+        <title>Invoice - Order ${orderToUse.id}</title>
           <style>
+          @page { size: 80mm auto; margin: 0; }
           body {
             font-family: Arial, sans-serif;
-            margin: 5px;
+            margin: 0; /* zero margins to match thermal printers */
+            padding: 4px 6px; /* small printable padding */
             color: #333;
-            width: 58mm; /* 👈 fit thermal width */
+            width: 80mm; /* 3" (80mm) thermal width */
+            box-sizing: border-box;
+            font-size: 12px;
+            -webkit-print-color-adjust: exact;
           }
           .header {
             border-bottom: 1px dashed #000;
@@ -2660,15 +2761,15 @@ export const Orders: React.FC = () => {
           }
           .company-info h1 {
             margin: 0;
-            font-size: 16px;
+            font-size: 14px;
             text-align: center;
             font-weight: bold;
           }
           .company-info p {
-            margin: 2px 0;
-            font-size: 12px;
+            margin: 1px 0;
+            font-size: 10px;
             text-align: center;
-            font-weight: bold;
+            font-weight: 700;
           }
           .invoice-info {
             text-align: left;
@@ -2756,7 +2857,7 @@ export const Orders: React.FC = () => {
             </tr>
           </thead>
           <tbody>
-            ${(viewingOrder.orderItems ?? []).map(item => {
+            ${(orderToUse.orderItems ?? []).map(item => {
               const product = products.find(p => p.id === item.productId);
               const subtotal = item.price * item.quantity;
               return `
@@ -2772,11 +2873,11 @@ export const Orders: React.FC = () => {
         </table>
 
         <div class="total-section">
-          <div><span>Invoice Total:</span><span>${formatCurrency(viewingOrder.total || 0, currency)}</span></div>
-          <div><span>Total Items:</span><span>${viewingOrder.orderItems?.reduce((sum, item) => sum + item.quantity, 0) ?? 0}</span></div>
+          <div><span>Invoice Total:</span><span>${formatCurrency(orderToUse.total || 0, currency)}</span></div>
+          <div><span>Total Items:</span><span>${orderToUse.orderItems?.reduce((sum, item) => sum + item.quantity, 0) ?? 0}</span></div>
           <!-- dotted full-width line for handwriting (no label) -->
           <div style="margin:6px 0; border-bottom: 1px dotted #000; height:10px;"></div>
-          <div><span>Return Amount:</span><span>${formatCurrency(viewingOrder.returnAmount || 0, currency)}</span></div>
+          <div><span>Return Amount:</span><span>${formatCurrency(orderToUse.returnAmount || 0, currency)}</span></div>
           <div><span>Paid:</span><span>${formatCurrency(editableAmountPaid, currency)}</span></div>
           <div><span>Cheque:</span><span>${formatBalanceAmount(editableChequeBalance, currency)}</span></div>
           <div><span>Credit:</span><span>${formatBalanceAmount(editableCreditBalance, currency)}</span></div>
@@ -2798,14 +2899,28 @@ export const Orders: React.FC = () => {
  
     const options = {
       margin: 1,
-      filename: `Invoice-${viewingOrder.id}.pdf`,
+      filename: `Invoice-${orderToUse.id}.pdf`,
       image: { type: "jpeg" as const, quality: 1 },
       html2canvas: { scale: 2 },
-      // Cast format to a fixed tuple to satisfy TypeScript definitions
       jsPDF: { unit: "mm", format: [80, 200] as [number, number], orientation: "portrait" as const }
     };
 
-    html2pdf().set(options).from(billHTML).save();
+    // Try to open a print window immediately so user sees print dialog on click.
+    try {
+      const printWindow = window.open('', '_blank', 'width=450,height=700');
+      if (printWindow) {
+        // Embed a small script inside the print HTML to trigger print when loaded.
+        const printHTML = billHTML + `\n<script>window.onload=function(){try{window.focus();setTimeout(()=>{try{window.print();/*window.close();*/}catch(e){console.error('Print failed',e);}},120);}catch(e){console.error(e);}};<\/script>`;
+        printWindow.document.write(printHTML);
+        printWindow.document.close();
+      } else {
+        // Popup was blocked; show transient toast and do not auto-download PDF
+        showTransientToast('Print popup blocked. Allow popups for this site or use kiosk/Electron for silent printing.', 'error', 6000);
+      }
+    } catch (e) {
+      console.warn('Print popup failed', e);
+      showTransientToast('Unable to open print window. Allow popups or use kiosk/Electron for direct printing.', 'error', 6000);
+    }
   };
 
   // PDF Export function
@@ -3056,6 +3171,29 @@ export const Orders: React.FC = () => {
                       className="w-full px-3 sm:px-4 py-2.5 sm:py-2 text-sm sm:text-base border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                       title="Filter by specific delivery date"
                   />
+                </div>
+                <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">Payment Filters</label>
+                    <div className="flex flex-wrap gap-2">
+                      <label className="inline-flex items-center text-sm px-2 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded">
+                        <input type="checkbox" className="mr-2" checked={filterCredit} onChange={(e) => setFilterCredit(e.target.checked)} />
+                        Credit
+                      </label>
+                      <label className="inline-flex items-center text-sm px-2 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded">
+                        <input type="checkbox" className="mr-2" checked={filterCheque} onChange={(e) => setFilterCheque(e.target.checked)} />
+                        Cheque
+                      </label>
+                      <label className="inline-flex items-center text-sm px-2 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded">
+                        <input type="checkbox" className="mr-2" checked={filterReturn} onChange={(e) => setFilterReturn(e.target.checked)} />
+                        Return
+                      </label>
+                      <label className="inline-flex items-center text-sm px-2 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded">
+                        <input type="checkbox" className="mr-2" checked={filterPaid} onChange={(e) => setFilterPaid(e.target.checked)} />
+                        Paid
+                      </label>
+                    </div>
+                  </div>
                 </div>
                 {currentUser?.role === UserRole.Admin && (
                   <div className="w-56">
@@ -4072,21 +4210,20 @@ export const Orders: React.FC = () => {
                         <div className="flex flex-wrap items-center gap-1">
                             {canEdit && (
                               <>
-                                <button onClick={handleSaveBalances} type="button" className="text-white bg-green-600 hover:bg-green-700 font-medium rounded text-xs px-2 py-1 text-center">
-                                  Save Balances
-                                </button>
-                                {/* Save Cost & Margin button removed; auto-save occurs when Download Bill & Confirm is used */}
+                                {/* Save Balances button removed — balances are auto-saved when printing */}
+                                {/* Save Cost & Margin button removed; auto-save occurs when Print Bill is used */}
                               </>
                              )}
                             {canPrintBill && !(viewingOrder.status === OrderStatus.Delivered && (currentUser?.role === UserRole.Driver || currentUser?.role === UserRole.Sales || currentUser?.role === UserRole.Manager)) && (
-                              <button 
+                                <button 
                                   onClick={handleDownloadBill} 
                                   type="button" 
                                   className="text-white bg-blue-600 hover:bg-blue-700 font-medium rounded text-xs px-2 py-1 text-center disabled:bg-blue-400 disabled:cursor-not-allowed"
                                   disabled={billLoading}
-                              >
-                                  {billLoading ? 'Processing...' : (viewingOrder.status === OrderStatus.Delivered ? 'Download Bill' : 'Download Bill & Confirm')}
-                              </button>
+                                  aria-label="Print bill"
+                                >
+                                  {billLoading ? 'Processing...' : 'Print Bill'}
+                                </button>
                             )}
                             <button onClick={closeViewModal} type="button" className="text-white bg-slate-600 hover:bg-slate-700 font-medium rounded text-xs px-2 py-1 text-center">
                                 Close

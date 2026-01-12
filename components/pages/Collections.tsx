@@ -70,9 +70,9 @@ export const Collections: React.FC = () => {
   const [partialAmount, setPartialAmount] = useState<number>(0);
   const [partialPaymentLoading, setPartialPaymentLoading] = useState(false);
 
-  // Fetch collections from Supabase on mount
-  useEffect(() => {
-    const fetchCollections = async () => {
+  // Fetch collections and subscribe to realtime changes so the page updates
+  const fetchCollections = async () => {
+    try {
       const { data, error } = await supabase
         .from('collections')
         .select('*')
@@ -83,8 +83,52 @@ export const Collections: React.FC = () => {
       } else {
         setCollections(data || []);
       }
-    };
+    } catch (e) {
+      console.error('Unexpected error fetching collections:', e);
+      setCollections([]);
+    }
+  };
+
+  useEffect(() => {
     fetchCollections();
+
+    // Expose a global refresh function so other parts of the app can trigger a collections refresh
+    try {
+      (window as any).refreshCollections = fetchCollections;
+    } catch (e) {
+      // ignore if window not writable in some runtimes
+    }
+
+    // Setup realtime subscription to update collections when DB changes.
+    // Support both v2 "channel" API and v1 "from().on().subscribe()" APIs.
+    let cleanup: (() => void) | null = null;
+    try {
+      // v2 channel API
+      const anySupabase: any = supabase as any;
+      if (anySupabase && typeof anySupabase.channel === 'function') {
+        const ch = anySupabase
+          .channel('public:collections')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'collections' }, () => {
+            fetchCollections();
+          })
+          .subscribe();
+        cleanup = () => { try { ch.unsubscribe(); } catch { /* ignore */ } };
+      } else if (anySupabase && typeof anySupabase.from === 'function') {
+        // v1 realtime
+        const sub = anySupabase.from('collections').on('*', () => {
+          fetchCollections();
+        }).subscribe();
+        cleanup = () => {
+          try { anySupabase.removeSubscription(sub); } catch { try { sub.unsubscribe && sub.unsubscribe(); } catch { /* ignore */ } }
+        };
+      }
+    } catch (e) {
+      console.warn('Realtime subscription setup failed:', e);
+    }
+
+    return () => {
+      if (cleanup) cleanup();
+    };
   }, []);
 
   const deleteCollection = async (collectionId: string) => {
@@ -458,8 +502,13 @@ export const Collections: React.FC = () => {
         .from('orders')
         .select('amountpaid')
         .eq('id', selectedCollection.order_id)
-        .single();
+        .maybeSingle();
       if (fetchOrderError) throw fetchOrderError;
+      if (!orderData) {
+        console.error('Order not found for recognize collection, order_id:', selectedCollection.order_id);
+        alert('Order not found for this collection. Cannot recognize collection.');
+        return;
+      }
       const prevAmountPaid = orderData?.amountpaid || 0;
 
       // Reduce the outstanding amount from the order and increment amountpaid
@@ -503,9 +552,14 @@ export const Collections: React.FC = () => {
 
       setSelectedCollection(null);
       setVerificationNotes('');
-    } catch (error) {
-      console.error('Error recognizing collection:', error);
-      alert('Failed to recognize collection. Please try again.');
+    } catch (error: any) {
+      try {
+        console.error('Error recognizing collection - selectedCollection:', selectedCollection);
+        console.error('Error recognizing collection - supabase error:', JSON.stringify(error));
+      } catch (e) {
+        console.error('Error recognizing collection (failed to stringify):', error);
+      }
+      alert('Failed to recognize collection. See console for details.');
     }
   };
 
