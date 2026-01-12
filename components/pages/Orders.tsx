@@ -2667,7 +2667,12 @@ export const Orders: React.FC = () => {
         return;
       }
     } else {
-      // Already delivered: just print, do not touch allocation/stock
+      // Already delivered: save any recent edits (costs/balances) first, then print
+      try {
+        await preSaveBeforePrint(viewingOrder);
+      } catch (e) {
+        console.warn('Pre-save before print failed for delivered order:', e);
+      }
       generateAndDownloadBill(viewingOrder.status, customer);
       setBillLoading(false);
     }
@@ -2715,7 +2720,12 @@ export const Orders: React.FC = () => {
         return;
       }
 
-      // Already delivered: just generate and download
+      // Already delivered: persist recent edits then generate/download
+      try {
+        await preSaveBeforePrint(order);
+      } catch (e) {
+        console.warn('Pre-save before card-print failed:', e);
+      }
       // Temporarily set viewingOrder for UI consistency, but pass the order
       // directly to the generator so we don't need to wait for state to update.
       setViewingOrder(order);
@@ -2727,7 +2737,8 @@ export const Orders: React.FC = () => {
     }
   };
 
-  // Download-only PDF for current viewing order (no print dialog)
+  // Download-only PDF handler removed — use Print Bill only
+  // Re-add Download PDF: generate PDF without opening print dialog, but keep same save/finalize flows
   const handleDownloadBillPDF = async () => {
     if (billLoading) return;
     setBillLoading(true);
@@ -2746,36 +2757,20 @@ export const Orders: React.FC = () => {
         } as unknown as Customer;
       }
 
-      // Mirror the Print Bill flow: if not yet delivered, auto-save cost/margin and balances,
-      // mark delivered optimistically, generate PDF (no print), then finalize in background.
+      // Mirror Print Bill flow: if not yet delivered, auto-save and finalize in background
       if (viewingOrder.status !== OrderStatus.Delivered && canMarkDelivered) {
         try {
-          try {
-            handleSaveCostMargin().catch((e) => console.warn('Auto-save cost/margin failed (continuing):', e));
-          } catch (e) {
-            console.warn('Triggering auto-save cost/margin failed:', e);
-          }
-
-          try {
-            const deliveredOrder = { ...viewingOrder, status: OrderStatus.Delivered } as Order;
-            handleSaveBalances(deliveredOrder).catch((err) => console.warn('Auto-save balances failed:', err));
-          } catch (e) {
-            console.warn('Triggering auto-save balances failed:', e);
-          }
+          try { handleSaveCostMargin().catch(e => console.warn('Auto-save cost/margin failed (continuing):', e)); } catch (e) { console.warn('Triggering auto-save cost/margin failed:', e); }
+          try { const deliveredOrder = { ...viewingOrder, status: OrderStatus.Delivered } as Order; handleSaveBalances(deliveredOrder).catch(err => console.warn('Auto-save balances failed:', err)); } catch (e) { console.warn('Triggering auto-save balances failed:', e); }
 
           if (setViewingOrder) setViewingOrder({ ...viewingOrder, status: OrderStatus.Delivered });
           setOrders(prev => prev.map(o => o.id === viewingOrder.id ? { ...o, status: OrderStatus.Delivered } : o));
 
-          // Generate PDF (skip print dialog)
+          // Generate PDF only
           generateAndDownloadBill(OrderStatus.Delivered, customer, viewingOrder, { skipPrint: true, downloadPdf: true });
 
           (async () => {
-            try {
-              const success = await handleConfirmFinalize(viewingOrder);
-              if (success) await refetchData();
-            } catch (e) {
-              console.error('Background finalize failed:', e);
-            }
+            try { const success = await handleConfirmFinalize(viewingOrder); if (success) await refetchData(); } catch (e) { console.error('Background finalize failed:', e); }
           })();
 
           setBillLoading(false);
@@ -2787,12 +2782,33 @@ export const Orders: React.FC = () => {
         }
       }
 
-      // Already delivered: just download PDF (no print)
+      // Already delivered: persist edits then download
+      try { await preSaveBeforePrint(viewingOrder); } catch (e) { console.warn('Pre-save before PDF download failed:', e); }
       generateAndDownloadBill(viewingOrder.status, customer, viewingOrder, { skipPrint: true, downloadPdf: true });
     } catch (err) {
       console.error('PDF download failed', err);
     } finally {
       setBillLoading(false);
+    }
+  };
+
+  // Ensure recent changes (costs, balances) are saved before printing/downloading
+  const preSaveBeforePrint = async (order: Order) => {
+    try {
+      // Save cost & margin first
+      await handleSaveCostMargin();
+    } catch (e) {
+      console.warn('Failed to save cost/margin before print:', e);
+      showTransientToast('Failed to save cost/margin. Printing may be out-of-sync.', 'warning', 4000);
+    }
+
+    try {
+      // Save balances with order marked Delivered to ensure collections/upserts
+      const deliveredOrder = { ...order, status: OrderStatus.Delivered } as Order;
+      await handleSaveBalances(deliveredOrder);
+    } catch (e) {
+      console.warn('Failed to save balances before print:', e);
+      showTransientToast('Failed to save balances. Printing may be out-of-sync.', 'warning', 4000);
     }
   };
 
@@ -2810,13 +2826,15 @@ export const Orders: React.FC = () => {
     <html>
       <head>
         <meta charset="utf-8" />
+        <meta name="viewport" content="width=74mm, initial-scale=1" />
         <title>Invoice - Order ${orderToUse.id}</title>
           <style>
           @page { size: 74mm auto; margin: 0; }
+          html, body { margin: 0; padding: 0; }
           body {
             font-family: Arial, sans-serif;
             margin: 0; /* zero margins to match thermal printers */
-            padding: 4px 6px; /* small printable padding */
+            padding: 0; /* remove inner padding so content fills width */
             color: #333;
             width: 74mm; /* 74mm thermal width */
             box-sizing: border-box;
@@ -2899,6 +2917,7 @@ export const Orders: React.FC = () => {
         </style>
       </head>
       <body>
+        <div class="page" style="width:74mm;box-sizing:border-box;">
         <div class="header">
           <div class="company-info">
             <h1>${COMPANY_DETAILS.name}</h1>
@@ -2962,15 +2981,16 @@ export const Orders: React.FC = () => {
           <div style="border-top: 1px solid #000; width: 200px; margin-left: auto;"></div>
           <p style="margin-bottom: 6px; font-size: 12px;font-weight: bold;">Customer Signature</p>
         </div>
+        </div>
       </body>
     </html>
   `;
  
     const options = {
-      margin: 1,
+      margin: 0,
       filename: `Invoice-${orderToUse.id}.pdf`,
       image: { type: "jpeg" as const, quality: 1 },
-      html2canvas: { scale: 2 },
+      html2canvas: { scale: 2, useCORS: true },
       jsPDF: { unit: "mm", format: [74, 200] as [number, number], orientation: "portrait" as const }
     };
 
@@ -4305,17 +4325,17 @@ export const Orders: React.FC = () => {
                                   {billLoading ? 'Processing...' : 'Print Bill'}
                                 </button>
                             )}
-                              {canPrintBill && (
-                                <button
-                                  onClick={handleDownloadBillPDF}
-                                  type="button"
-                                  className="text-white bg-green-600 hover:bg-green-700 font-medium rounded text-xs px-2 py-1 text-center disabled:bg-green-400 disabled:cursor-not-allowed"
-                                  disabled={billLoading}
-                                  aria-label="Download PDF"
-                                >
-                                  {billLoading ? 'Processing...' : 'Download PDF'}
-                                </button>
-                              )}
+                            {canPrintBill && (
+                              <button
+                                onClick={handleDownloadBillPDF}
+                                type="button"
+                                className="text-white bg-green-600 hover:bg-green-700 font-medium rounded text-xs px-2 py-1 text-center disabled:bg-green-400 disabled:cursor-not-allowed"
+                                disabled={billLoading}
+                                aria-label="Download PDF"
+                              >
+                                {billLoading ? 'Processing...' : 'Download PDF'}
+                              </button>
+                            )}
                             <button onClick={closeViewModal} type="button" className="text-white bg-slate-600 hover:bg-slate-700 font-medium rounded text-xs px-2 py-1 text-center">
                                 Close
                             </button>
