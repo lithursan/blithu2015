@@ -1,4 +1,4 @@
-﻿import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '../ui/Card';
 import { FilterField } from '../ui/FilterField';
 import { Badge } from '../ui/Badge';
@@ -587,7 +587,11 @@ export const Dashboard: React.FC = () => {
     const relevantProducts = accessibleSuppliers 
       ? safeProducts.filter(p => accessibleSuppliers.has(p.supplier))
       : safeProducts;
-    return ['all', ...new Set(relevantProducts.map(p => p.category))]
+    // Ensure categories are strings and filter out null/undefined values
+    const cats = relevantProducts
+      .map(p => (p?.category == null ? null : String(p.category).trim()))
+      .filter((c): c is string => !!c);
+    return ['all', ...Array.from(new Set(cats))];
   }, [safeProducts, accessibleSuppliers]);
 
   // Filtered products based on current filter selections
@@ -1176,7 +1180,10 @@ export const Dashboard: React.FC = () => {
              </FilterField>
              <FilterField label="Category" htmlFor="category-filter" variant="purple">
                <select id="category-filter" value={selectedCategory} onChange={e => setSelectedCategory(e.target.value)}>
-                 {categories.map(c => <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>)}
+                 {categories.filter(c => c != null).map(c => {
+                   const label = String(c);
+                   return <option key={label} value={label}>{label.charAt(0).toUpperCase() + label.slice(1)}</option>
+                 })}
                </select>
              </FilterField>
              {isAdmin && (
