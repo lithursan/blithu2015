@@ -461,7 +461,7 @@ export const Products: React.FC = () => {
                       categoryFilter === category ? activeColor : inactiveColor
                     }`}
                   >
-                    {category.charAt(0).toUpperCase() + category.slice(1)}
+                    {String(category || '').charAt(0).toUpperCase() + String(category || '').slice(1)}
                   </button>
                 );
               })}
@@ -589,7 +589,7 @@ export const Products: React.FC = () => {
                         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                           <div className="flex items-center gap-3">
                             <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center text-white font-bold text-lg shadow-md">
-                              {supplierName.charAt(0)}
+                              {String(supplierName || '').charAt(0)}
                             </div>
                             <div>
                               <h2 className="text-xl sm:text-2xl font-bold bg-gradient-to-r from-slate-800 to-slate-600 dark:from-slate-100 dark:to-slate-300 bg-clip-text text-transparent">
