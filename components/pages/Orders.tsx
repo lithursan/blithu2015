@@ -857,13 +857,13 @@ export const Orders: React.FC = () => {
       filteredProducts = filteredProducts.filter(p => accessibleSuppliers.has(norm(p.supplier)));
     }
     
-    // Search filtering for product modal
-    if (productSearchTerm.trim()) {
-      const searchLower = productSearchTerm.toLowerCase();
+    // Search filtering for product modal (guard against nulls)
+    if (String(productSearchTerm || '').trim()) {
+      const searchLower = String(productSearchTerm || '').toLowerCase();
       filteredProducts = filteredProducts.filter(product =>
-        product.name.toLowerCase().includes(searchLower) ||
-        product.category.toLowerCase().includes(searchLower) ||
-        product.sku.toLowerCase().includes(searchLower)
+        String(product?.name || '').toLowerCase().includes(searchLower) ||
+        String(product?.category || '').toLowerCase().includes(searchLower) ||
+        String(product?.sku || '').toLowerCase().includes(searchLower)
       );
     }
     
